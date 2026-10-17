@@ -1,0 +1,9 @@
+chapter CaraML
+
+session CaraML_Spec = HOL +
+  options [document = false]
+  sessions Coinductive
+  theories
+    Pipeline
+  document_files (in "..")
+    "root.bib"

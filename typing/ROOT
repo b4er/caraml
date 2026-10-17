@@ -1,0 +1,17 @@
+chapter CaraML
+
+session CaraML_Typing = CaraML_Core +
+  options [document = false, threads = 4]
+  theories
+    Types
+    Basis
+    Unify
+    Desugar
+    Grades
+    Typing
+    Infer
+    Infer_Scope
+    Infer_Invariants
+    Infer_Confinement
+  document_files (in "..")
+    "root.bib"

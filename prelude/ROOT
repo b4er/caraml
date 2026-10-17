@@ -1,0 +1,13 @@
+chapter CaraML
+
+session CaraML_Prelude = "HOL-Library" +
+  options [document = false]
+  sessions "Regular-Sets"
+  theories
+    Named_Cases
+    Prelude_Imports
+
+session CaraML_Prelude_Test in test = CaraML_Prelude +
+  options [document = false]
+  theories
+    Named_Cases_Test

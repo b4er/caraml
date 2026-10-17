@@ -1,0 +1,14 @@
+chapter CaraML
+
+session CaraML_Core = CaraML_Syntax +
+  options [document = false]
+  sessions CaraML_Spec
+  theories
+    Core
+    Foreign
+    Behaviour
+    Relaxed
+    Bigstep
+    Closure
+  document_files (in "..")
+    "root.bib"
