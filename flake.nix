@@ -1,5 +1,7 @@
 {
   inputs = {
+    self.submodules = true;
+
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
     afp = {
@@ -36,6 +38,11 @@
               ./typing
               ./haskell/ROOT
               ./haskell/Export.thy
+              (pkgs.lib.fileset.difference ./grammar (pkgs.lib.fileset.unions [
+                (pkgs.lib.fileset.maybeMissing ./grammar/output)
+                (pkgs.lib.fileset.maybeMissing ./grammar/papers)
+                (pkgs.lib.fileset.maybeMissing ./grammar/scratch)
+              ]))
             ];
           };
 
