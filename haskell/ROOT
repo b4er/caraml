@@ -1,0 +1,6 @@
+chapter CaraML
+
+session CaraML_Export = CaraML_Typing +
+  options [document = false]
+  theories Export
+  export_files (in "verified") [3] "*:code/caraml/**"

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "CaraML",
+  "scopeName": "source.caraml",
+  "patterns": [
+    { "include": "#chars" },
+    { "include": "#strings" },
+    { "include": "#comments" },
+    { "include": "#keywords" },
+    { "include": "#constructors" },
+    { "include": "#numbers" },
+    { "include": "#reservedOperators" },
+    { "include": "#operators" },
+    { "include": "#wildcard" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "include": "#lineComment" },
+        { "include": "#blockComment" }
+      ]
+    },
+    "lineComment": {
+      "comment": "A run of two or more dashes to end of line; -->, -< etc. are operators (the whole symbol run must be dashes).",
+      "name": "comment.line.double-dash.caraml",
+      "match": "(?>-{2,})(?![!#$%&*+\\-/:<=>?@^|~\\u2190-\\u22FF]).*$"
+    },
+    "blockComment": {
+      "comment": "Nested {- ... -}.",
+      "name": "comment.block.caraml",
+      "begin": "\\{-",
+      "end": "-\\}",
+      "patterns": [{ "include": "#blockComment" }]
+    },
+    "strings": {
+      "comment": "Literals admit no escape sequences.",
+      "name": "string.quoted.double.caraml",
+      "begin": "\"",
+      "end": "\""
+    },
+    "chars": {
+      "comment": "One Unicode scalar value, no escapes.",
+      "name": "constant.character.caraml",
+      "match": "(?<![\\w'])'[^']'"
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "comment": "if c { t } else { e }, match e { p -> e }, handle e { cls }, handler { cls }, handle x { cls } e, mask[l] e; return(p) e and finally e are handler clauses.",
+          "name": "keyword.control.caraml",
+          "match": "(?<![\\w'])(if|else|match|handle|handler|mask|return|finally)(?![\\w'])"
+        },
+        {
+          "comment": "let p = e, let p <- e, fn(p, ...) e, fn(M : SIG) e, fn{M : SIG} e, fn[x] e; C p as x, op(p) as k -> e.",
+          "name": "keyword.other.caraml",
+          "match": "(?<![\\w'])(let|fn|as)(?![\\w'])"
+        },
+        {
+          "comment": "Declarations and specifications.",
+          "name": "keyword.declaration.caraml",
+          "match": "(?<![\\w'])(type|module|signature|implicit|instance|open|include|extern|effect|protocol|infix|infixl|infixr)(?![\\w'])"
+        }
+      ]
+    },
+    "constructors": {
+      "comment": "Constructors, modules and signatures start upper case.",
+      "name": "entity.name.type.caraml",
+      "match": "(?<![\\w'])[A-Z\\u0391-\\u03A9][A-Za-z0-9_\\u0391-\\u03A9\\u03B1-\\u03C9']*"
+    },
+    "numbers": {
+      "comment": "Decimal naturals.",
+      "name": "constant.numeric.caraml",
+      "match": "(?<![\\w'])[0-9]+(?![\\w'])"
+    },
+    "reservedOperators": {
+      "comment": "A whole symbol run that is reserved: arrows, bind, binding, ascription, alternatives.",
+      "name": "keyword.operator.reserved.caraml",
+      "match": "(?<![!#$%&*+\\-/:<=>?@^|~\\u2190-\\u22FF])(->|\\u2192|<-|\\u2190|=|:|\\|)(?![!#$%&*+\\-/:<=>?@^|~\\u2190-\\u22FF])"
+    },
+    "operators": {
+      "name": "keyword.operator.caraml",
+      "match": "[!#$%&*+\\-/:<=>?@^|~\\u2190-\\u22FF]+"
+    },
+    "wildcard": {
+      "name": "variable.language.wildcard.caraml",
+      "match": "(?<![\\w'])_(?![\\w'])"
+    },
+    "punctuation": {
+      "patterns": [
+        { "name": "punctuation.separator.caraml", "match": "[,;]" },
+        { "name": "punctuation.accessor.caraml", "match": "\\." }
+      ]
+    }
+  }
+}

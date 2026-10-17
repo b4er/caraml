@@ -1,0 +1,92 @@
+{
+  "name": "caraml",
+  "displayName": "CaraML",
+  "description": "Language support for CaraML backed by the Haskell LSP.",
+  "version": "0.1.0",
+  "publisher": "b4er",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configurationDefaults": {
+      "[caraml]": {
+        "editor.wordBasedSuggestions": "off"
+      }
+    },
+    "languages": [
+      {
+        "id": "caraml",
+        "aliases": ["CaraML", "caraml"],
+        "extensions": [".caraml"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "caraml",
+        "scopeName": "source.caraml",
+        "path": "./syntaxes/caraml.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "CaraML",
+      "properties": {
+        "caraml.server.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the caraml executable (empty: $CARAML_SERVER, else caraml on PATH)."
+        },
+        "caraml.server.args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "markdownDescription": "Global options passed before the `lsp` command, e.g. `[\"-vv\"]` for debug logs (shown in the CaraML LSP output channel)."
+        },
+        "caraml.abbreviations.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Replace backslash abbreviations as you type: `\\alpha` becomes `α`, `\\to` becomes `→` (the canonical arrow), `\\le` becomes `≤`."
+        },
+        "caraml.inlayHints.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show inferred type hints inline after value bindings."
+        },
+        "caraml.inlayHints.literals": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Also annotate bindings whose value is an obvious literal (e.g. `= 42`, `= \"…\"`). Off by default, since the type merely restates the syntax."
+        },
+        "caraml.inlayHints.hideTypeVariables": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Suppress hints whose inferred type is an unsolved type variable (e.g. `t0`). These usually indicate types the compiler could not resolve rather than genuine polymorphism."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "caraml.restartServer",
+        "title": "Restart Language Server",
+        "category": "CaraML"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^10.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/vscode": "^1.91.0",
+    "typescript": "^7.0.2"
+  }
+}
