@@ -1,6 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | The LSP server: one reader, one writer and one dispatcher thread, plus one worker
 -- per request and one diagnostics job per document.
 
@@ -45,7 +42,7 @@ import qualified Data.Text.Utf16.Rope.Mixed as Rope
 import CaraML.Cli
 import CaraML.Lsp.Docs
 import CaraML.Lsp.JsonRpc
-import Paths_caraml (version)
+import Paths_caraml_lang (version)
 
 type RequestHandler = Server -> Docs -> Value -> Cli (Either ResponseError Value)
 
@@ -55,10 +52,10 @@ type NotificationHandler = Server -> Value -> Cli ()
 type Diagnose = Uri -> Doc -> Cli [Value]
 
 data Handlers = Handlers
-  { hCapabilities  :: [Pair]
-  , hRequests      :: Map Text RequestHandler
-  , hNotifications :: Map Text NotificationHandler
-  , hDiagnose      :: Diagnose
+  { capabilities  :: [Pair]
+  , requests      :: Map Text RequestHandler
+  , notifications :: Map Text NotificationHandler
+  , diagnose      :: Diagnose
   }
 
 data Phase = Uninitialized | Running | ShuttingDown
@@ -71,15 +68,15 @@ data In = Msg Message | Eof
 data Out = Frame BS.ByteString | Close
 
 data Server = Server
-  { sIn       :: TQueue In
-  , sOut      :: TQueue Out
-  , sPhase    :: TVar Phase
-  , sDocs     :: TVar Docs
-  , sJobs     :: TVar (Map Id Job)
-  , sDiag     :: TVar (Map Uri ThreadId)
-  , sPending  :: TVar (Map Id (TMVar (Either ResponseError Value)))
-  , sNextId   :: TVar Int
-  , sConfig   :: TVar Value
+  { input    :: TQueue In
+  , output   :: TQueue Out
+  , phase    :: TVar Phase
+  , docs     :: TVar Docs
+  , jobs     :: TVar (Map Id Job)
+  , diag     :: TVar (Map Uri ThreadId)
+  , pending  :: TVar (Map Id (TMVar (Either ResponseError Value)))
+  , nextId   :: TVar Int
+  , config   :: TVar Value
   }
 
 -- | Thrown to a worker by @$/cancelRequest@ and to a superseded diagnostics job.
@@ -107,7 +104,7 @@ run hs = do
   logInfo "started"
   code <- dispatch hs s
   liftIO $ do
-    atomically (writeTQueue (sOut s) Close)
+    atomically (writeTQueue s.output Close)
     takeMVar written
   logInfo ("exit: " <> T.pack (show code))
   pure code
@@ -145,21 +142,21 @@ reader s h = loop
         then logWith Debug "response" ["id" .= i, "ok" .= either (const False) (const True) r]
         else logWith Warn "response to unknown request" ["id" .= i]
     m@(Request i _ _) -> liftIO . atomically $ do
-      modifyTVar' (sJobs s) (Map.insert i Queued)
-      writeTQueue (sIn s) (Msg m)
-    m -> liftIO (atomically (writeTQueue (sIn s) (Msg m)))
+      modifyTVar' s.jobs (Map.insert i Queued)
+      writeTQueue s.input (Msg m)
+    m -> liftIO (atomically (writeTQueue s.input (Msg m)))
 
   logCancel i c = logWith (if c == NotPending then Trace else Debug) "cancel" ["id" .= i, "was" .= show c]
 
-  eof = logDebug "end of input" >> liftIO (atomically (writeTQueue (sIn s) Eof))
+  eof = logDebug "end of input" >> liftIO (atomically (writeTQueue s.input Eof))
 
 data CancelResult = BeforeStart | Interrupted | NotPending
   deriving (Eq, Show)
 
 cancel :: Server -> Id -> IO CancelResult
 cancel s i = do
-  busy <- atomically $ Map.lookup i <$> readTVar (sJobs s) >>= \case
-    Just Queued -> Left BeforeStart <$ modifyTVar' (sJobs s) (Map.insert i Cancelled)
+  busy <- atomically $ Map.lookup i <$> readTVar s.jobs >>= \case
+    Just Queued -> Left BeforeStart <$ modifyTVar' s.jobs (Map.insert i Cancelled)
     Just (Busy t) -> pure (Right t)
     _ -> pure (Left NotPending)
   -- throwTo blocks until delivered; never stall the reader on a masked worker
@@ -167,15 +164,15 @@ cancel s i = do
 
 deliver :: Server -> Id -> Either ResponseError Value -> IO Bool
 deliver s i r = atomically $ do
-  w <- Map.lookup i <$> readTVar (sPending s)
-  for_ w $ \v -> modifyTVar' (sPending s) (Map.delete i) >> putTMVar v r
+  w <- Map.lookup i <$> readTVar s.pending
+  for_ w $ \v -> modifyTVar' s.pending (Map.delete i) >> putTMVar v r
   pure (isJust w)
 
 writer :: Server -> Handle -> Cli ()
 writer s h = loop
  where
   loop = do
-    outs <- liftIO . atomically $ (:) <$> readTQueue (sOut s) <*> flushTQueue (sOut s)
+    outs <- liftIO . atomically $ (:) <$> readTQueue s.output <*> flushTQueue s.output
     let (frames, rest) = break isClose outs
     on <- enabled Trace
     when on $ for_ [b | Frame b <- frames] $ \b -> logTrace ("-> " <> excerpt b)
@@ -183,7 +180,7 @@ writer s h = loop
     case r of
       Left e -> do
         logError ("write: " <> T.pack (displayException (e :: IOException)))
-        liftIO (atomically (writeTQueue (sIn s) Eof))
+        liftIO (atomically (writeTQueue s.input Eof))
       Right () -> when (null rest) loop
 
   isClose Close = True
@@ -192,7 +189,7 @@ writer s h = loop
 dispatch :: Handlers -> Server -> Cli ExitCode
 dispatch hs s = loop
  where
-  loop = liftIO (atomically (readTQueue (sIn s))) >>= \case
+  loop = liftIO (atomically (readTQueue s.input)) >>= \case
     Eof -> exitCode
     Msg (Notification "exit" _) -> do
       c <- exitCode
@@ -202,7 +199,7 @@ dispatch hs s = loop
 
   exitCode = phase <&> \p -> if p == ShuttingDown then ExitSuccess else ExitFailure 1
 
-  phase = liftIO (readTVarIO (sPhase s))
+  phase = liftIO (readTVarIO s.phase)
 
   step = \case
     Request i m p -> logWith Debug m ["id" .= i] >> phase >>= \case
@@ -214,16 +211,16 @@ dispatch hs s = loop
         | m == "initialize" -> reject i (invalidRequest "initialize sent twice")
         | m == "shutdown" -> do
             logInfo "shutdown"
-            liftIO (atomically (writeTVar (sPhase s) ShuttingDown))
+            liftIO (atomically (writeTVar s.phase ShuttingDown))
             answer i (Right Null)
-        | Just h <- Map.lookup m (hRequests hs) -> spawn s i m (h s) p
+        | Just h <- Map.lookup m hs.requests -> spawn s i m (h s) p
         | otherwise -> reject i (methodNotFound ("unknown method: " <> m))
     Notification m p -> phase >>= \case
       Running -> notification m p
       _ -> logDebug ("dropped " <> m <> " outside the running phase")
     Response{} -> pure ()
 
-  reject i e = logWith Warn (errMessage e) ["id" .= i] >> answer i (Left e)
+  reject i e = logWith Warn e.message ["id" .= i] >> answer i (Left e)
 
   initialize i p = do
     let client = either (const "unknown client") id . flip parseEither p . withObject "InitializeParams" $ \o ->
@@ -232,33 +229,33 @@ dispatch hs s = loop
     logInfo ("initialize: " <> client)
     logTrace ("initialize params: " <> excerpt (BS.toStrict (Json.encode p)))
     for_ (parseEither (withObject "InitializeParams" (.:? "initializationOptions")) p) $
-      traverse_ (liftIO . atomically . writeTVar (sConfig s))
-    liftIO (atomically (writeTVar (sPhase s) Running))
+      traverse_ (liftIO . atomically . writeTVar s.config)
+    liftIO (atomically (writeTVar s.phase Running))
     answer i . Right $ object
       [ "capabilities" .= object
           ( "positionEncoding" .= ("utf-16" :: Text)
           : "textDocumentSync" .= object ["openClose" .= True, "change" .= (2 :: Int)]
-          : hCapabilities hs )
+          : hs.capabilities )
       , "serverInfo" .= object ["name" .= ("caraml" :: Text), "version" .= showVersion version]
       ]
 
   answer i r = liftIO . atomically $ do
-    modifyTVar' (sJobs s) (Map.delete i)
-    writeTQueue (sOut s) (Frame (responseFrame (Just i) r))
+    modifyTVar' s.jobs (Map.delete i)
+    writeTQueue s.output (Frame (responseFrame (Just i) r))
 
   notification m p = case m of
     "initialized" -> pure ()
     "textDocument/didOpen" -> withNote p $ \(DidOpen uri d) -> do
-      logWith Info "open" ["uri" .= uri, "version" .= docVersion d]
-      liftIO (atomically (modifyTVar' (sDocs s) (Map.insert uri d)))
+      logWith Info "open" ["uri" .= uri, "version" .= d.version]
+      liftIO (atomically (modifyTVar' s.docs (Map.insert uri d)))
       diagnose hs s uri
     "textDocument/didChange" -> withNote p $ \(DidChange uri v cs) -> do
       logWith Debug "change" ["uri" .= uri, "version" .= v, "edits" .= length cs]
-      r <- liftIO . atomically $ Map.lookup uri <$> readTVar (sDocs s) >>= \case
+      r <- liftIO . atomically $ Map.lookup uri <$> readTVar s.docs >>= \case
         Nothing -> pure (Left "change to a document that is not open")
-        Just d -> case applyChanges (docText d) cs of
+        Just d -> case applyChanges d.text cs of
           Left e -> pure (Left e)
-          Right t -> Right t <$ modifyTVar' (sDocs s) (Map.insert uri (Doc v t))
+          Right t -> Right t <$ modifyTVar' s.docs (Map.insert uri (Doc v t))
       case r of
         Left e -> logError (uri <> ": " <> T.pack e)
         Right t -> do
@@ -266,15 +263,15 @@ dispatch hs s = loop
           diagnose hs s uri
     "textDocument/didClose" -> withNote p $ \(DidClose uri) -> do
       logWith Info "close" ["uri" .= uri]
-      liftIO . atomically $ modifyTVar' (sDocs s) (Map.delete uri)
+      liftIO . atomically $ modifyTVar' s.docs (Map.delete uri)
       stopDiagnostics s uri
       liftIO (sendNotification s "textDocument/publishDiagnostics" (publish uri Nothing []))
     "workspace/didChangeConfiguration" -> do
       logDebug "configuration changed"
       logTrace ("settings: " <> excerpt (BS.toStrict (Json.encode p)))
       for_ (parseEither (withObject "DidChangeConfigurationParams" (.:? "settings")) p) $
-        traverse_ (liftIO . atomically . writeTVar (sConfig s))
-    _ | Just h <- Map.lookup m (hNotifications hs) -> guarded m (h s p)
+        traverse_ (liftIO . atomically . writeTVar s.config)
+    _ | Just h <- Map.lookup m hs.notifications -> guarded m (h s p)
       | "$/" `T.isPrefixOf` m -> pure ()
       | otherwise -> logWarn ("unknown notification " <> m)
 
@@ -284,14 +281,14 @@ dispatch hs s = loop
 -- | Run a request on its own thread; it replies exactly once.
 spawn :: Server -> Id -> Text -> (Docs -> Value -> Cli (Either ResponseError Value)) -> Value -> Cli ()
 spawn s i m h p = do
-  docs <- liftIO (readTVarIO (sDocs s))
+  docs <- liftIO (readTVarIO s.docs)
   env <- ask
   let cli x = runReaderT x env
   void . liftIO . forkIO $ mask $ \restore -> do
     t <- myThreadId
-    go <- atomically $ Map.lookup i <$> readTVar (sJobs s) >>= \case
+    go <- atomically $ Map.lookup i <$> readTVar s.jobs >>= \case
       Just Cancelled -> pure False
-      _ -> True <$ modifyTVar' (sJobs s) (Map.insert i (Busy t))
+      _ -> True <$ modifyTVar' s.jobs (Map.insert i (Busy t))
     cli (scoped m (logWith Trace (if go then "start" else "skip, cancelled before start") ["id" .= i]))
     r <- if not go then pure (Left (toException Cancel)) else
       try . restore . cli . scoped m . timed Debug "done" $
@@ -305,8 +302,8 @@ spawn s i m h p = do
           | otherwise -> responseFrame (Just i) (Left (internalError (T.pack (displayException e)))) <$
               cli (scoped m (logError (T.pack (displayException e))))
       atomically $ do
-        modifyTVar' (sJobs s) (Map.delete i)
-        writeTQueue (sOut s) (Frame b)
+        modifyTVar' s.jobs (Map.delete i)
+        writeTQueue s.output (Frame b)
 
 -- | (Re)start the diagnostics job of a document, cancelling a running one; a job
 -- publishes only if its version is still the current one.
@@ -319,23 +316,23 @@ diagnose hs s uri = do
     me <- myThreadId
     r <- try . flip runReaderT env . scoped "diagnostics" $ do
       liftIO (threadDelay debounceMicros)
-      docs <- liftIO (readTVarIO (sDocs s))
+      docs <- liftIO (readTVarIO s.docs)
       for_ (Map.lookup uri docs) $ \d -> do
-        ds <- timed Trace "computed" (hDiagnose hs uri d)
+        ds <- timed Trace "computed" (hs.diagnose uri d)
         b <- liftIO (evaluate (notificationFrame "textDocument/publishDiagnostics"
-                                 (publish uri (Just (docVersion d)) ds)))
+                                 (publish uri (Just d.version) ds)))
         current <- liftIO . atomically $ do
-          cur <- Map.lookup uri <$> readTVar (sDocs s)
-          let current = fmap docVersion cur == Just (docVersion d)
-          current <$ when current (writeTQueue (sOut s) (Frame b))
+          cur <- Map.lookup uri <$> readTVar s.docs
+          let current = fmap (.version) cur == Just d.version
+          current <$ when current (writeTQueue s.output (Frame b))
         logWith (if current then Debug else Trace) (if current then "published" else "dropped, stale")
-          ["uri" .= uri, "version" .= docVersion d, "count" .= length ds]
+          ["uri" .= uri, "version" .= d.version, "count" .= length ds]
     case r of
       Left e | Nothing <- (fromException e :: Maybe Cancel) ->
         runReaderT (logError ("diagnostics: " <> T.pack (displayException e))) env
       _ -> pure ()
-    atomically $ modifyTVar' (sDiag s) (Map.update (\t' -> if t' == me then Nothing else Just t') uri)
-  old <- liftIO . atomically $ stateTVar (sDiag s) (\m -> (Map.lookup uri m, Map.insert uri t m))
+    atomically $ modifyTVar' s.diag (Map.update (\t' -> if t' == me then Nothing else Just t') uri)
+  old <- liftIO . atomically $ stateTVar s.diag (\m -> (Map.lookup uri m, Map.insert uri t m))
   for_ old $ \_ -> logWith Trace "diagnostics superseded" ["uri" .= uri]
   liftIO $ do
     for_ old $ \o -> forkIO (throwTo o Cancel)
@@ -343,7 +340,7 @@ diagnose hs s uri = do
 
 stopDiagnostics :: Server -> Uri -> Cli ()
 stopDiagnostics s uri = liftIO $ do
-  old <- atomically $ stateTVar (sDiag s) (\m -> (Map.lookup uri m, Map.delete uri m))
+  old <- atomically $ stateTVar s.diag (\m -> (Map.lookup uri m, Map.delete uri m))
   for_ old $ \o -> forkIO (throwTo o Cancel)
 
 -- | The start of a message, for trace logs.
@@ -366,19 +363,19 @@ sendNotification s m p = send' s (notificationFrame m p)
 sendRequest :: Server -> Text -> Value -> IO (Either ResponseError Value)
 sendRequest s m p = do
   (i, v) <- atomically $ do
-    n <- stateTVar (sNextId s) (\n -> (n, n + 1))
+    n <- stateTVar s.nextId (\n -> (n, n + 1))
     let i = IdText ("caraml-" <> T.pack (show n))
     v <- newEmptyTMVar
-    modifyTVar' (sPending s) (Map.insert i v)
-    writeTQueue (sOut s) (Frame (requestFrame i m p))
+    modifyTVar' s.pending (Map.insert i v)
+    writeTQueue s.output (Frame (requestFrame i m p))
     pure (i, v)
-  atomically (takeTMVar v) `onException` atomically (modifyTVar' (sPending s) (Map.delete i))
+  atomically (takeTMVar v) `onException` atomically (modifyTVar' s.pending (Map.delete i))
 
 send :: Server -> BS.ByteString -> Cli ()
 send s = liftIO . send' s
 
 send' :: Server -> BS.ByteString -> IO ()
-send' s = atomically . writeTQueue (sOut s) . Frame
+send' s = atomically . writeTQueue s.output . Frame
 
 -- | A notification handler failing must not take down the dispatcher.
 guarded :: Text -> Cli () -> Cli ()

@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Open documents as UTF-16-addressable ropes, so an incremental edit costs O(log n).
 module CaraML.Lsp.Docs
   ( Uri
@@ -28,7 +26,7 @@ import qualified Data.Text.Utf16.Rope.Mixed as Rope
 
 type Uri = Text
 
-data Doc = Doc { docVersion :: !Int, docText :: !Rope }
+data Doc = Doc { version :: !Int, text :: !Rope }
 
 type Docs = Map Uri Doc
 

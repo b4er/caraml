@@ -1,3 +1,4 @@
+import * as readline from 'readline';
 import * as vscode from 'vscode';
 import {
   LanguageClient,
@@ -29,12 +30,38 @@ function newClient(): LanguageClient {
     debug: { command, args: [...args, '-vv', 'lsp'] },
   };
 
+  const stdioOptions = {
+    stdout: (input: NodeJS.ReadableStream, out: vscode.LogOutputChannel) =>
+      lines(input, (l) => out.info(l)),
+    stderr: (input: NodeJS.ReadableStream, out: vscode.LogOutputChannel) =>
+      lines(input, (l) => {
+        const m = /^\[(error|warn|info|debug|trace)\] (.*)$/.exec(l);
+        if (!m) {
+          out.error(l);
+          return;
+        }
+        const msg = m[2];
+        switch (m[1]) {
+          case 'error': out.error(msg); break;
+          case 'warn': out.warn(msg); break;
+          case 'info': out.info(msg); break;
+          case 'debug': out.debug(msg); break;
+          default: out.trace(msg);
+        }
+      }),
+  };
+
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: 'file', language: 'caraml' }],
     initializationOptions: currentConfig(),
+    stdioOptions,
   };
 
   return new LanguageClient('caraml', 'CaraML LSP', serverOptions, clientOptions);
+}
+
+function lines(input: NodeJS.ReadableStream, f: (line: string) => void): void {
+  readline.createInterface({ input, crlfDelay: Infinity, terminal: false }).on('line', f);
 }
 
 export function activate(context: vscode.ExtensionContext): void {

@@ -1,44 +1,77 @@
 cabal-version:  3.0
-name:           caraml
+name:           caraml-lang
 version:        0.1.0
 synopsis:       CaraML compiler and tools.
 build-type:     Simple
 
-library caraml-verified
+library caraml-lang-verified
   hs-source-dirs:   verified
   exposed-modules:  CaraML.Verified
   build-depends:    base, containers
   default-language: Haskell2010
   ghc-options:      -Wno-tabs
 
-executable caraml
-  main-is:          Main.hs
-  hs-source-dirs:   src
+common shared
   default-language: GHC2021
-  ghc-options:      -Wall -threaded -rtsopts "-with-rtsopts=-N2"
-  other-modules:
-      CaraML.Commands.Check
+  default-extensions:
+      DuplicateRecordFields
+      LambdaCase
+      NoFieldSelectors
+      OverloadedRecordDot
+      OverloadedStrings
+  ghc-options:      -Wall -Werror
+  build-depends:
+      base       >=4.14 && <5,
+      containers,
+      text
+  other-modules:    Paths_caraml_lang
+  autogen-modules:  Paths_caraml_lang
+
+library
+  import:           shared
+  hs-source-dirs:   src
+  exposed-modules:
+      CaraML.Build.Fetch
+      CaraML.Build.Project
+      CaraML.Cli
+      CaraML.Commands
+      CaraML.Commands.Build
       CaraML.Commands.Compile
       CaraML.Commands.Fmt
       CaraML.Commands.Lsp
-      CaraML.Commands
-      CaraML.Cli
+      CaraML.Language
       CaraML.Lsp.Abbreviations
       CaraML.Lsp.Docs
       CaraML.Lsp.Handlers
       CaraML.Lsp.JsonRpc
       CaraML.Lsp.Server
-      Paths_caraml
-  autogen-modules:  Paths_caraml
+  other-modules:
+      CaraML.Unverified
   build-depends:
-      base       >=4.14 && <5,
       aeson      >=2.0,
-      caraml-verified,
+      caraml-lang-verified,
       bytestring,
-      containers,
-      text,
+      cryptohash-sha256,
+      directory,
+      filepath,
+      process,
       text-rope  >=0.3,
       mtl,
-      optparse-applicative >=0.18,
       stm
   build-tool-depends: autoexporter:autoexporter
+
+executable caraml
+  import:           shared
+  main-is:          Main.hs
+  hs-source-dirs:   app
+  ghc-options:      -threaded -rtsopts "-with-rtsopts=-N2"
+  build-depends:
+    caraml-lang,
+    optparse-applicative >=0.18
+
+-- test-suite caraml-test
+--   import:           shared
+--   type:             exitcode-stdio-1.0
+--   main-is:          Main.hs
+--   hs-source-dirs:   test
+--   build-depends: caraml-lang

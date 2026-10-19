@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module CaraML.Cli
   ( Cli
   , Global (..)
@@ -40,22 +38,22 @@ import qualified Data.Text.Encoding as T
 data LogLevel = Error | Warn | Info | Debug | Trace
   deriving (Eq, Ord, Show, Enum, Bounded)
 
-data Global = Global { gLogLevel :: LogLevel, gJson :: Bool }
+data Global = Global { logLevel :: LogLevel, json :: Bool }
 
-data Logger = Logger { lLevel :: LogLevel, lJson :: Bool, lScope :: [Text] }
+data Logger = Logger { level :: LogLevel, json :: Bool, scope :: [Text] }
 
-data Env = Env { envGlobal :: Global, envLogger :: Logger }
+data Env = Env { global :: Global, logger :: Logger }
 
 type Cli = ReaderT Env IO
 
 runCli :: Global -> Cli a -> IO a
-runCli g m = runReaderT m (Env g (Logger (gLogLevel g) (gJson g) []))
+runCli g m = runReaderT m (Env g (Logger g.logLevel g.json []))
 
 scoped :: Text -> Cli a -> Cli a
-scoped s = local (\e -> e { envLogger = (envLogger e) { lScope = lScope (envLogger e) ++ [s] } })
+scoped s = local (\e -> e { logger = e.logger { scope = e.logger.scope ++ [s] } })
 
 enabled :: LogLevel -> Cli Bool
-enabled lvl = asks ((lvl <=) . lLevel . envLogger)
+enabled lvl = asks (\e -> lvl <= e.logger.level)
 
 logAt :: LogLevel -> Text -> Cli ()
 logAt lvl msg = emit lvl msg []
@@ -87,19 +85,19 @@ timed lvl msg act = do
 
 emit :: LogLevel -> Text -> [(Key, Value)] -> Cli ()
 emit lvl msg extra = do
-  lg <- asks envLogger
-  when (lvl <= lLevel lg) $ liftIO $ BS.hPut stderr (line lg <> "\n")
+  lg <- asks (.logger)
+  when (lvl <= lg.level) $ liftIO $ BS.hPut stderr (line lg <> "\n")
  where
   name = T.pack (map toLower (show lvl))
   line lg
-    | lJson lg = LBS.toStrict . Json.encode . object $
+    | lg.json = LBS.toStrict . Json.encode . object $
         ["level" .= name, "msg" .= msg]
-        ++ ["scope" .= scope lg | not (null (lScope lg))]
+        ++ ["scope" .= scope lg | not (null lg.scope)]
         ++ extra
     | otherwise = T.encodeUtf8 $
         "[" <> name <> "] "
-        <> (if null (lScope lg) then "" else scope lg <> ": ")
+        <> (if null lg.scope then "" else scope lg <> ": ")
         <> msg
         <> foldMap (\(k, v) -> "  " <> Key.toText k <> "="
                                  <> T.decodeUtf8 (LBS.toStrict (Json.encode v))) extra
-  scope = T.intercalate "/" . lScope
+  scope l = T.intercalate "/" l.scope

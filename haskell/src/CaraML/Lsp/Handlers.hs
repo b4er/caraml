@@ -1,13 +1,10 @@
-{-# LANGUAGE OverloadedStrings #-}
-
--- | The language features. All mocked: they exercise the server, not the checker.
 module CaraML.Lsp.Handlers (handlers) where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad.Reader (liftIO)
 import Data.Aeson (Value (..), object, withObject, (.:), (.=))
 import Data.Aeson.Types (parseEither)
-import Data.Char (isAlphaNum, isAsciiLower, isAsciiUpper, isLetter, isUpper)
+import Data.Char (isAsciiLower, isAsciiUpper, isUpper)
 import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 
@@ -17,6 +14,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Utf16.Rope.Mixed as Rope
 
 import CaraML.Cli
+import CaraML.Language (Err (..), Span (..), boundNames, isIdentChar, keywords, parseModule, typecheck)
 import CaraML.Lsp.Abbreviations
 import CaraML.Lsp.Docs
 import CaraML.Lsp.JsonRpc
@@ -24,18 +22,36 @@ import CaraML.Lsp.Server
 
 handlers :: Handlers
 handlers = Handlers
-  { hCapabilities =
+  { capabilities =
       [ "hoverProvider" .= True
       , "completionProvider" .= object ["triggerCharacters" .= ["\\" :: Text]]
       ]
-  , hRequests = Map.fromList
+  , requests = Map.fromList
       [ ("textDocument/hover", hover)
       , ("textDocument/completion", completion)
       , ("caraml/sleep", sleep)
       ]
-  , hNotifications = Map.empty
-  , hDiagnose = \_ _ -> pure []
+  , notifications = Map.empty
+  , diagnose = \_ d -> pure (diagnostics d)
   }
+
+-- | The errors of parsing and checking a document.
+diagnostics :: Doc -> [Value]
+diagnostics d = case parseModule (Rope.toText d.text) >>= typecheck of
+  Right () -> []
+  Left e -> [ object
+                [ "range" .= range e.span, "severity" .= (1 :: Int)
+                , "source" .= ("caraml" :: Text), "message" .= e.msg ] ]
+ where
+  range = \case
+    Nothing -> object ["start" .= origin, "end" .= origin]
+    Just sp ->
+      let l = fromIntegral (sp.line - 1)
+          at c = position (Position l (utf16 l c))
+      in object ["start" .= at (sp.col - 1), "end" .= at (sp.col - 1 + sp.len)]
+  origin = position (Position 0 0)
+  -- Span columns count characters, LSP columns UTF-16 code units
+  utf16 l c = Rope.utf16Length (Rope.fromText (T.take c (Rope.toText (lineAt l d.text))))
 
 -- | The identifier under the cursor and the document version.
 hover :: RequestHandler
@@ -45,24 +61,25 @@ hover _ docs p = withParams p $ \(At uri (Position l c)) ->
     Just d -> object
       [ "contents" .= object
           [ "kind" .= ("markdown" :: Text)
-          , "value" .= ("`" <> word (lineAt l (docText d)) c <> "` at " <> T.pack (show l) <> ":"
-                         <> T.pack (show c) <> ", version " <> T.pack (show (docVersion d)))
+          , "value" .= ("`" <> word (lineAt l d.text) c <> "` at " <> T.pack (show l) <> ":"
+                         <> T.pack (show c) <> ", version " <> T.pack (show d.version))
           ]
       ]
  where
   word line c = case splitAtPosition (Position 0 c) line of
     Nothing -> ""
     Just (a, b) -> T.takeWhileEnd ident (Rope.toText a) <> T.takeWhile ident (Rope.toText b)
-  ident = identChar
+  ident = isIdentChar
 
 -- | After @\\name@ the abbreviations, replacing it; otherwise the keywords and the
--- identifiers of the document. No scopes and no types yet.
+-- names the document binds at the top level (none while it does not parse). No
+-- scopes and no types yet.
 completion :: RequestHandler
 completion _ docs p = withParams p $ \(At uri (Position l c)) ->
   pure . Right $ case Map.lookup uri docs of
     Nothing -> Null
     Just d ->
-      let before = maybe mempty fst (splitAtPosition (Position 0 c) (lineAt l (docText d)))
+      let before = maybe mempty fst (splitAtPosition (Position 0 c) (lineAt l d.text))
           end = Rope.utf16Length before
           typed = Rope.toText before
           items = case pendingAbbreviation typed of
@@ -71,8 +88,8 @@ completion _ docs p = withParams p $ \(At uri (Position l c)) ->
               in map (abbreviation start (Position l end)) abbreviations
             Nothing -> map (item 14 "keyword") keywords
               ++ [ item (if isUpper (T.head w) then 9 else 6) "in this document" w
-                 | w <- Set.toList (identifiers (Rope.toText (docText d)))
-                 , w /= T.takeWhileEnd identChar typed
+                 | w <- either (const []) (Set.toList . boundNames) (parseModule (Rope.toText d.text))
+                 , w /= T.takeWhileEnd isIdentChar typed
                  ]
       in object ["isIncomplete" .= False, "items" .= items]
  where
@@ -96,39 +113,6 @@ pendingAbbreviation t = listToMaybe
   ]
  where
   symbol = (`T.elem` "-<>=/|")
-
-keywords :: [Text]
-keywords =
-  [ "if", "else", "match", "handle", "handler", "mask", "return", "finally", "let", "fn", "as"
-  , "type", "module", "signature", "implicit", "instance", "open", "include", "extern", "effect"
-  , "protocol", "infix", "infixl", "infixr"
-  ]
-
--- | Identifier tokens outside comments, strings and character literals, without keywords.
-identifiers :: Text -> Set.Set Text
-identifiers = (`Set.difference` Set.fromList ("_" : keywords)) . go Set.empty
- where
-  go acc t = case T.uncons t of
-    Nothing -> acc
-    Just (x, r)
-      | isLetter x || x == '_' -> let (w, r') = T.span identChar t in go (Set.insert w acc) r'
-      | x == '"' -> go acc (T.drop 1 (T.dropWhile (/= '"') r))
-      | x == '\'', Just (_, r') <- T.uncons r, "'" `T.isPrefixOf` r' -> go acc (T.drop 1 r')
-      | "{-" `T.isPrefixOf` t -> go acc (block (1 :: Int) (T.drop 2 t))
-      | opChar x ->
-          let (o, r') = T.span opChar t
-          in go acc (if T.length o >= 2 && T.all (== '-') o then T.dropWhile (/= '\n') r' else r')
-      | otherwise -> go acc r
-  block 0 t = t
-  block n t
-    | "{-" `T.isPrefixOf` t = block (n + 1) (T.drop 2 t)
-    | "-}" `T.isPrefixOf` t = block (n - 1) (T.drop 2 t)
-    | T.null t = t
-    | otherwise = block n (T.drop 1 t)
-  opChar x = x `T.elem` "!#$%&*+-/:<=>?@^|~" || ('\x2190' <= x && x <= '\x22FF')
-
-identChar :: Char -> Bool
-identChar x = isAlphaNum x || x == '_' || x == '\''
 
 -- | @{"ms": n}@: wait, then answer @null@; for trying out @$/cancelRequest@.
 sleep :: RequestHandler

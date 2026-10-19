@@ -1,6 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 module CaraML.Commands.Lsp where
 
 import Control.Monad.Reader (liftIO)

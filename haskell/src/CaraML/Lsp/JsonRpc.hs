@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | JSON-RPC 2.0 messages and the LSP @Content-Length@ framing.
 module CaraML.Lsp.JsonRpc
   ( Id (..)
@@ -52,7 +50,7 @@ data Message
   | Notification !Text !Value
   | Response !Id !(Either ResponseError Value)
 
-data ResponseError = ResponseError { errCode :: !Int, errMessage :: !Text }
+data ResponseError = ResponseError { code :: !Int, message :: !Text }
   deriving (Show)
 
 instance FromJSON ResponseError where
