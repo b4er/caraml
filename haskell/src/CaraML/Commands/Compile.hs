@@ -13,7 +13,11 @@ data Target = X64 | Wasm
 data Stage = Surface | Core | ANF | Flat
   deriving (Eq, Ord, Show, Enum, Bounded)
 
-data Compile = Compile { cTarget :: Target, cOut :: Maybe FilePath, cEmit :: Set Stage }
+data Compile = Compile
+  { cTarget :: Target
+  , cOut :: Maybe FilePath
+  , cEmit :: Set Stage
+  }
 
 compile :: Compile -> [FilePath] -> Cli ()
 compile _ _ = logFatal "compile: not implemented"

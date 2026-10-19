@@ -39,5 +39,6 @@ executable caraml
       text,
       text-rope  >=0.3,
       mtl,
+      optparse-applicative >=0.18,
       stm
   build-tool-depends: autoexporter:autoexporter
