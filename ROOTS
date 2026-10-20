@@ -2,6 +2,7 @@ grammar
 
 core
 haskell
+parser
 prelude
 spec
 syntax

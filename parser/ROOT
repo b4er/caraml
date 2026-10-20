@@ -1,0 +1,23 @@
+chapter CaraML
+
+session CaraML_Parser = LR_Parser +
+  sessions CaraML_Syntax CaraML_Spec
+  theories [document = false]
+    Tok
+    Unicode
+    UnicodeLexer
+    Lexing
+    Trivia
+    Trivia_Correct
+    Literals
+    Literals_Correct
+    Lexer
+    Lexer_Correct
+    Grammar
+  document_files (in "..")
+    "root.bib"
+
+session CaraML_Parser_Test in test = CaraML_Parser +
+  theories [document = false]
+    Lexer_Test
+    Example
