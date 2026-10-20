@@ -51,6 +51,27 @@
           "default": true,
           "markdownDescription": "Replace backslash abbreviations as you type: `\\alpha` becomes `α`, `\\to` becomes `→` (the canonical arrow), `\\le` becomes `≤`."
         },
+        "caraml.displaySymbols.enabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Display ASCII symbols as Unicode without changing the file: `->` is drawn as `→` but stays `->` on disk. The symbol under the cursor is shown as typed. Toggle with `CaraML: Toggle Unicode Display` (`Ctrl+Alt+\\`) or the `ascii`/`utf8` status bar item."
+        },
+        "caraml.displaySymbols.symbols": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {
+            "\\": "λ",
+            "->": "→",
+            "<-": "←",
+            "=>": "⇒",
+            "<=": "≤",
+            ">=": "≥",
+            "/=": "≠"
+          },
+          "markdownDescription": "Symbols displayed by `#caraml.displaySymbols.enabled#`, from a whole symbol run to its display. A run is replaced only as a whole: `-->` is not drawn as `-→`."
+        },
         "caraml.inlayHints.enabled": {
           "type": "boolean",
           "default": false,
@@ -73,6 +94,19 @@
         "command": "caraml.restartServer",
         "title": "Restart Language Server",
         "category": "CaraML"
+      },
+      {
+        "command": "caraml.toggleDisplaySymbols",
+        "title": "Toggle Unicode Display",
+        "category": "CaraML"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "caraml.toggleDisplaySymbols",
+        "key": "ctrl+alt+\\",
+        "mac": "cmd+alt+\\",
+        "when": "editorLangId == caraml"
       }
     ]
   },

@@ -6,6 +6,7 @@ import {
   ServerOptions,
 } from 'vscode-languageclient/node';
 import { registerAbbreviations } from './abbreviate';
+import { registerSymbols } from './symbols';
 
 let client: LanguageClient | undefined;
 
@@ -37,16 +38,15 @@ function newClient(): LanguageClient {
       lines(input, (l) => {
         const m = /^\[(error|warn|info|debug|trace)\] (.*)$/.exec(l);
         if (!m) {
-          out.error(l);
-          return;
+          return out.error(l);
         }
         const msg = m[2];
         switch (m[1]) {
-          case 'error': out.error(msg); break;
-          case 'warn': out.warn(msg); break;
-          case 'info': out.info(msg); break;
-          case 'debug': out.debug(msg); break;
-          default: out.trace(msg);
+          case 'error': return out.error(msg);
+          case 'warn': return out.warn(msg);
+          case 'info': return out.info(msg);
+          case 'debug': return out.debug(msg);
+          default: return out.trace(msg);
         }
       }),
   };
@@ -66,6 +66,7 @@ function lines(input: NodeJS.ReadableStream, f: (line: string) => void): void {
 
 export function activate(context: vscode.ExtensionContext): void {
   registerAbbreviations(context);
+  registerSymbols(context);
 
   client = newClient();
   client.start();
