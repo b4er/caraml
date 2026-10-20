@@ -1,0 +1,10 @@
+# Baseline: hints the code had when hlint was introduced. Fix one, delete its line.
+- ignore: {name: "Redundant <$>"} # 3 hints
+- ignore: {name: "Use :"} # 1 hint
+- ignore: {name: "Use <|>"} # 1 hint
+- ignore: {name: "Use >=>"} # 1 hint
+- ignore: {name: "Use fromMaybe"} # 1 hint
+- ignore: {name: "Use fromRight"} # 1 hint
+- ignore: {name: "Use isNothing"} # 1 hint
+- ignore: {name: "Use lambda-case"} # 2 hints
+- ignore: {name: "Use void"} # 2 hints

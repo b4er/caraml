@@ -12,7 +12,7 @@ import qualified Data.Set as Set
 
 import CaraML.Cli
 import CaraML.Commands
-import Paths_caraml_lang (version)
+import Paths_caraml (version)
 
 main :: IO ()
 main = customExecParser (prefs (showHelpOnEmpty <> helpShowGlobals)) parser'

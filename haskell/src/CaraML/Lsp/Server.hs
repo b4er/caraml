@@ -42,7 +42,7 @@ import qualified Data.Text.Utf16.Rope.Mixed as Rope
 import CaraML.Cli
 import CaraML.Lsp.Docs
 import CaraML.Lsp.JsonRpc
-import Paths_caraml_lang (version)
+import Paths_caraml (version)
 
 type RequestHandler = Server -> Docs -> Value -> Cli (Either ResponseError Value)
 
