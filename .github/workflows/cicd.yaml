@@ -1,0 +1,314 @@
+name: CI/CD
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{github.workflow}}-${{github.ref}}
+  cancel-in-progress: ${{github.event_name == 'pull_request'}}
+
+permissions:
+  contents: read
+
+env:
+  AFP: afp-2026-07-21
+  GHC: "9.10.3"
+  CABAL: "3.16"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    env:
+      ACTIONLINT: 1.7.12
+      HLINT: "3.10"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: install linters
+        run: |
+          bin="$HOME/.local/bin"
+          mkdir -p "$bin" "$HOME/.local/hlint"
+          curl -sSfL "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT/actionlint_${ACTIONLINT}_linux_amd64.tar.gz" \
+            | tar -xz -C "$bin" actionlint
+          curl -sSfL "https://github.com/ndmitchell/hlint/releases/download/v$HLINT/hlint-$HLINT-x86_64-linux.tar.gz" \
+            | tar -xz -C "$HOME/.local/hlint" --strip-components=1
+          { echo "$bin"; echo "$HOME/.local/hlint"; } >> "$GITHUB_PATH"
+
+      - name: run checks
+        run: .githooks/pre-commit
+
+  isabelle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    container:
+      image: makarius/isabelle:Isabelle2025-2
+      options: --user root
+    steps:
+      - name: install git
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends ca-certificates git > /dev/null
+          echo /home/isabelle/Isabelle/bin >> "$GITHUB_PATH"
+
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - id: afp
+        uses: actions/cache@v6
+        with:
+          path: afp
+          key: ${{env.AFP}}
+
+      - if: steps.afp.outputs.cache-hit != 'true'
+        name: download AFP
+        run: |
+          mkdir afp
+          curl -sSfL "https://www.isa-afp.org/release/$AFP.tar.gz" \
+            | tar -xz -C afp --strip-components=1 "$AFP/thys"
+
+      - id: user
+        run: echo "home=$(isabelle getenv -b ISABELLE_HOME_USER)" >> "$GITHUB_OUTPUT"
+
+      - id: heaps
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{steps.user.outputs.home}}/heaps
+          key: heaps-${{env.AFP}}-${{hashFiles('**/ROOT', '**/ROOTS', '**/*.thy', '**/*.ML', 'isabelle-site/**', '!afp/**')}}
+          restore-keys: heaps-${{env.AFP}}-
+
+      - name: register isabelle-site
+        run: |
+          isabelle components -u "$PWD/isabelle-site"
+          isabelle scala_build
+
+      - name: build sessions
+        run: |
+          isabelle build -b -e -v -j 2 -d . -d afp/thys \
+            CaraML_Export CaraML_Web \
+            CaraML_Prelude_Test CaraML_Syntax_Test CaraML_Parser_Test
+
+      - if: always() && steps.heaps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{steps.user.outputs.home}}/heaps
+          key: ${{steps.heaps.outputs.cache-primary-key}}
+
+      - name: generate site
+        run: isabelle site -n -c -d . -d afp/thys -O dist/site CaraML_Web
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: verified
+          path: haskell/verified
+          if-no-files-found: error
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist/site
+
+  sdist:
+    needs: isabelle
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: verified
+          path: haskell/verified
+
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: ${{env.GHC}}
+          cabal-version: ${{env.CABAL}}
+
+      - working-directory: haskell
+        run: cabal sdist -o ../dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  # builds the sdist, not the checkout, so a file missing from the .cabal fails here
+  haskell:
+    needs: sdist
+    name: haskell (${{matrix.target}})
+    runs-on: ${{matrix.runner}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64,    runner: ubuntu-24.04 }
+          - { target: linux-arm64,  runner: ubuntu-24.04-arm }
+          - { target: darwin-arm64, runner: macos-15 }
+          - { target: win32-x64,    runner: windows-2025 }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: haskell/cabal.project
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: sdist
+
+      - id: unpack
+        name: unpack
+        run: |
+          sdist=$(echo caraml-*.tar.gz)
+          version=${sdist#caraml-}; version=${version%.tar.gz}
+          echo "binary=caraml-$version-${{matrix.target}}.tar.gz" >> "$GITHUB_OUTPUT"
+          mkdir pkg
+          tar -xzf "$sdist" -C pkg --strip-components=1
+          cp haskell/cabal.project pkg/
+
+      - id: hs
+        uses: haskell-actions/setup@v2
+        with:
+          ghc-version: ${{env.GHC}}
+          cabal-version: ${{env.CABAL}}
+
+      - working-directory: pkg
+        run: |
+          cabal update
+          cabal build all --dry-run
+
+      - id: store
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{steps.hs.outputs.cabal-store}}
+          key: cabal-${{matrix.target}}-${{env.GHC}}-${{hashFiles('pkg/dist-newstyle/cache/plan.json')}}
+          restore-keys: cabal-${{matrix.target}}-${{env.GHC}}-
+
+      - working-directory: pkg
+        run: cabal build all --only-dependencies
+
+      - if: steps.store.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{steps.hs.outputs.cabal-store}}
+          key: ${{steps.store.outputs.cache-primary-key}}
+
+      - working-directory: pkg
+        run: |
+          cabal build all
+          mkdir -p ../out
+          cabal install exe:caraml --installdir=../out --install-method=copy --overwrite-policy=always
+          cp LICENSE ../out/
+          tar -czf "../${{steps.unpack.outputs.binary}}" -C ../out .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: caraml-${{matrix.target}}
+          path: ${{steps.unpack.outputs.binary}}
+          if-no-files-found: error
+
+  editors:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      VSCE: 4.0.0
+      OVSX: 1.2.0
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: package vsix
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          npx --yes "@vscode/vsce@$VSCE" package -o ../../caraml.vsix
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vsix
+          path: caraml.vsix
+          if-no-files-found: error
+
+      # a release is the first push to main that carries a version without a tag
+      - id: versions
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          new() { git ls-remote --exit-code --tags origin "refs/tags/$1" > /dev/null && echo false || echo true; }
+          v=$(jq -r .version editors/vscode/package.json)
+          e=$(sed -n 's/^;; Version: *//p' editors/emacs/local/caraml-mode/caraml-mode.el)
+          {
+            echo "vscode=$v";  echo "vscode_new=$(new "vscode-v$v")"
+            echo "emacs=$e";   echo "emacs_new=$(new "emacs-v$e")"
+          } >> "$GITHUB_OUTPUT"
+
+      - if: steps.versions.outputs.vscode_new == 'true'
+        name: publish vsix
+        env:
+          VSCE_PAT: ${{secrets.VSCE_PAT}}
+          OVSX_PAT: ${{secrets.OVSX_PAT}}
+        run: |
+          npx --yes "@vscode/vsce@$VSCE" publish --packagePath caraml.vsix
+          npx --yes "ovsx@$OVSX" publish caraml.vsix
+          git tag "vscode-v${{steps.versions.outputs.vscode}}"
+          git push origin "vscode-v${{steps.versions.outputs.vscode}}"
+
+      # MELPA builds from the repository; the tag is the stable release
+      - if: steps.versions.outputs.emacs_new == 'true'
+        name: tag emacs
+        run: |
+          git tag "emacs-v${{steps.versions.outputs.emacs}}"
+          git push origin "emacs-v${{steps.versions.outputs.emacs}}"
+
+  release:
+    needs: [sdist, haskell]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: version
+        run: |
+          v=$(sed -n 's/^version: *//p' haskell/caraml.cabal)
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$v" > /dev/null; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.version.outputs.new == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+          pattern: "{sdist,caraml-*}"
+
+      - if: steps.version.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{github.token}}
+        run: gh release create "${{steps.version.outputs.tag}}" dist/* --target "$GITHUB_SHA" --generate-notes
+
+  pages:
+    needs: isabelle
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{steps.deploy.outputs.page_url}}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5

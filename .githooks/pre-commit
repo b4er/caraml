@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+cd "$(git rev-parse --show-toplevel)"
+
+editors/gen-abbreviations.sh --check
+
+actionlint
+shellcheck editors/gen-abbreviations.sh .githooks/pre-commit
+(cd haskell && hlint src app)
