@@ -1,18 +1,5 @@
 {
   "nodes": {
-    "afp": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1784663325,
-        "narHash": "sha256-kc4Zsn2b0yQeQ/LHiumfX3WlIyva/dlObXbRAaU08MQ=",
-        "type": "tarball",
-        "url": "https://www.isa-afp.org/release/afp-2026-07-21.tar.gz"
-      },
-      "original": {
-        "type": "tarball",
-        "url": "https://www.isa-afp.org/release/afp-2026-07-21.tar.gz"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1792030654,
@@ -31,7 +18,6 @@
     },
     "root": {
       "inputs": {
-        "afp": "afp",
         "nixpkgs": "nixpkgs"
       }
     }
