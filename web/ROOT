@@ -1,0 +1,11 @@
+session CaraML_Web = CaraML_Parser +
+  description "The CaraML website."
+  options [document = false]
+  sessions Site CaraML_Spec
+  theories
+    CaraML_Site
+    Index
+    Get_Started
+    Compiler
+  document_files (in "..")
+    "root.bib"
