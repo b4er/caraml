@@ -7,6 +7,7 @@ import {
 } from 'vscode-languageclient/node';
 import { registerAbbreviations } from './abbreviate';
 import { registerSymbols } from './symbols';
+import { findServer, setupServer } from './wizard';
 
 let client: LanguageClient | undefined;
 
@@ -21,9 +22,8 @@ function currentConfig(): object {
   };
 }
 
-function newClient(): LanguageClient {
+function newClient(command: string): LanguageClient {
   const c = vscode.workspace.getConfiguration('caraml');
-  const command = c.get<string>('server.path') || process.env.CARAML_SERVER || 'caraml';
   const args = c.get<string[]>('server.args', []);
 
   const serverOptions: ServerOptions = {
@@ -68,17 +68,28 @@ export function activate(context: vscode.ExtensionContext): void {
   registerAbbreviations(context);
   registerSymbols(context);
 
-  client = newClient();
-  client.start();
-
-  const restart = async () => {
-    await client?.stop();
-    client = newClient();
+  // without a server, offer to set one up; that writes `caraml.server.path`, which restarts
+  const start = async (explicit = false) => {
+    const command = findServer();
+    if (!command) {
+      void setupServer(context, explicit);
+      return;
+    }
+    client = newClient(command);
     await client.start();
   };
 
+  const restart = async (explicit = false) => {
+    await client?.stop();
+    client = undefined;
+    await start(explicit);
+  };
+
+  void start();
+
   context.subscriptions.push(
-    vscode.commands.registerCommand('caraml.restartServer', restart),
+    vscode.commands.registerCommand('caraml.restartServer', () => restart(true)),
+    vscode.commands.registerCommand('caraml.setupServer', () => setupServer(context, true)),
 
     vscode.workspace.onDidChangeConfiguration(async (e) => {
       if (e.affectsConfiguration('caraml.server')) {

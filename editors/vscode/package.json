@@ -4,6 +4,11 @@
   "description": "Language support for CaraML backed by the Haskell LSP.",
   "version": "0.1.0",
   "publisher": "b4er",
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/b4er/caraml"
+  },
   "engines": {
     "vscode": "^1.91.0"
   },
@@ -38,7 +43,7 @@
         "caraml.server.path": {
           "type": "string",
           "default": "",
-          "description": "Path to the caraml executable (empty: $CARAML_SERVER, else caraml on PATH)."
+          "markdownDescription": "Path to the caraml executable (empty: `$CARAML_SERVER`, else `caraml` on PATH). When none is found, `CaraML: Set Up Language Server` offers to download or build one and sets this."
         },
         "caraml.server.args": {
           "type": "array",
@@ -93,6 +98,11 @@
       {
         "command": "caraml.restartServer",
         "title": "Restart Language Server",
+        "category": "CaraML"
+      },
+      {
+        "command": "caraml.setupServer",
+        "title": "Set Up Language Server",
         "category": "CaraML"
       },
       {
