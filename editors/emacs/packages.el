@@ -1,7 +1,7 @@
 ;;; packages.el --- CaraML layer packages file for Spacemacs.  -*- lexical-binding: t; -*-
 
 ;; Author: b4er
-;; License: same as caraml-mode.el
+;; SPDX-License-Identifier: BSD-3-Clause
 
 ;;; Commentary:
 
@@ -17,6 +17,6 @@
   (use-package caraml-mode
     :defer t
     :mode (("\\.caraml\\'" . caraml-mode))
-    :hook (caraml-mode . eglot-ensure)))
+    :hook (caraml-mode . caraml-eglot-ensure)))
 
 ;;; packages.el ends here

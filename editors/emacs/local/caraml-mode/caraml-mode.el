@@ -1,7 +1,7 @@
 ;;; caraml-mode.el --- major mode for the CaraML language -*- lexical-binding: t; -*-
 
 ;; Author: b4er
-;; License: Apache License 2.0
+;; SPDX-License-Identifier: BSD-3-Clause
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: languages
@@ -12,7 +12,7 @@
 ;;
 ;;   (add-to-list 'load-path "/path/to/caraml/editors/emacs/local/caraml-mode")
 ;;   (require 'caraml-mode)
-;;   (add-hook 'caraml-mode-hook #'eglot-ensure)
+;;   (add-hook 'caraml-mode-hook #'caraml-eglot-ensure)
 ;;
 ;; Spacemacs (private layer):  the enclosing `emacs/' directory *is*
 ;; the layer -- it already contains `packages.el' and this file under
@@ -25,27 +25,29 @@
 ;; `packages.el' wires up `auto-mode-alist' and the `eglot-ensure'
 ;; hook, so no extra user-config is needed.
 ;;
-;; The language server is `caraml lsp'.  If `caraml' is not on PATH,
-;; customize `caraml-server-path'.
+;; The language server is `caraml lsp'.  When `caraml' is neither on
+;; PATH nor in `caraml-server-path', `caraml-eglot-ensure' offers
+;; `caraml-setup' (see caraml-setup.el).
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'caraml-input)
+(require 'caraml-setup)
 
 (defgroup caraml nil
   "Major mode for the CaraML language."
   :group 'languages
   :prefix "caraml-")
 
-;;;; Customization -----------------------------------------------------
+;;;; customization -----------------------------------------------------
 
 (define-obsolete-variable-alias 'caraml-lsp-server-path 'caraml-server-path "0.1.0")
 
-(defcustom caraml-server-path "caraml"
+(defcustom caraml-server-path nil
   "Path to the caraml executable; Eglot runs it as `caraml lsp'.
-The default assumes the binary is on PATH."
-  :type 'string)
+Nil looks in $CARAML_SERVER, then PATH, then `caraml-setup-directory'."
+  :type '(choice (const :tag "Look it up" nil) file))
 
 (defcustom caraml-server-args nil
   "Global options passed before the `lsp' command, e.g. (\"-vv\") for debug logs.
@@ -99,7 +101,7 @@ Mirrors `caraml.inlayHints.hideTypeVariables' from ../vscode/."
   :type 'boolean
   :set #'caraml--set-and-notify)
 
-;;;; Syntax table ------------------------------------------------------
+;;;; syntax table ------------------------------------------------------
 
 (eval-and-compile
   (defconst caraml--op-chars "!#$%&*+/:<=>?@^|~\u2190-\u22ff-"
@@ -144,7 +146,7 @@ mathematical operators (U+2190..U+22FF), as in ../vscode/."))
    ("\\({\\)-"    (1 "< bn"))
    ("-\\(}\\)"    (1 "> bn"))))
 
-;;;; Font lock ---------------------------------------------------------
+;;;; font lock ---------------------------------------------------------
 
 (defconst caraml--keywords-control
   '("if" "else" "match" "handle" "handler" "mask" "return" "finally"
@@ -173,9 +175,7 @@ mathematical operators (U+2190..U+22FF), as in ../vscode/."))
           'font-lock-builtin-face)))
     ("\\_<_\\_>"                                         . font-lock-variable-name-face)))
 
-;;;; Indentation -------------------------------------------------------
-
-;; Same heuristics as the VSCode extension's `indentationRules'.
+;;;; indentation -------------------------------------------------------
 
 (defconst caraml--increase-indent-re
   "\\(?:=\\|<-\\|←\\|->\\|→\\|(\\|\\[\\|{\\)[ \t]*\\(?:--.*\\)?$")
@@ -211,8 +211,6 @@ mathematical operators (U+2190..U+22FF), as in ../vscode/."))
         (indent-line-to base)
       (save-excursion (indent-line-to base)))))
 
-;;;; LSP integration (Eglot) -------------------------------------------
-
 (defun caraml--lsp-initialization-options ()
   "Assemble the `initializationOptions' plist sent to `caraml lsp'.
 Shape matches what ../vscode/src/extension.ts sends."
@@ -228,12 +226,9 @@ Shape matches what ../vscode/src/extension.ts sends."
   (cl-defmethod eglot-initialization-options ((_srv caraml-eglot-server))
     (caraml--lsp-initialization-options))
 
-  ;; Function contact.  Eglot recognises a leading class symbol in the
-  ;; returned list and instantiates that subclass, so our
-  ;; `eglot-initialization-options' method dispatches correctly.
   (defun caraml--eglot-contact (_interactive)
     "Return the Eglot server-contact list for `caraml-mode'."
-    `(caraml-eglot-server ,caraml-server-path ,@caraml-server-args "lsp"))
+    `(caraml-eglot-server ,(or (caraml-server) "caraml") ,@caraml-server-args "lsp"))
 
   (add-to-list 'eglot-server-programs
                '(caraml-mode . caraml--eglot-contact)))
@@ -245,7 +240,7 @@ Shape matches what ../vscode/src/extension.ts sends."
     (user-error "Eglot not available; require Emacs 29+ or load Eglot"))
   (call-interactively #'eglot-reconnect))
 
-;;;; Mode --------------------------------------------------------------
+;;;; mode --------------------------------------------------------------
 
 (defvar caraml-mode-map
   (let ((map (make-sparse-keymap)))
