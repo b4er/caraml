@@ -8,22 +8,30 @@
 
 ;;; Commentary:
 
-;; Vanilla Emacs (drop-in via load-path):
+;; Emacs 30 (`init.el'):
 ;;
-;;   (add-to-list 'load-path "/path/to/caraml/editors/emacs/local/caraml-mode")
-;;   (require 'caraml-mode)
-;;   (add-hook 'caraml-mode-hook #'caraml-eglot-ensure)
+;;   (use-package caraml-mode
+;;     :vc (:url "https://github.com/b4er/caraml"
+;;          :lisp-dir "editors/emacs/local/caraml-mode")
+;;     :hook (caraml-mode . caraml-eglot-ensure))
 ;;
-;; Spacemacs (private layer):  the enclosing `emacs/' directory *is*
-;; the layer -- it already contains `packages.el' and this file under
-;; `local/caraml-mode/'.  Symlink it into place once:
+;; Emacs 29: install once with `M-x eval-expression'
 ;;
-;;   ln -s /path/to/caraml/editors/emacs ~/.emacs.d/private/caraml
+;;   (package-vc-install
+;;    '(caraml-mode :url "https://github.com/b4er/caraml"
+;;                  :lisp-dir "editors/emacs/local/caraml-mode"))
 ;;
-;; then add `caraml' to `dotspacemacs-configuration-layers' in
-;; ~/.spacemacs and restart (or `SPC f e R').  The layer's
-;; `packages.el' wires up `auto-mode-alist' and the `eglot-ensure'
-;; hook, so no extra user-config is needed.
+;; and add `(add-hook 'caraml-mode-hook #'caraml-eglot-ensure)' to
+;; `init.el'.
+;;
+;; Spacemacs (`~/.spacemacs'): add to `dotspacemacs-additional-packages'
+;;
+;;   (caraml-mode :location (recipe :fetcher github :repo "b4er/caraml"
+;;                                  :files ("editors/emacs/local/caraml-mode/*.el")))
+;;
+;; and the same `add-hook' to `dotspacemacs/user-config'.  From a local
+;; checkout, the enclosing `editors/emacs/' directory also works as a
+;; private layer: symlink it to ~/.emacs.d/private/caraml.
 ;;
 ;; The language server is `caraml lsp'.  When `caraml' is neither on
 ;; PATH nor in `caraml-server-path', `caraml-eglot-ensure' offers
