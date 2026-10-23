@@ -990,6 +990,13 @@ lemma infer_pat_sigs:
 proof (induction uf B p n and uf B a n and uf B as n and uf B ps n
     arbitrary: s \<tau> \<Gamma> n' and s \<tau> \<Gamma> n' and s \<tau>s \<Gamma> n' and s \<tau>s \<Gamma> n'
     rule: infer_pat_induct)
+  case (infer_pat_PatOp uf B as opr p n)
+  from infer_pat_PatOp.prems have B: \<open>sigs_in B X\<close> by blast
+  from infer_pat_PatOp.prems obtain q where q: \<open>pat_resolve B (PatOp as opr p) = Some q\<close>
+    and d: \<open>infer_pat uf B q n = Some (s, \<tau>, \<Gamma>, n')\<close>
+    by (auto simp del: pat_resolve.simps split: option.split_asm)
+  show ?case by (rule infer_pat_PatOp.IH[OF q d B])
+next
   case (infer_pat_PatApp_Cons_PQid_Cons uf B p v va n)
   from infer_pat_PatApp_Cons_PQid_Cons.prems have B: \<open>sigs_in B X\<close> by blast
   from infer_pat_PatApp_Cons_PQid_Cons.prems obtain \<sigma> m \<tau>\<^sub>c n\<^sub>1 \<tau>s \<tau>\<^sub>0 sp \<tau>s' \<Gamma>\<^sub>1 n\<^sub>2 s\<^sub>1 where
@@ -2148,6 +2155,29 @@ next
     by (rule infer_cls_Cons_HOp.IH)
       (use tsigs_sub_pend[OF s3] wb tsigs_sapp[OF s321 T0] tsigs_sapp[OF s321 Targs] in simp_all)
   show ?case using se s321 wc by (simp add: shyg_scomp)
+next
+  case (infer_cls_Cons_HFin uf B A pd nm \<tau>\<^sub>0 targs b cls n s cls'x \<tau> pd' n')
+  from infer_cls_Cons_HFin.prems have B: \<open>sigs_in B X\<close>
+    and P: \<open>tsigs_pend pd \<subseteq> X\<close>
+    and T0: \<open>tsigs \<tau>\<^sub>0 \<subseteq> X\<close>
+    and Targs: \<open>tsigs targs \<subseteq> X\<close> by blast+
+  from infer_cls_Cons_HFin.prems obtain s\<^sub>1 b'' \<tau>\<^sub>f pd\<^sub>1 n\<^sub>1 s\<^sub>2 n\<^sub>2 s\<^sub>3 cls'' where
+    d1: \<open>infer uf B A pd b n = Some (s\<^sub>1, b'', \<tau>\<^sub>f, pd\<^sub>1, n\<^sub>1)\<close> and
+    u1: \<open>uni uf \<tau>\<^sub>f unit_ty n\<^sub>1 = Some (s\<^sub>2, n\<^sub>2)\<close> and
+    dc: \<open>infer_cls uf (sappe (s\<^sub>2 \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) nm
+           (sapp (s\<^sub>2 \<odot> s\<^sub>1) \<tau>\<^sub>0) (sapp (s\<^sub>2 \<odot> s\<^sub>1) targs) cls n\<^sub>2
+           = Some (s\<^sub>3, cls'', \<tau>, pd', n')\<close> and
+    se: \<open>s = s\<^sub>3 \<odot> (s\<^sub>2 \<odot> s\<^sub>1)\<close>
+    by (auto simp: Let_def bind_eq_Some_conv)
+  have i1: \<open>shyg s\<^sub>1 X \<and> tsigs \<tau>\<^sub>f \<subseteq> X \<and> tsigs_pend pd\<^sub>1 \<subseteq> X\<close>
+    using d1 B P by (rule infer_cls_Cons_HFin.IH)
+  have s2: \<open>shyg s\<^sub>2 X\<close> by (rule uni_shyg[OF u1]) (use i1 in simp_all)
+  have s21: \<open>shyg (s\<^sub>2 \<odot> s\<^sub>1) X\<close> using i1 s2 by (simp add: shyg_scomp)
+  have wc: \<open>shyg s\<^sub>3 X \<and> tsigs \<tau> \<subseteq> X \<and> tsigs_pend pd' \<subseteq> X\<close>
+    using d1 refl refl refl refl u1 refl refl dc sigs_in_sappe[OF s21 B]
+    by (rule infer_cls_Cons_HFin.IH)
+       (use tsigs_sub_pend[OF s2] i1 tsigs_sapp[OF s21 T0] tsigs_sapp[OF s21 Targs] in simp_all)
+  show ?case using se s21 wc by (simp add: shyg_scomp)
 next
   case (infer_cls_Cons_HRet uf B A pd nm \<tau>\<^sub>0 targs p b cls n s cls'x \<tau> pd' n')
   from infer_cls_Cons_HRet.prems have B: \<open>sigs_in B X\<close>

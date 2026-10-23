@@ -4192,6 +4192,47 @@ lemma infer_wf:
     have le: \<open>n \<le> n'\<close> using le14 le5 by simp
     show ?case using se le fresh outwf_scomp[OF os' o_c le5] by simp
   next
+    case (infer_cls_Cons_HFin uf B A pd nm \<tau>\<^sub>0 targs b cls n s cls'x \<tau> pd' n' FK)
+    have E: \<open>infer_cls uf B A pd nm \<tau>\<^sub>0 targs (HFin b # cls) n = Some (s, cls'x, \<tau>, pd', n')\<close>
+      and I: \<open>inwf B A pd FK n\<close> and F\<^sub>0: \<open>fresh_ok \<tau>\<^sub>0 0 n FK\<close>
+      and F\<^sub>t: \<open>fresh_ok targs 0 n FK\<close> by (fact infer_cls_Cons_HFin.prems)+
+    from E obtain s\<^sub>1 b'' \<tau>\<^sub>f pd\<^sub>1 n\<^sub>1 s\<^sub>2 n\<^sub>2 s\<^sub>3 cls'' where
+      d1: \<open>infer uf B A pd b n = Some (s\<^sub>1, b'', \<tau>\<^sub>f, pd\<^sub>1, n\<^sub>1)\<close> and
+      u1: \<open>uni uf \<tau>\<^sub>f unit_ty n\<^sub>1 = Some (s\<^sub>2, n\<^sub>2)\<close> and
+      dc: \<open>infer_cls uf (sappe (s\<^sub>2 \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) nm
+             (sapp (s\<^sub>2 \<odot> s\<^sub>1) \<tau>\<^sub>0) (sapp (s\<^sub>2 \<odot> s\<^sub>1) targs) cls n\<^sub>2
+             = Some (s\<^sub>3, cls'', \<tau>, pd', n')\<close> and
+      se: \<open>s = s\<^sub>3 \<odot> (s\<^sub>2 \<odot> s\<^sub>1)\<close>
+      by (auto simp: Let_def bind_eq_Some_conv)
+    from d1 I have \<open>n \<le> n\<^sub>1 \<and> outwf s\<^sub>1 pd\<^sub>1 FK n\<^sub>1 \<and> fresh_ok \<tau>\<^sub>f 0 n\<^sub>1 FK\<close>
+      by (rule infer_cls_Cons_HFin.IH)
+    then have le1: \<open>n \<le> n\<^sub>1\<close> and o1: \<open>outwf s\<^sub>1 pd\<^sub>1 FK n\<^sub>1\<close>
+      and f1: \<open>fresh_ok \<tau>\<^sub>f 0 n\<^sub>1 FK\<close> by simp_all
+    from o1 have ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close>
+      by (auto simp: outwf_def)
+    note uf1 = uni_fresh[OF u1 fresh_ok_mono[OF f1 le_refl le_refl] fresh_ok_TC_nil le0]
+    have le2: \<open>n\<^sub>1 \<le> n\<^sub>2\<close> using uf1 by simp
+    have sc2: \<open>sconf s\<^sub>2 {..< n\<^sub>2} {..< n\<^sub>2}\<close> using uf1 by (simp add: atLeast0LessThan)
+    have kh2: \<open>khyg s\<^sub>2 FK\<close> and bf2: \<open>bfree_sub s\<^sub>2\<close> using uf1 by simp_all
+    have o2': \<open>outwf s\<^sub>2 (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
+      by (rule outwf_of_uni[OF sc2 kh2 bf2 ftp1 frp1 le2])
+    have os: \<open>outwf (s\<^sub>2 \<odot> s\<^sub>1) (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
+      by (rule outwf_scomp[OF o1 o2' le2])
+    have le12: \<open>n \<le> n\<^sub>2\<close> using le1 le2 by simp
+    have ic: \<open>inwf (sappe (s\<^sub>2 \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
+      by (rule inwf_step[OF I os le12])
+    have f0: \<open>fresh_ok (sapp (s\<^sub>2 \<odot> s\<^sub>1) \<tau>\<^sub>0) 0 n\<^sub>2 FK\<close>
+      by (rule fresh_ok_sapp0[OF F\<^sub>0 os le12])
+    have ft: \<open>fresh_ok (sapp (s\<^sub>2 \<odot> s\<^sub>1) targs) 0 n\<^sub>2 FK\<close>
+      by (rule fresh_ok_sapp0[OF F\<^sub>t os le12])
+    from d1 refl refl refl refl u1 refl refl dc ic f0 ft
+    have wc: \<open>n\<^sub>2 \<le> n' \<and> outwf s\<^sub>3 pd' FK n' \<and> fresh_ok \<tau> 0 n' FK\<close>
+      by (rule infer_cls_Cons_HFin.IH)
+    have le3: \<open>n\<^sub>2 \<le> n'\<close> and o_c: \<open>outwf s\<^sub>3 pd' FK n'\<close> and fresh: \<open>fresh_ok \<tau> 0 n' FK\<close>
+      using wc by simp_all
+    have le: \<open>n \<le> n'\<close> using le12 le3 by simp
+    show ?case using se le fresh outwf_scomp[OF os o_c le3] by simp
+  next
     case (infer_cls_Cons_HRet uf B A pd nm \<tau>\<^sub>0 targs p b cls n s cls'x \<tau> pd' n' FK)
     have E: \<open>infer_cls uf B A pd nm \<tau>\<^sub>0 targs (HRet p b # cls) n = Some (s, cls'x, \<tau>, pd', n')\<close>
       and I: \<open>inwf B A pd FK n\<close> and F\<^sub>0: \<open>fresh_ok \<tau>\<^sub>0 0 n FK\<close>

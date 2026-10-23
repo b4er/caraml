@@ -119,9 +119,47 @@ where
 subsection \<open>Patterns\<close>
 
 text \<open>\<open>infer_pat uf B p n\<close>: the pattern's type, its binders with their
-  types, and the substitution constructor arguments forced.\<close>
+  types, and the substitution constructor arguments forced. An operator pattern is
+  inferred as its resolution, which holds no chain, so the algorithm recurses on
+  the number of chains in a pattern first (\<^text>\<open>patops\<close>) and its size second.\<close>
 
-fun infer_pat ::
+fun patops :: \<open>mpat \<Rightarrow> nat\<close> and patops_atom :: \<open>mpatom \<Rightarrow> nat\<close>
+and patops_atoms :: \<open>mpatom list \<Rightarrow> nat\<close> and patops_pats :: \<open>mpat list \<Rightarrow> nat\<close>
+and patops_fields :: \<open>(nm \<times> mpat) list \<Rightarrow> nat\<close> where
+  \<open>patops (PatApp as) = patops_atoms as\<close>
+| \<open>patops (PatOp as _ p) = Suc (patops_atoms as + patops p)\<close>
+| \<open>patops (PatAs p _) = patops p\<close>
+| \<open>patops (PatAnn p _) = patops p\<close>
+| \<open>patops_atom (PParen ps) = patops_pats ps\<close>
+| \<open>patops_atom (PList ps) = patops_pats ps\<close>
+| \<open>patops_atom (PRec fs _) = patops_fields fs\<close>
+| \<open>patops_atom _ = 0\<close>
+| \<open>patops_atoms [] = 0\<close>
+| \<open>patops_atoms (a # as) = patops_atom a + patops_atoms as\<close>
+| \<open>patops_pats [] = 0\<close>
+| \<open>patops_pats (p # ps) = patops p + patops_pats ps\<close>
+| \<open>patops_fields [] = 0\<close>
+| \<open>patops_fields ((_, p) # fs) = patops p + patops_fields fs\<close>
+
+lemma patops_pats_0: \<open>patops_pats ps = 0 \<longleftrightarrow> (\<forall>p \<in> set ps. patops p = 0)\<close>
+  by (induction ps) auto
+
+lemma tree_pat_patops: \<open>tree_pat ps t = Some q \<Longrightarrow> patops_pats ps = 0 \<Longrightarrow> patops q = 0\<close>
+  by (induction ps t arbitrary: q rule: tree_pat.induct)
+     (auto simp: bind_eq_Some_conv patops_pats_0 split: if_split_asm)
+
+lemma pat_resolve_patops:
+  \<open>pat_resolve B p = Some q \<Longrightarrow> patops q = 0\<close>
+  \<open>patom_resolve B a = Some b \<Longrightarrow> patops_atom b = 0\<close>
+  \<open>chain_resolve B p = Some (qs, oprs) \<Longrightarrow> patops_pats qs = 0\<close>
+  \<open>pats_resolve B ps = Some qs \<Longrightarrow> patops_pats qs = 0\<close>
+  \<open>patoms_resolve B as = Some bs \<Longrightarrow> patops_atoms bs = 0\<close>
+  \<open>fields_resolve B fs = Some gs \<Longrightarrow> patops_fields gs = 0\<close>
+  by (induction B p and B a and B p and B ps and B as and B fs
+      arbitrary: q and b and qs oprs and qs and bs and gs rule: pat_resolve_induct)
+     (auto simp: bind_eq_Some_conv tree_pat_patops)
+
+function (sequential) infer_pat ::
   \<open>nat \<Rightarrow> tenv \<Rightarrow> mpat \<Rightarrow> nat \<Rightarrow> (ksub \<times> kty \<times> (name \<times> kty) list \<times> nat) option\<close>
 and infer_patom ::
   \<open>nat \<Rightarrow> tenv \<Rightarrow> mpatom \<Rightarrow> nat \<Rightarrow> (ksub \<times> kty \<times> (name \<times> kty) list \<times> nat) option\<close>
@@ -149,7 +187,8 @@ where
      (if nm_ok (n_txt x)
       then infer_pat uf B p n \<bind> (\<lambda>(s, \<tau>, \<Gamma>, n'). Some (s, \<tau>, (n_txt x, \<tau>) # \<Gamma>, n'))
       else None)\<close>
-| \<open>infer_pat uf B (PatOp _ _ _) n = None\<close>
+| \<open>infer_pat uf B (PatOp as opr p) n =
+     (case pat_resolve B (PatOp as opr p) of Some q \<Rightarrow> infer_pat uf B q n | None \<Rightarrow> None)\<close>
 | \<open>infer_pat uf B (PatAnn p ty) n =
      infer_pat uf B p n \<bind> (\<lambda>(s, \<tau>, \<Gamma>, n\<^sub>1).
        ty_stat (sappe s B) True ([], []) n\<^sub>1 ty \<bind> (\<lambda>(\<tau>\<^sub>a, _, n\<^sub>2).
@@ -165,9 +204,9 @@ where
      (case tlookup B (path_nms p) of
         Some (TEcon \<sigma> 0) \<Rightarrow> (case inst_scheme n \<sigma> of (\<tau>, n\<^sub>1) \<Rightarrow> Some (sid, \<tau>, [], n\<^sub>1))
       | _ \<Rightarrow> None)\<close>
-| \<open>infer_patom uf B (PNum l v None) n =
-     (if 0 \<le> v then Some (sid, TC nat_ty [], [], n) else None)\<close>
-| \<open>infer_patom uf B (PNum l v (Some _)) n = None\<close>
+| \<open>infer_patom uf B (PNum l v None) n = Some (sid, TC int_ty [], [], n)\<close>
+| \<open>infer_patom uf B (PNum l v (Some k)) n =
+     (if sfx_ok k v then Some (sid, TC (sfx_ty k) [], [], n) else None)\<close>
 | \<open>infer_patom uf B (PStr l cs) n = Some (sid, TC string_ty [], [], n)\<close>
 | \<open>infer_patom uf B (PChar l c) n = Some (sid, TC char_ty [], [], n)\<close>
 | \<open>infer_patom uf B (PParen [p]) n = infer_pat uf B p n\<close>
@@ -188,6 +227,21 @@ where
      infer_pat uf B p n \<bind> (\<lambda>(s\<^sub>1, \<tau>, \<Gamma>\<^sub>1, n\<^sub>1).
        infer_pats uf (sappe s\<^sub>1 B) ps n\<^sub>1 \<bind> (\<lambda>(s\<^sub>2, \<tau>s, \<Gamma>\<^sub>2, n\<^sub>2).
          Some (s\<^sub>2 \<odot> s\<^sub>1, sapp s\<^sub>2 \<tau> # \<tau>s, map (apsnd (sapp s\<^sub>2)) \<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2, n\<^sub>2)))\<close>
+
+  by pat_completeness auto
+
+termination
+  by (relation \<open>measures [\<lambda>x. case x of
+        Inl (Inl (uf, B, p, n)) \<Rightarrow> patops p
+      | Inl (Inr (uf, B, a, n)) \<Rightarrow> patops_atom a
+      | Inr (Inl (uf, B, as, n)) \<Rightarrow> patops_atoms as
+      | Inr (Inr (uf, B, ps, n)) \<Rightarrow> patops_pats ps,
+      \<lambda>x. case x of
+        Inl (Inl (uf, B, p, n)) \<Rightarrow> size p
+      | Inl (Inr (uf, B, a, n)) \<Rightarrow> size a
+      | Inr (Inl (uf, B, as, n)) \<Rightarrow> size_list size as
+      | Inr (Inr (uf, B, ps, n)) \<Rightarrow> size_list size ps]\<close>)
+     (auto simp: pat_resolve_patops simp del: pat_resolve.simps)
 
 lemmas infer_pat_induct =
   infer_pat_infer_patom_infer_patoms_infer_pats.induct[named_cases infer_pat]
@@ -509,8 +563,10 @@ where
       | Some (TEffi s \<sigma>) \<Rightarrow> (case inst_scheme n \<sigma> of (\<tau>, n') \<Rightarrow> Some (sid, APath p, \<tau>, pd, n'))
       | Some _ \<Rightarrow> None
       | None \<Rightarrow> infer_opn uf B pd p n)\<close>
-| \<open>infer_atom uf B A pd (ANum l v None) n =
-     (if 0 \<le> v then Some (sid, ANum l v None, TC nat_ty [], pd, n) else None)\<close>
+| \<open>infer_atom uf B A pd (ANum l v None) n = Some (sid, ANum l v None, TC int_ty [], pd, n)\<close>
+| \<open>infer_atom uf B A pd (ANum l v (Some k)) n =
+     (if sfx_ok k v then Some (sid, ANum l v (Some k), TC (sfx_ty k) [], pd, n) else None)\<close>
+| \<open>infer_atom uf B A pd (AFloat x) n = Some (sid, AFloat x, TC f64_ty [], pd, n)\<close>
 | \<open>infer_atom uf B A pd (AStr l cs) n = Some (sid, AStr l cs, TC string_ty [], pd, n)\<close>
 | \<open>infer_atom uf B A pd (AChar l c) n = Some (sid, AChar l c, TC char_ty [], pd, n)\<close>
 | \<open>infer_atom uf B A pd (AParen [e]) n =
@@ -521,8 +577,6 @@ where
      infer_exps uf B A pd es n \<bind> (\<lambda>(s\<^sub>1, es', \<tau>s, pd\<^sub>1, n\<^sub>1).
        unis uf (map (\<lambda>\<tau>. (\<tau>, TV n\<^sub>1)) \<tau>s) (Suc n\<^sub>1) \<bind> (\<lambda>(s\<^sub>2, n\<^sub>2).
          Some (s\<^sub>2 \<odot> s\<^sub>1, AList es', TC list_ty [sapp s\<^sub>2 (TV n\<^sub>1)], sub_pend s\<^sub>2 pd\<^sub>1, n\<^sub>2)))\<close>
-| \<open>infer_atom uf B A pd (ANum _ _ (Some _)) n = None\<close>
-| \<open>infer_atom uf B A pd (AFloat _) n = None\<close>
 | \<open>infer_atom uf B A pd (ARec _) n = None\<close>
 | \<open>infer_atom uf B A pd (ADot _ _) n = None\<close>
 | \<open>infer_atom uf B A pd (AMod p sg) n = None\<close>
@@ -650,6 +704,13 @@ where
                         (\<lambda>(s\<^sub>3, cls', \<tau>, pd\<^sub>3, n\<^sub>4).
                         Some (s\<^sub>3 \<odot> s', HRet p b' # cls', \<tau>, pd\<^sub>3, n\<^sub>4))))
               else None))))\<close>
+| \<open>infer_cls uf B A pd nm \<tau>\<^sub>0 targs (HFin b # cls) n =
+     infer uf B A pd b n \<bind> (\<lambda>(s\<^sub>1, b', \<tau>\<^sub>f, pd\<^sub>1, n\<^sub>1).
+       uni uf \<tau>\<^sub>f unit_ty n\<^sub>1 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>2).
+         (let s = s\<^sub>2 \<odot> s\<^sub>1 in
+          infer_cls uf (sappe s B) (sappr s A) (sub_pend s\<^sub>2 pd\<^sub>1) nm (sapp s \<tau>\<^sub>0) (sapp s targs)
+            cls n\<^sub>2 \<bind>
+            (\<lambda>(s\<^sub>3, cls', \<tau>, pd\<^sub>3, n\<^sub>3). Some (s\<^sub>3 \<odot> s, HFin b' # cls', \<tau>, pd\<^sub>3, n\<^sub>3)))))\<close>
 | \<open>infer_cls uf B A pd nm \<tau>\<^sub>0 targs (_ # cls) n = None\<close>
 
   \<comment> \<open>Named handlers: a first-class named handler (\<open>W_handlern\<close>), and its

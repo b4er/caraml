@@ -1429,10 +1429,41 @@ lemma irrefutable_eq:
   by (induction B p and B a arbitrary: B' and B' rule: irrefutable_irrefutable_atom.induct)
      (auto simp: is_con_eq list_all_iff)
 
+lemma tlookup_single: \<open>tlookup B [x] = map_of B x\<close>
+  by simp
+
+lemma op_stat_eq: \<open>lookup_eq B B' \<Longrightarrow> op_stat B opr = op_stat B' opr\<close>
+  unfolding op_stat_def
+  by (cases rule: lookup_eqE[of B B' \<open>[opr]\<close>]; cases rule: lookup_eqE[of B B' \<open>[fix_key opr]\<close>])
+     (simp_all add: tlookup_single[symmetric] del: tlookup.simps)
+
+lemma ops_of_eq: \<open>lookup_eq B B' \<Longrightarrow> ops_of B oprs = ops_of B' oprs\<close>
+  by (induction oprs) (auto simp: op_stat_eq)
+
+lemma chain_tree_eq: \<open>lookup_eq B B' \<Longrightarrow> chain_tree B oprs = chain_tree B' oprs\<close>
+  by (simp add: chain_tree_def ops_of_eq)
+
+text \<open>Resolving an operator pattern reads only fixities, so it is invariant too, and with it
+  the constructor head of a pattern:\<close>
+
+lemma pat_resolve_eq:
+  \<open>lookup_eq B B' \<Longrightarrow> pat_resolve B p = pat_resolve B' p\<close>
+  \<open>lookup_eq B B' \<Longrightarrow> patom_resolve B a = patom_resolve B' a\<close>
+  \<open>lookup_eq B B' \<Longrightarrow> chain_resolve B p = chain_resolve B' p\<close>
+  \<open>lookup_eq B B' \<Longrightarrow> pats_resolve B ps = pats_resolve B' ps\<close>
+  \<open>lookup_eq B B' \<Longrightarrow> patoms_resolve B as = patoms_resolve B' as\<close>
+  \<open>lookup_eq B B' \<Longrightarrow> fields_resolve B fs = fields_resolve B' fs\<close>
+  by (induction B p and B a and B p and B ps and B as and B fs rule: pat_resolve_induct)
+     (auto simp: chain_tree_eq cong: Option.bind_cong)
+
+lemma con_head_eq: \<open>lookup_eq B B' \<Longrightarrow> con_head B p = con_head B' p\<close>
+  by (induction B p rule: con_head.induct) (simp_all add: pat_resolve_eq del: pat_resolve.simps)
+
 lemma con_clause_eq: \<open>lookup_eq B B' \<Longrightarrow> con_clause B k C n p = con_clause B' k C n p\<close>
   unfolding con_clause_def
-  by (cases \<open>con_head p\<close>; cases rule: lookup_eqE[of B B' \<open>path_nms (fst (the (con_head p)))\<close>])
-     (auto simp: irrefutable_eq list_all_iff split: option.split tentry.split)
+  by (cases \<open>con_head B p\<close>;
+      cases rule: lookup_eqE[of B B' \<open>path_nms (fst (the (con_head B p)))\<close>])
+     (auto simp: irrefutable_eq con_head_eq list_all_iff split: option.split tentry.split)
 
 lemma covers_eq: \<open>lookup_eq B B' \<Longrightarrow> covers B \<tau> ps = covers B' \<tau> ps\<close>
   unfolding covers_def
@@ -1471,20 +1502,6 @@ proof (induction B cls arbitrary: B' rule: hlabels_induct)
     by (cases rule: lookup_eqE[OF Cons_HOp.prems, of \<open>[n_txt opn]\<close>])
       (simp_all add: ih cong: tentry.case_cong)
 qed auto
-
-lemma tlookup_single: \<open>tlookup B [x] = map_of B x\<close>
-  by simp
-
-lemma op_stat_eq: \<open>lookup_eq B B' \<Longrightarrow> op_stat B opr = op_stat B' opr\<close>
-  unfolding op_stat_def
-  by (cases rule: lookup_eqE[of B B' \<open>[opr]\<close>]; cases rule: lookup_eqE[of B B' \<open>[fix_key opr]\<close>])
-     (simp_all add: tlookup_single[symmetric] del: tlookup.simps)
-
-lemma ops_of_eq: \<open>lookup_eq B B' \<Longrightarrow> ops_of B oprs = ops_of B' oprs\<close>
-  by (induction oprs) (auto simp: op_stat_eq)
-
-lemma chain_tree_eq: \<open>lookup_eq B B' \<Longrightarrow> chain_tree B oprs = chain_tree B' oprs\<close>
-  by (simp add: chain_tree_def ops_of_eq)
 
 text \<open>Implicit resolution reads only the instance entries, which substitution leaves alone:\<close>
 
@@ -2405,6 +2422,12 @@ proof (induction uf B p n and uf B a n and uf B as n and uf B ps n
   case (infer_pat_PatApp_Cons_Nil uf B a n)
   then show ?case by simp
 next
+  case (infer_pat_PatOp uf B as opr p n)
+  from infer_pat_PatOp.prems obtain q where q: \<open>pat_resolve B (PatOp as opr p) = Some q\<close>
+    and d: \<open>infer_pat uf B q n = Some (s, \<tau>, \<Gamma>, n')\<close>
+    by (auto simp del: pat_resolve.simps split: option.split_asm)
+  show ?case by (rule infer_pat_PatOp.IH[OF q d]) (fact infer_pat_PatOp.prems)+
+next
   case (infer_pat_PatApp_Cons_PQid_Cons uf B p v va n)
   from infer_pat_PatApp_Cons_PQid_Cons.prems
   obtain \<sigma> m \<tau>\<^sub>c n\<^sub>1 \<tau>s \<tau>\<^sub>0 sp \<tau>s' \<Gamma>\<^sub>1 n\<^sub>2 s\<^sub>1 where
@@ -2485,6 +2508,9 @@ next
   show ?case using con_inst_fresh[OF wf lk inst(1)] inst by simp
 next
   case (infer_patom_PNum_None uf B l v n)
+  then show ?case by (auto simp: fresh_ok_TC0 split: if_split_asm)
+next
+  case (infer_patom_PNum_Some uf B l v k n)
   then show ?case by (auto simp: fresh_ok_TC0 split: if_split_asm)
 next
   case (infer_patom_PStr uf B l cs n)

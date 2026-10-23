@@ -765,139 +765,6 @@ where
 abbreviation imp_resolve :: \<open>tenv \<Rightarrow> tvar list \<Rightarrow> tenv \<Rightarrow> (tvar \<times> kty) list \<Rightarrow> name option\<close> where
   \<open>imp_resolve B K E \<phi> \<equiv> imp_res (cands B) K E \<phi>\<close>
 
-subsection \<open>Patterns\<close>
-
-text \<open>Pattern typing \<open>wtp B p \<tau> \<Gamma>\<close>: \<open>p\<close> matches scrutinees of type \<open>\<tau>\<close> and
-  binds \<open>\<Gamma>\<close>, in the order the elaborator's \<open>elab_pat\<close> produces binders. A
-  single-segment name that is not a constructor binds; a constructor
-  pattern is saturated.\<close>
-
-definition is_con :: \<open>tenv \<Rightarrow> name \<Rightarrow> bool\<close> where
-  \<open>is_con B x = (case tlookup B [x] of Some (TEcon _ _) \<Rightarrow> True | _ \<Rightarrow> False)\<close>
-
-fun con_ty :: \<open>nat \<Rightarrow> kty \<Rightarrow> (kty list \<times> kty) option\<close> where
-  \<open>con_ty 0 \<tau> = Some ([], \<tau>)\<close>
-| \<open>con_ty (Suc n) (TFn \<tau>\<^sub>1 _ \<tau>\<^sub>2) = con_ty n \<tau>\<^sub>2 \<bind> (\<lambda>(ts, t). Some (\<tau>\<^sub>1 # ts, t))\<close>
-| \<open>con_ty (Suc n) _ = None\<close>
-
-lemmas con_ty_induct = con_ty.induct[named_cases con_ty]
-
-fun fn_pat :: \<open>mpat list \<Rightarrow> mpat\<close> where
-  \<open>fn_pat [p] = p\<close>
-| \<open>fn_pat ps = PatApp [PParen ps]\<close>
-
-fun fn_ty :: \<open>kty list \<Rightarrow> kty\<close> where
-  \<open>fn_ty [\<tau>] = \<tau>\<close>
-| \<open>fn_ty \<tau>s = tuple \<tau>s\<close>
-
-inductive wtp :: \<open>tenv \<Rightarrow> mpat \<Rightarrow> kty \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
-  wtpa :: \<open>tenv \<Rightarrow> mpatom \<Rightarrow> kty \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
-  wtpas :: \<open>tenv \<Rightarrow> mpatom list \<Rightarrow> kty list \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
-  wtps :: \<open>tenv \<Rightarrow> mpat list \<Rightarrow> kty list \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close>
-where
-  P_atom: \<open>wtpa B a \<tau> \<Gamma> \<Longrightarrow> wtp B (PatApp [a]) \<tau> \<Gamma>\<close>
-| P_con:  \<open>tlookup B (path_nms p) = Some (TEcon \<sigma> n) \<Longrightarrow> n = length as \<Longrightarrow> as \<noteq> [] \<Longrightarrow>
-           \<sigma> \<succeq> \<tau>\<^sub>c \<Longrightarrow> con_ty n \<tau>\<^sub>c = Some (\<tau>s, \<tau>) \<Longrightarrow> wtpas B as \<tau>s' \<Gamma> \<Longrightarrow> \<tau>s' [\<simeq>] \<tau>s \<Longrightarrow>
-           wtp B (PatApp (PQid p # as)) \<tau> \<Gamma>\<close>
-| P_as:   \<open>wtp B p \<tau> \<Gamma> \<Longrightarrow> nm_ok (n_txt x) \<Longrightarrow> wtp B (PatAs p x) \<tau> ((n_txt x, \<tau>) # \<Gamma>)\<close>
-| P_ann:  \<open>wtp B p \<tau> \<Gamma> \<Longrightarrow> ty_stat B True ([], []) n ty = Some (\<tau>\<^sub>a, ve, n') \<Longrightarrow>
-           close_sch (set [n ..< n']) (set [n ..< n']) \<tau>\<^sub>a \<succeq> \<tau>' \<Longrightarrow> \<tau>' \<simeq> \<tau> \<Longrightarrow>
-           wtp B (PatAnn p ty) \<tau> \<Gamma>\<close>
-| PA_wild: \<open>wtpa B (PWild x) \<tau> []\<close>
-| PA_var: \<open>\<not> is_con B (n_txt x) \<Longrightarrow> nm_ok (n_txt x) \<Longrightarrow>
-           wtpa B (PQid (MkPath [x])) \<tau> [(n_txt x, \<tau>)]\<close>
-| PA_con: \<open>tlookup B (path_nms p) = Some (TEcon \<sigma> 0) \<Longrightarrow> \<sigma> \<succeq> \<tau>\<^sub>c \<Longrightarrow> \<tau>\<^sub>c \<simeq> \<tau> \<Longrightarrow>
-           wtpa B (PQid p) \<tau> []\<close>
-| PA_num: \<open>0 \<le> v \<Longrightarrow> wtpa B (PNum l v None) (TC nat_ty []) []\<close>
-| PA_str: \<open>wtpa B (PStr l cs) (TC string_ty []) []\<close>
-| PA_chr: \<open>wtpa B (PChar l c) (TC char_ty []) []\<close>
-| PA_par: \<open>wtp B p \<tau> \<Gamma> \<Longrightarrow> wtpa B (PParen [p]) \<tau> \<Gamma>\<close>
-| PA_tup: \<open>length ps \<noteq> 1 \<Longrightarrow> wtps B ps \<tau>s \<Gamma> \<Longrightarrow> wtpa B (PParen ps) (tuple \<tau>s) \<Gamma>\<close>
-| PA_list: \<open>wtps B ps \<tau>s \<Gamma> \<Longrightarrow> \<forall>\<tau>' \<in> set \<tau>s. \<tau>' \<simeq> \<tau> \<Longrightarrow>
-           wtpa B (PList ps) (TC list_ty [\<tau>]) \<Gamma>\<close>
-| PAs_nil: \<open>wtpas B [] [] []\<close>
-| PAs_cons: \<open>wtpa B a \<tau> \<Gamma>\<^sub>1 \<Longrightarrow> wtpas B as \<tau>s \<Gamma>\<^sub>2 \<Longrightarrow> wtpas B (a # as) (\<tau> # \<tau>s) (\<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2)\<close>
-| Ps_nil: \<open>wtps B [] [] []\<close>
-| Ps_cons: \<open>wtp B p \<tau> \<Gamma>\<^sub>1 \<Longrightarrow> wtps B ps \<tau>s \<Gamma>\<^sub>2 \<Longrightarrow> wtps B (p # ps) (\<tau> # \<tau>s) (\<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2)\<close>
-
-subsection \<open>Exhaustiveness and syntactic values\<close>
-
-text \<open>Shallow exhaustiveness: an irrefutable clause, or every constructor
-  of the scrutinee's stamped type covered by a clause whose sub-patterns
-  are irrefutable. The constructors are those the type name lists; a
-  clause covers one when its head resolves to a constructor of that stamp
-  under the constructor's declared name.\<close>
-
-fun irrefutable :: \<open>tenv \<Rightarrow> mpat \<Rightarrow> bool\<close> and
-  irrefutable_atom :: \<open>tenv \<Rightarrow> mpatom \<Rightarrow> bool\<close>
-where
-  \<open>irrefutable B (PatApp [a]) = irrefutable_atom B a\<close>
-| \<open>irrefutable B (PatApp _) = False\<close>
-| \<open>irrefutable B (PatAs p x) = irrefutable B p\<close>
-| \<open>irrefutable B (PatAnn p _) = irrefutable B p\<close>
-| \<open>irrefutable B (PatOp _ _ _) = False\<close>
-| \<open>irrefutable_atom B (PWild _) = True\<close>
-| \<open>irrefutable_atom B (PQid (MkPath [x])) = (\<not> is_con B (n_txt x))\<close>
-| \<open>irrefutable_atom B (PQid _) = False\<close>
-| \<open>irrefutable_atom B (PParen ps) = list_all (irrefutable B) ps\<close>
-| \<open>irrefutable_atom B _ = False\<close>
-
-definition con_stamp :: \<open>scheme \<Rightarrow> nat \<Rightarrow> nat option\<close> where
-  \<open>con_stamp \<sigma> n =
-     (case con_result n (sch_body \<sigma>) of Some (TC c _) \<Rightarrow> Some (stamp c) | _ \<Rightarrow> None)\<close>
-
-fun con_head :: \<open>mpat \<Rightarrow> (mpath \<times> mpatom list) option\<close> where
-  \<open>con_head (PatApp (PQid p # as)) = Some (p, as)\<close>
-| \<open>con_head (PatAs p x) = con_head p\<close>
-| \<open>con_head (PatAnn p _) = con_head p\<close>
-| \<open>con_head _ = None\<close>
-
-definition con_clause :: \<open>tenv \<Rightarrow> nat \<Rightarrow> name \<Rightarrow> nat \<Rightarrow> mpat \<Rightarrow> bool\<close> where
-  \<open>con_clause B k C n p \<longleftrightarrow>
-     (case con_head p of
-        Some (q, as) \<Rightarrow>
-          last (path_nms q) = C \<and> length as = n \<and> list_all (irrefutable_atom B) as \<and>
-          (case tlookup B (path_nms q) of
-             Some (TEcon \<sigma> n') \<Rightarrow> n' = n \<and> con_stamp \<sigma> n = Some k
-           | _ \<Rightarrow> False)
-      | None \<Rightarrow> False)\<close>
-
-definition covers :: \<open>tenv \<Rightarrow> kty \<Rightarrow> mpat list \<Rightarrow> bool\<close> where
-  \<open>covers B \<tau> ps \<longleftrightarrow>
-     list_ex (irrefutable B) ps \<or>
-     (case \<tau> of
-        TC (k, x, cs) args \<Rightarrow>
-          cs \<noteq> [] \<and> list_all (\<lambda>(C, n). list_ex (con_clause B k C n) ps) cs
-      | _ \<Rightarrow> False)\<close>
-
-text \<open>The value restriction (non-expansive expressions,
-  \<^cite>\<open>\<open>Sect. 4.7--4.8\<close> in milner1997\<close>): a local binding generalises only a
-  syntactic value.\<close>
-
-fun val_exp :: \<open>tenv \<Rightarrow> expr \<Rightarrow> bool\<close> and
-  val_atom :: \<open>tenv \<Rightarrow> matom \<Rightarrow> bool\<close>
-where
-  \<open>val_exp B (EFn _ _) = True\<close>
-| \<open>val_exp B (EFnMod _ _) = True\<close>
-| \<open>val_exp B (EHandlerN _) = True\<close>
-| \<open>val_exp B (ESpine [a]) = val_atom B a\<close>
-| \<open>val_exp B (ESpine (APath p # as)) =
-     ((case tlookup B (path_nms p) of Some (TEcon _ n) \<Rightarrow> n = length as | _ \<Rightarrow> False) \<and>
-      list_all (val_atom B) as)\<close>
-| \<open>val_exp B (EAnn e _) = val_exp B e\<close>
-| \<open>val_exp B _ = False\<close>
-| \<open>val_atom B (APath p) =
-     (case tlookup B (path_nms p) of
-        Some (TEval _) \<Rightarrow> True | Some (TEcon _ _) \<Rightarrow> True | Some (TEffi _ _) \<Rightarrow> True | _ \<Rightarrow> False)\<close>
-| \<open>val_atom B (ANum _ _ _) = True\<close>
-| \<open>val_atom B (AStr _ _) = True\<close>
-| \<open>val_atom B (AChar _ _) = True\<close>
-| \<open>val_atom B (AParen es) = list_all (val_exp B) es\<close>
-| \<open>val_atom B (AList es) = list_all (val_exp B) es\<close>
-| \<open>val_atom B _ = False\<close>
-
-lemmas val_exp_induct = val_exp_val_atom.induct[named_cases val_exp]
-
 subsection \<open>Operator chains\<close>
 
 text \<open>An operator chain is resolved by \<^const>\<open>shunt\<close> over its fixities into a
@@ -942,6 +809,196 @@ inductive wt_tree :: \<open>tenv \<Rightarrow> krow \<Rightarrow> kty list \<Rig
            \<tau>\<^sub>c \<simeq> TFn \<tau>\<^sub>l \<epsilon>\<^sub>1 (TFn \<tau>\<^sub>r \<epsilon>\<^sub>2 \<tau>) \<Longrightarrow>
            wt_tree B \<epsilon> \<tau>s (Node (OCon c) l r) \<tau>\<close>
 
+text \<open>An operator pattern \<open>p \<oplus> q\<close> resolves by the same chain: every node must be
+  a binary constructor (an operator bound as a value has no meaning in a
+  pattern), applied to its operands as parenthesised patterns. The resolution of
+  a pattern replaces every chain in it, so the result holds no \<^const>\<open>PatOp\<close>; the
+  typing rules and the algorithm type an operator pattern as its resolution, and
+  exhaustiveness reads the resolution's constructor head.\<close>
+
+fun tree_pat :: \<open>mpat list \<Rightarrow> optree \<Rightarrow> mpat option\<close> where
+  \<open>tree_pat ps (Leaf i) = (if i < length ps then Some (ps ! i) else None)\<close>
+| \<open>tree_pat ps (Node (OCon c) l r) =
+     tree_pat ps l \<bind> (\<lambda>p. tree_pat ps r \<bind> (\<lambda>q.
+       Some (PatApp [PQid (MkPath [mk_nm c]), PParen [p], PParen [q]])))\<close>
+| \<open>tree_pat ps (Node (OVar _) _ _) = None\<close>
+
+fun pat_resolve :: \<open>tenv \<Rightarrow> mpat \<Rightarrow> mpat option\<close>
+and patom_resolve :: \<open>tenv \<Rightarrow> mpatom \<Rightarrow> mpatom option\<close>
+and chain_resolve :: \<open>tenv \<Rightarrow> mpat \<Rightarrow> (mpat list \<times> nm list) option\<close>
+and pats_resolve :: \<open>tenv \<Rightarrow> mpat list \<Rightarrow> mpat list option\<close>
+and patoms_resolve :: \<open>tenv \<Rightarrow> mpatom list \<Rightarrow> mpatom list option\<close>
+and fields_resolve :: \<open>tenv \<Rightarrow> (nm \<times> mpat) list \<Rightarrow> (nm \<times> mpat) list option\<close>
+where
+  \<open>pat_resolve B (PatApp as) = map_option PatApp (patoms_resolve B as)\<close>
+| \<open>pat_resolve B (PatOp as opr p) =
+     patoms_resolve B as \<bind> (\<lambda>as'. chain_resolve B p \<bind> (\<lambda>(ps, oprs).
+       chain_tree B (opr # oprs) \<bind> tree_pat (PatApp as' # ps)))\<close>
+| \<open>pat_resolve B (PatAs p x) = map_option (\<lambda>q. PatAs q x) (pat_resolve B p)\<close>
+| \<open>pat_resolve B (PatAnn p ty) = map_option (\<lambda>q. PatAnn q ty) (pat_resolve B p)\<close>
+| \<open>patom_resolve B (PParen ps) = map_option PParen (pats_resolve B ps)\<close>
+| \<open>patom_resolve B (PList ps) = map_option PList (pats_resolve B ps)\<close>
+| \<open>patom_resolve B (PRec fs wild) = map_option (\<lambda>fs'. PRec fs' wild) (fields_resolve B fs)\<close>
+| \<open>patom_resolve B a = Some a\<close>
+| \<open>chain_resolve B (PatOp as opr p) =
+     patoms_resolve B as \<bind> (\<lambda>as'. chain_resolve B p \<bind> (\<lambda>(ps, oprs).
+       Some (PatApp as' # ps, opr # oprs)))\<close>
+| \<open>chain_resolve B (PatApp as) = map_option (\<lambda>as'. ([PatApp as'], [])) (patoms_resolve B as)\<close>
+| \<open>chain_resolve B (PatAs p x) = map_option (\<lambda>q. ([PatAs q x], [])) (pat_resolve B p)\<close>
+| \<open>chain_resolve B (PatAnn p ty) = map_option (\<lambda>q. ([PatAnn q ty], [])) (pat_resolve B p)\<close>
+| \<open>pats_resolve B [] = Some []\<close>
+| \<open>pats_resolve B (p # ps) = pat_resolve B p \<bind> (\<lambda>q. map_option ((#) q) (pats_resolve B ps))\<close>
+| \<open>patoms_resolve B [] = Some []\<close>
+| \<open>patoms_resolve B (a # as) =
+     patom_resolve B a \<bind> (\<lambda>b. map_option ((#) b) (patoms_resolve B as))\<close>
+| \<open>fields_resolve B [] = Some []\<close>
+| \<open>fields_resolve B ((x, p) # fs) =
+     pat_resolve B p \<bind> (\<lambda>q. map_option ((#) (x, q)) (fields_resolve B fs))\<close>
+
+lemmas pat_resolve_induct =
+  pat_resolve_patom_resolve_chain_resolve_pats_resolve_patoms_resolve_fields_resolve.induct[
+    named_cases pat_resolve]
+
+subsection \<open>Patterns\<close>
+
+text \<open>Pattern typing \<open>wtp B p \<tau> \<Gamma>\<close>: \<open>p\<close> matches scrutinees of type \<open>\<tau>\<close> and
+  binds \<open>\<Gamma>\<close>, in the order the elaborator's \<open>elab_pat\<close> produces binders. A
+  single-segment name that is not a constructor binds; a constructor
+  pattern is saturated; an operator pattern is typed as its resolution. An
+  unsuffixed literal is an \<open>int\<close>, a suffixed one has its suffix's type.\<close>
+
+definition is_con :: \<open>tenv \<Rightarrow> name \<Rightarrow> bool\<close> where
+  \<open>is_con B x = (case tlookup B [x] of Some (TEcon _ _) \<Rightarrow> True | _ \<Rightarrow> False)\<close>
+
+fun con_ty :: \<open>nat \<Rightarrow> kty \<Rightarrow> (kty list \<times> kty) option\<close> where
+  \<open>con_ty 0 \<tau> = Some ([], \<tau>)\<close>
+| \<open>con_ty (Suc n) (TFn \<tau>\<^sub>1 _ \<tau>\<^sub>2) = con_ty n \<tau>\<^sub>2 \<bind> (\<lambda>(ts, t). Some (\<tau>\<^sub>1 # ts, t))\<close>
+| \<open>con_ty (Suc n) _ = None\<close>
+
+lemmas con_ty_induct = con_ty.induct[named_cases con_ty]
+
+fun fn_pat :: \<open>mpat list \<Rightarrow> mpat\<close> where
+  \<open>fn_pat [p] = p\<close>
+| \<open>fn_pat ps = PatApp [PParen ps]\<close>
+
+fun fn_ty :: \<open>kty list \<Rightarrow> kty\<close> where
+  \<open>fn_ty [\<tau>] = \<tau>\<close>
+| \<open>fn_ty \<tau>s = tuple \<tau>s\<close>
+
+inductive wtp :: \<open>tenv \<Rightarrow> mpat \<Rightarrow> kty \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
+  wtpa :: \<open>tenv \<Rightarrow> mpatom \<Rightarrow> kty \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
+  wtpas :: \<open>tenv \<Rightarrow> mpatom list \<Rightarrow> kty list \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
+  wtps :: \<open>tenv \<Rightarrow> mpat list \<Rightarrow> kty list \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close>
+where
+  P_atom: \<open>wtpa B a \<tau> \<Gamma> \<Longrightarrow> wtp B (PatApp [a]) \<tau> \<Gamma>\<close>
+| P_con:  \<open>tlookup B (path_nms p) = Some (TEcon \<sigma> n) \<Longrightarrow> n = length as \<Longrightarrow> as \<noteq> [] \<Longrightarrow>
+           \<sigma> \<succeq> \<tau>\<^sub>c \<Longrightarrow> con_ty n \<tau>\<^sub>c = Some (\<tau>s, \<tau>) \<Longrightarrow> wtpas B as \<tau>s' \<Gamma> \<Longrightarrow> \<tau>s' [\<simeq>] \<tau>s \<Longrightarrow>
+           wtp B (PatApp (PQid p # as)) \<tau> \<Gamma>\<close>
+| P_as:   \<open>wtp B p \<tau> \<Gamma> \<Longrightarrow> nm_ok (n_txt x) \<Longrightarrow> wtp B (PatAs p x) \<tau> ((n_txt x, \<tau>) # \<Gamma>)\<close>
+| P_ann:  \<open>wtp B p \<tau> \<Gamma> \<Longrightarrow> ty_stat B True ([], []) n ty = Some (\<tau>\<^sub>a, ve, n') \<Longrightarrow>
+           close_sch (set [n ..< n']) (set [n ..< n']) \<tau>\<^sub>a \<succeq> \<tau>' \<Longrightarrow> \<tau>' \<simeq> \<tau> \<Longrightarrow>
+           wtp B (PatAnn p ty) \<tau> \<Gamma>\<close>
+| P_op:   \<open>pat_resolve B (PatOp as opr p) = Some q \<Longrightarrow> wtp B q \<tau> \<Gamma> \<Longrightarrow>
+           wtp B (PatOp as opr p) \<tau> \<Gamma>\<close>
+| PA_wild: \<open>wtpa B (PWild x) \<tau> []\<close>
+| PA_var: \<open>\<not> is_con B (n_txt x) \<Longrightarrow> nm_ok (n_txt x) \<Longrightarrow>
+           wtpa B (PQid (MkPath [x])) \<tau> [(n_txt x, \<tau>)]\<close>
+| PA_con: \<open>tlookup B (path_nms p) = Some (TEcon \<sigma> 0) \<Longrightarrow> \<sigma> \<succeq> \<tau>\<^sub>c \<Longrightarrow> \<tau>\<^sub>c \<simeq> \<tau> \<Longrightarrow>
+           wtpa B (PQid p) \<tau> []\<close>
+| PA_num: \<open>wtpa B (PNum l v None) (TC int_ty []) []\<close>
+| PA_numsfx: \<open>sfx_ok k v \<Longrightarrow> wtpa B (PNum l v (Some k)) (TC (sfx_ty k) []) []\<close>
+| PA_str: \<open>wtpa B (PStr l cs) (TC string_ty []) []\<close>
+| PA_chr: \<open>wtpa B (PChar l c) (TC char_ty []) []\<close>
+| PA_par: \<open>wtp B p \<tau> \<Gamma> \<Longrightarrow> wtpa B (PParen [p]) \<tau> \<Gamma>\<close>
+| PA_tup: \<open>length ps \<noteq> 1 \<Longrightarrow> wtps B ps \<tau>s \<Gamma> \<Longrightarrow> wtpa B (PParen ps) (tuple \<tau>s) \<Gamma>\<close>
+| PA_list: \<open>wtps B ps \<tau>s \<Gamma> \<Longrightarrow> \<forall>\<tau>' \<in> set \<tau>s. \<tau>' \<simeq> \<tau> \<Longrightarrow>
+           wtpa B (PList ps) (TC list_ty [\<tau>]) \<Gamma>\<close>
+| PAs_nil: \<open>wtpas B [] [] []\<close>
+| PAs_cons: \<open>wtpa B a \<tau> \<Gamma>\<^sub>1 \<Longrightarrow> wtpas B as \<tau>s \<Gamma>\<^sub>2 \<Longrightarrow> wtpas B (a # as) (\<tau> # \<tau>s) (\<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2)\<close>
+| Ps_nil: \<open>wtps B [] [] []\<close>
+| Ps_cons: \<open>wtp B p \<tau> \<Gamma>\<^sub>1 \<Longrightarrow> wtps B ps \<tau>s \<Gamma>\<^sub>2 \<Longrightarrow> wtps B (p # ps) (\<tau> # \<tau>s) (\<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2)\<close>
+
+subsection \<open>Exhaustiveness and syntactic values\<close>
+
+text \<open>Shallow exhaustiveness: an irrefutable clause, or every constructor
+  of the scrutinee's stamped type covered by a clause whose sub-patterns
+  are irrefutable. The constructors are those the type name lists; a
+  clause covers one when its head resolves to a constructor of that stamp
+  under the constructor's declared name.\<close>
+
+fun irrefutable :: \<open>tenv \<Rightarrow> mpat \<Rightarrow> bool\<close> and
+  irrefutable_atom :: \<open>tenv \<Rightarrow> mpatom \<Rightarrow> bool\<close>
+where
+  \<open>irrefutable B (PatApp [a]) = irrefutable_atom B a\<close>
+| \<open>irrefutable B (PatApp _) = False\<close>
+| \<open>irrefutable B (PatAs p x) = irrefutable B p\<close>
+| \<open>irrefutable B (PatAnn p _) = irrefutable B p\<close>
+| \<open>irrefutable B (PatOp _ _ _) = False\<close>
+| \<open>irrefutable_atom B (PWild _) = True\<close>
+| \<open>irrefutable_atom B (PQid (MkPath [x])) = (\<not> is_con B (n_txt x))\<close>
+| \<open>irrefutable_atom B (PQid _) = False\<close>
+| \<open>irrefutable_atom B (PParen ps) = list_all (irrefutable B) ps\<close>
+| \<open>irrefutable_atom B _ = False\<close>
+
+definition con_stamp :: \<open>scheme \<Rightarrow> nat \<Rightarrow> nat option\<close> where
+  \<open>con_stamp \<sigma> n =
+     (case con_result n (sch_body \<sigma>) of Some (TC c _) \<Rightarrow> Some (stamp c) | _ \<Rightarrow> None)\<close>
+
+fun con_head :: \<open>tenv \<Rightarrow> mpat \<Rightarrow> (mpath \<times> mpatom list) option\<close> where
+  \<open>con_head B (PatApp (PQid p # as)) = Some (p, as)\<close>
+| \<open>con_head B (PatAs p x) = con_head B p\<close>
+| \<open>con_head B (PatAnn p _) = con_head B p\<close>
+| \<open>con_head B (PatOp as opr p) =
+     (case pat_resolve B (PatOp as opr p) of
+        Some (PatApp (PQid q # as')) \<Rightarrow> Some (q, as') | _ \<Rightarrow> None)\<close>
+| \<open>con_head B _ = None\<close>
+
+definition con_clause :: \<open>tenv \<Rightarrow> nat \<Rightarrow> name \<Rightarrow> nat \<Rightarrow> mpat \<Rightarrow> bool\<close> where
+  \<open>con_clause B k C n p \<longleftrightarrow>
+     (case con_head B p of
+        Some (q, as) \<Rightarrow>
+          last (path_nms q) = C \<and> length as = n \<and> list_all (irrefutable_atom B) as \<and>
+          (case tlookup B (path_nms q) of
+             Some (TEcon \<sigma> n') \<Rightarrow> n' = n \<and> con_stamp \<sigma> n = Some k
+           | _ \<Rightarrow> False)
+      | None \<Rightarrow> False)\<close>
+
+definition covers :: \<open>tenv \<Rightarrow> kty \<Rightarrow> mpat list \<Rightarrow> bool\<close> where
+  \<open>covers B \<tau> ps \<longleftrightarrow>
+     list_ex (irrefutable B) ps \<or>
+     (case \<tau> of
+        TC (k, x, cs) args \<Rightarrow>
+          cs \<noteq> [] \<and> list_all (\<lambda>(C, n). list_ex (con_clause B k C n) ps) cs
+      | _ \<Rightarrow> False)\<close>
+
+text \<open>The value restriction (non-expansive expressions,
+  \<^cite>\<open>\<open>Sect. 4.7--4.8\<close> in milner1997\<close>): a local binding generalises only a
+  syntactic value.\<close>
+
+fun val_exp :: \<open>tenv \<Rightarrow> expr \<Rightarrow> bool\<close> and
+  val_atom :: \<open>tenv \<Rightarrow> matom \<Rightarrow> bool\<close>
+where
+  \<open>val_exp B (EFn _ _) = True\<close>
+| \<open>val_exp B (EFnMod _ _) = True\<close>
+| \<open>val_exp B (EHandlerN _) = True\<close>
+| \<open>val_exp B (ESpine [a]) = val_atom B a\<close>
+| \<open>val_exp B (ESpine (APath p # as)) =
+     ((case tlookup B (path_nms p) of Some (TEcon _ n) \<Rightarrow> n = length as | _ \<Rightarrow> False) \<and>
+      list_all (val_atom B) as)\<close>
+| \<open>val_exp B (EAnn e _) = val_exp B e\<close>
+| \<open>val_exp B _ = False\<close>
+| \<open>val_atom B (APath p) =
+     (case tlookup B (path_nms p) of
+        Some (TEval _) \<Rightarrow> True | Some (TEcon _ _) \<Rightarrow> True | Some (TEffi _ _) \<Rightarrow> True | _ \<Rightarrow> False)\<close>
+| \<open>val_atom B (ANum _ _ _) = True\<close>
+| \<open>val_atom B (AStr _ _) = True\<close>
+| \<open>val_atom B (AChar _ _) = True\<close>
+| \<open>val_atom B (AParen es) = list_all (val_exp B) es\<close>
+| \<open>val_atom B (AList es) = list_all (val_exp B) es\<close>
+| \<open>val_atom B _ = False\<close>
+
+lemmas val_exp_induct = val_exp_val_atom.induct[named_cases val_exp]
+
 subsection \<open>Expressions\<close>
 
 text \<open>The judgement \<open>B,\<epsilon> \<turnstile> e \<leadsto> e' : \<tau>\<close>: under basis \<open>B\<close> and ambient row \<open>\<epsilon>\<close>
@@ -973,7 +1030,9 @@ text \<open>The judgement \<open>B,\<epsilon> \<turnstile> e \<leadsto> e' : \<t
   row outside the handler; tail-resumptive clauses, \<^cite>\<open>\<open>Sect. 2.6\<close> in xie2021\<close>).
   A named handler (\<open>wt_cls\<close> with the flag set) installs one frame for all
   of its clauses and pops it before a clause body runs, so its clause
-  bodies and resumptions live at the ambient row. \<open>mask\<close> hides the innermost
+  bodies and resumptions live at the ambient row. A \<open>finally\<close> clause runs when
+  its handler exits, outside the handled computation: its body is typed at the
+  handler's ambient row, for its effect only. \<open>mask\<close> hides the innermost
   handler of its label \<^cite>\<open>\<open>Sect. 5\<close> in xie2020\<close>.
 
   A local function group \<open>let f bs ps = e | \<dots>\<close> is its lowering
@@ -1094,7 +1153,10 @@ where
 | H_atom:  \<open>wt_atom B \<epsilon> a a' \<tau> \<Longrightarrow> (\<forall>p. a \<noteq> APath p) \<Longrightarrow> wt_head B \<epsilon> a a' \<tau>\<close>
 
 | A_path:  \<open>wt_head B \<epsilon> (APath p) (APath p) \<tau> \<Longrightarrow> wt_atom B \<epsilon> (APath p) (APath p) \<tau>\<close>
-| A_num:   \<open>0 \<le> v \<Longrightarrow> wt_atom B \<epsilon> (ANum l v None) (ANum l v None) (TC nat_ty [])\<close>
+| A_num:   \<open>wt_atom B \<epsilon> (ANum l v None) (ANum l v None) (TC int_ty [])\<close>
+| A_numsfx: \<open>sfx_ok k v \<Longrightarrow>
+            wt_atom B \<epsilon> (ANum l v (Some k)) (ANum l v (Some k)) (TC (sfx_ty k) [])\<close>
+| A_float: \<open>wt_atom B \<epsilon> (AFloat x) (AFloat x) (TC f64_ty [])\<close>
 | A_str:   \<open>wt_atom B \<epsilon> (AStr l cs) (AStr l cs) (TC string_ty [])\<close>
 | A_chr:   \<open>wt_atom B \<epsilon> (AChar l c) (AChar l c) (TC char_ty [])\<close>
 | A_par:   \<open>B,\<epsilon> \<turnstile> e \<leadsto> e' : \<tau> \<Longrightarrow> wt_atom B \<epsilon> (AParen [e]) (AParen [e']) \<tau>\<close>
@@ -1157,6 +1219,8 @@ where
             (binders \<Gamma> @ B),\<epsilon>' \<turnstile> b \<leadsto> b' : \<tau>' \<Longrightarrow>
             wt_cls B \<epsilon> nm \<tau>' targs cls cls' \<tau> \<Longrightarrow> nm \<longrightarrow> hlabels B cls = [] \<Longrightarrow>
             wt_cls B \<epsilon> nm \<tau>\<^sub>0 targs (HRet p b # cls) (HRet p b' # cls') \<tau>\<close>
+| Cl_fin:  \<open>B,\<epsilon> \<turnstile> b \<leadsto> b' : \<tau>\<^sub>f \<Longrightarrow> \<tau>\<^sub>f \<simeq> unit_ty \<Longrightarrow> wt_cls B \<epsilon> nm \<tau>\<^sub>0 targs cls cls' \<tau> \<Longrightarrow>
+            wt_cls B \<epsilon> nm \<tau>\<^sub>0 targs (HFin b # cls) (HFin b' # cls') \<tau>\<close>
 
 | Al_nil:  \<open>wt_alts B \<epsilon> [] [] \<tau>\<close>
 | Al_cons: \<open>wt_exps B \<epsilon> gs gs' \<tau>s \<Longrightarrow> \<forall>\<tau>\<^sub>g \<in> set \<tau>s. \<tau>\<^sub>g \<simeq> TC bool_ty [] \<Longrightarrow>
@@ -1587,10 +1651,12 @@ definition tbase :: tenv where
      TEcon (Sch (TFn (TB 0) (RB 1) (TFn (TC list_ty [TB 0]) (RB 2) (TC list_ty [TB 0])))) 2),
     (str ''bool'', TEtyp (TyAbs bool_ty 0)),
     (str ''list'', TEtyp (TyAbs list_ty 1)),
-    (str ''nat'', TEtyp (TyAbs nat_ty 0)),
+    (str ''int'', TEtyp (TyAbs int_ty 0)),
+    (str ''f64'', TEtyp (TyAbs f64_ty 0)),
     (str ''string'', TEtyp (TyAbs string_ty 0)),
     (str ''char'', TEtyp (TyAbs char_ty 0))
-  ]\<close>
+  ] @ map (\<lambda>k. (fst (snd (sfx_ty k)), TEtyp (TyAbs (sfx_ty k) 0)))
+        [I8, I16, I32, I64, U8, U16, U32, U64]\<close>
 
 text \<open>A program is a whole unit: it must bind \<open>main\<close> at the top level; the
   output is the explicit program. This is the \<^text>\<open>has_type\<close> of the \<^text>\<open>type_system\<close>

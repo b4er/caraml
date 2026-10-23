@@ -88,9 +88,12 @@ datatype kty =
 
 text \<open>The built-in type names: literal types and tuples at stamp \<open>0\<close>, the
   prelude's \<open>bool\<close> and \<open>list\<close> at \<open>1\<close> and \<open>2\<close>; user declarations count from
-  \<^text>\<open>first_stamp\<close>.\<close>
+  \<^text>\<open>first_stamp\<close>. An unsuffixed integer literal is an unbounded \<open>int\<close>; a
+  suffixed one names its fixed-width type, \<^text>\<open>sfx_ty\<close>, and must lie in its
+  range, \<^text>\<open>sfx_ok\<close>.\<close>
 
-definition \<open>nat_ty = (0, str ''nat'', [])\<close>
+definition \<open>int_ty = (0, str ''int'', [])\<close>
+definition \<open>f64_ty = (0, str ''f64'', [])\<close>
 definition \<open>string_ty = (0, str ''string'', [])\<close>
 definition \<open>char_ty = (0, str ''char'', [])\<close>
 definition \<open>tuple_ty n = (0, tuple_con n, [(tuple_con n, n)])\<close>
@@ -98,6 +101,29 @@ definition \<open>bool_ty = (1, str ''bool'', [(str ''True'', 0), (str ''False''
 definition \<open>list_ty = (2, str ''list'', [(str ''Nil'', 0), (str ''Cons'', 2)])\<close>
 
 definition \<open>first_stamp = 3\<close>
+
+fun sfx_ty :: \<open>suffix \<Rightarrow> tyname\<close> where
+  \<open>sfx_ty I8 = (0, str ''i8'', [])\<close>
+| \<open>sfx_ty I16 = (0, str ''i16'', [])\<close>
+| \<open>sfx_ty I32 = (0, str ''i32'', [])\<close>
+| \<open>sfx_ty I64 = (0, str ''i64'', [])\<close>
+| \<open>sfx_ty U8 = (0, str ''u8'', [])\<close>
+| \<open>sfx_ty U16 = (0, str ''u16'', [])\<close>
+| \<open>sfx_ty U32 = (0, str ''u32'', [])\<close>
+| \<open>sfx_ty U64 = (0, str ''u64'', [])\<close>
+
+fun sfx_bits :: \<open>suffix \<Rightarrow> nat\<close> where
+  \<open>sfx_bits I8 = 8\<close> | \<open>sfx_bits I16 = 16\<close> | \<open>sfx_bits I32 = 32\<close> | \<open>sfx_bits I64 = 64\<close>
+| \<open>sfx_bits U8 = 8\<close> | \<open>sfx_bits U16 = 16\<close> | \<open>sfx_bits U32 = 32\<close> | \<open>sfx_bits U64 = 64\<close>
+
+fun sfx_signed :: \<open>suffix \<Rightarrow> bool\<close> where
+  \<open>sfx_signed I8 = True\<close> | \<open>sfx_signed I16 = True\<close> | \<open>sfx_signed I32 = True\<close>
+| \<open>sfx_signed I64 = True\<close> | \<open>sfx_signed _ = False\<close>
+
+definition sfx_ok :: \<open>suffix \<Rightarrow> int \<Rightarrow> bool\<close> where
+  \<open>sfx_ok k v \<longleftrightarrow>
+     (if sfx_signed k then - (2 ^ (sfx_bits k - 1)) \<le> v \<and> v < 2 ^ (sfx_bits k - 1)
+      else 0 \<le> v \<and> v < 2 ^ sfx_bits k)\<close>
 
 text \<open>An effect, identified by its label prefix, as a type constant, so that
   the effect of a handler name or an action is inferred by unification (the
