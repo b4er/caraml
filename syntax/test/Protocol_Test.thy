@@ -1,5 +1,5 @@
 theory Protocol_Test
-  imports Protocol
+  imports CaraML_Syntax.Protocol
 begin
 
 section \<open>Example: a file effect\<close>

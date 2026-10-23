@@ -23,6 +23,7 @@ defaults:
 
 jobs:
   lint:
+    name: Lint
     runs-on: ubuntu-24.04
     env:
       ACTIONLINT: 1.7.12
@@ -30,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: install linters
+      - name: Install linters
         run: |
           bin="$HOME/.local/bin"
           mkdir -p "$bin" "$HOME/.local/hlint"
@@ -40,17 +41,18 @@ jobs:
             | tar -xz -C "$HOME/.local/hlint" --strip-components=1
           { echo "$bin"; echo "$HOME/.local/hlint"; } >> "$GITHUB_PATH"
 
-      - name: run checks
+      - name: Run checks
         run: .githooks/pre-commit
 
   isabelle:
+    name: Isabelle
     runs-on: ubuntu-24.04
     timeout-minutes: 340
     container:
       image: makarius/isabelle:Isabelle2025-2
       options: --user root
     steps:
-      - name: install git
+      - name: Install git
         run: |
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends ca-certificates git > /dev/null
@@ -67,13 +69,14 @@ jobs:
           key: ${{env.AFP}}
 
       - if: steps.afp.outputs.cache-hit != 'true'
-        name: download AFP
+        name: Download AFP
         run: |
           mkdir afp
           curl -sSfL "https://www.isa-afp.org/release/$AFP.tar.gz" \
             | tar -xz -C afp --strip-components=1 "$AFP/thys"
 
-      - id: user
+      - name: Get Isabelle user
+        id: user
         run: echo "home=$(isabelle getenv -b ISABELLE_HOME_USER)" >> "$GITHUB_OUTPUT"
 
       - id: heaps
@@ -83,12 +86,12 @@ jobs:
           key: heaps-${{env.AFP}}-${{hashFiles('**/ROOT', '**/ROOTS', '**/*.thy', '**/*.ML', 'isabelle-site/**', '!afp/**')}}
           restore-keys: heaps-${{env.AFP}}-
 
-      - name: register isabelle-site
+      - name: Register isabelle-site
         run: |
           isabelle components -u "$PWD/isabelle-site"
           isabelle scala_build
 
-      - name: build sessions
+      - name: Build sessions
         run: |
           isabelle build -b -e -v -j 2 -d . -d afp/thys \
             CaraML_Export CaraML_Web \
@@ -100,7 +103,7 @@ jobs:
           path: ${{steps.user.outputs.home}}/heaps
           key: ${{steps.heaps.outputs.cache-primary-key}}
 
-      - name: generate site
+      - name: Generate site
         run: isabelle site -n -c -d . -d afp/thys -O dist/site CaraML_Web
 
       - uses: actions/upload-artifact@v7
@@ -114,6 +117,7 @@ jobs:
           path: dist/site
 
   sdist:
+    name: Source distribution
     needs: isabelle
     runs-on: ubuntu-24.04
     steps:
@@ -129,7 +133,8 @@ jobs:
           ghc-version: ${{env.GHC}}
           cabal-version: ${{env.CABAL}}
 
-      - working-directory: haskell
+      - name: Package sources
+        working-directory: haskell
         run: cabal sdist -o ../dist
 
       - uses: actions/upload-artifact@v7
@@ -138,10 +143,9 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
-  # builds the sdist, not the checkout, so a file missing from the .cabal fails here
   haskell:
     needs: sdist
-    name: haskell (${{matrix.target}})
+    name: Haskell (${{matrix.target}})
     runs-on: ${{matrix.runner}}
     strategy:
       fail-fast: false
@@ -162,7 +166,7 @@ jobs:
           name: sdist
 
       - id: unpack
-        name: unpack
+        name: Unpack sources
         run: |
           sdist=$(echo caraml-*.tar.gz)
           version=${sdist#caraml-}; version=${version%.tar.gz}
@@ -177,7 +181,8 @@ jobs:
           ghc-version: ${{env.GHC}}
           cabal-version: ${{env.CABAL}}
 
-      - working-directory: pkg
+      - name: Cabal dry-run
+        working-directory: pkg
         run: |
           cabal update
           cabal build all --dry-run
@@ -189,7 +194,8 @@ jobs:
           key: cabal-${{matrix.target}}-${{env.GHC}}-${{hashFiles('pkg/dist-newstyle/cache/plan.json')}}
           restore-keys: cabal-${{matrix.target}}-${{env.GHC}}-
 
-      - working-directory: pkg
+      - name: Cabal build dependencies
+        working-directory: pkg
         run: cabal build all --only-dependencies
 
       - if: steps.store.outputs.cache-hit != 'true'
@@ -198,7 +204,8 @@ jobs:
           path: ${{steps.hs.outputs.cabal-store}}
           key: ${{steps.store.outputs.cache-primary-key}}
 
-      - working-directory: pkg
+      - name: Cabal build and package CaraML
+        working-directory: pkg
         run: |
           cabal build all
           mkdir -p ../out
@@ -213,6 +220,8 @@ jobs:
           if-no-files-found: error
 
   editors:
+    name: Editors
+    needs: lint
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -226,7 +235,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: package vsix
+      - name: Package vsix
         working-directory: editors/vscode
         run: |
           npm ci
@@ -240,6 +249,7 @@ jobs:
 
       # a release is the first push to main that carries a version without a tag
       - id: versions
+        name: Check editor versions
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           new() { git ls-remote --exit-code --tags origin "refs/tags/$1" > /dev/null && echo false || echo true; }
@@ -251,7 +261,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - if: steps.versions.outputs.vscode_new == 'true'
-        name: publish vsix
+        name: Publish vsix
         env:
           VSCE_PAT: ${{secrets.VSCE_PAT}}
           OVSX_PAT: ${{secrets.OVSX_PAT}}
@@ -263,12 +273,13 @@ jobs:
 
       # MELPA builds from the repository; the tag is the stable release
       - if: steps.versions.outputs.emacs_new == 'true'
-        name: tag emacs
+        name: Tag emacs
         run: |
           git tag "emacs-v${{steps.versions.outputs.emacs}}"
           git push origin "emacs-v${{steps.versions.outputs.emacs}}"
 
   release:
+    name: Release
     needs: [sdist, haskell]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-24.04
@@ -278,6 +289,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - id: version
+        name: Check release version
         run: |
           v=$(sed -n 's/^version: *//p' haskell/caraml.cabal)
           echo "tag=v$v" >> "$GITHUB_OUTPUT"
@@ -295,11 +307,13 @@ jobs:
           pattern: "{sdist,caraml-*}"
 
       - if: steps.version.outputs.new == 'true'
+        name: Create release
         env:
           GH_TOKEN: ${{github.token}}
         run: gh release create "${{steps.version.outputs.tag}}" dist/* --target "$GITHUB_SHA" --generate-notes
 
   pages:
+    name: Pages
     needs: isabelle
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-24.04
