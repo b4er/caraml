@@ -46,16 +46,21 @@ jobs:
 
   isabelle:
     name: Isabelle
+    needs: lint
     runs-on: ubuntu-24.04
     timeout-minutes: 340
     container:
       image: makarius/isabelle:Isabelle2025-2
       options: --user root
+    env:
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
     steps:
-      - name: Install git
+      - name: Setup toolchain
         run: |
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends ca-certificates git > /dev/null
+
           echo /home/isabelle/Isabelle/bin >> "$GITHUB_PATH"
 
       - uses: actions/checkout@v7
@@ -94,10 +99,10 @@ jobs:
       - name: Build sessions
         run: |
           isabelle build -b -e -v -j 2 -d . -d afp/thys \
-            CaraML_Export CaraML_Web \
+            CaraML_Export CaraML_Web CaraML_Spec \
             CaraML_Prelude_Test CaraML_Syntax_Test CaraML_Parser_Test
 
-      - if: always() && steps.heaps.outputs.cache-hit != 'true'
+      - if: ${{!cancelled() && steps.heaps.outputs.cache-hit != 'true'}}
         uses: actions/cache/save@v6
         with:
           path: ${{steps.user.outputs.home}}/heaps
@@ -113,11 +118,12 @@ jobs:
           if-no-files-found: error
 
       - uses: actions/upload-pages-artifact@v5
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         with:
           path: dist/site
 
   sdist:
-    name: Source distribution
+    name: Source dist
     needs: isabelle
     runs-on: ubuntu-24.04
     steps:
@@ -144,8 +150,8 @@ jobs:
           if-no-files-found: error
 
   haskell:
+    name: Build compiler (${{matrix.target}})
     needs: sdist
-    name: Haskell (${{matrix.target}})
     runs-on: ${{matrix.runner}}
     strategy:
       fail-fast: false
@@ -220,7 +226,7 @@ jobs:
           if-no-files-found: error
 
   editors:
-    name: Editors
+    name: Editor plugins
     needs: lint
     runs-on: ubuntu-24.04
     permissions:
@@ -285,7 +291,7 @@ jobs:
           git tag "$VERSION" && git push origin "$VERSION"
 
   release:
-    name: Release
+    name: Release compiler
     needs: [sdist, haskell]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-24.04
@@ -297,13 +303,9 @@ jobs:
       - name: Check release version
         id: version
         run: |
+          new() { git ls-remote --exit-code --tags origin "refs/tags/$1" > /dev/null && echo false || echo true; }
           v=$(sed -n 's/^version: *//p' haskell/caraml.cabal)
-          echo "tag=v$v" >> "$GITHUB_OUTPUT"
-          if git ls-remote --exit-code --tags origin "refs/tags/v$v" > /dev/null; then
-            echo "new=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "new=true" >> "$GITHUB_OUTPUT"
-          fi
+          { echo "tag=v$v"; echo "new=$(new "v$v")"; } >> "$GITHUB_OUTPUT"
 
       - if: steps.version.outputs.new == 'true'
         uses: actions/download-artifact@v8
@@ -319,7 +321,7 @@ jobs:
         run: gh release create "${{steps.version.outputs.tag}}" dist/* --target "$GITHUB_SHA" --generate-notes
 
   pages:
-    name: Pages
+    name: GitHub Pages
     needs: isabelle
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-24.04
