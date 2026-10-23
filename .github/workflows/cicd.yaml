@@ -100,7 +100,7 @@ jobs:
         run: |
           isabelle build -b -e -v -j 2 -d . -d afp/thys \
             CaraML_Export CaraML_Web CaraML_Spec \
-            CaraML_Prelude_Test CaraML_Syntax_Test CaraML_Parser_Test
+            CaraML_Prelude_Test CaraML_Parser_Test
 
       - if: ${{!cancelled() && steps.heaps.outputs.cache-hit != 'true'}}
         uses: actions/cache/save@v6

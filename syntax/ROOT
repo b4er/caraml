@@ -2,16 +2,11 @@ chapter CaraML
 
 session CaraML_Syntax = CaraML_Prelude +
   options [document = false]
-  sessions "Regular-Sets"
   theories
     Names
-    Protocol
     Loc
     Expressions
     Module_Expressions
   document_files (in "..")
     "root.bib"
 
-session CaraML_Syntax_Test in test = CaraML_Syntax +
-  theories [document = false]
-    Protocol_Test

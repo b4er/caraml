@@ -1,5 +1,5 @@
 theory Literals
-  imports UnicodeLexer "HOL-Library.Sublist"
+  imports UnicodeLexer CaraML_Syntax.Names "HOL-Library.Sublist"
 begin
 
 section \<open>Literals: numerals, strings and characters\<close>
@@ -62,8 +62,6 @@ lemma scan_digits_split: \<open>scan_digits D s = Some (ds, r) \<Longrightarrow>
 (*>*)
 
 subsection \<open>Numerals\<close>
-
-datatype suffix = I8 | I16 | I32 | I64 | U8 | U16 | U32 | U64
 
 definition suffix_table :: \<open>(ustring \<times> suffix) list\<close> where
   \<open>suffix_table =

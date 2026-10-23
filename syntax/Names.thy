@@ -21,6 +21,11 @@ definition tuple_con :: \<open>nat \<Rightarrow> name\<close> where
 definition mangle :: \<open>name \<Rightarrow> name \<Rightarrow> name\<close> where
   \<open>mangle p x = (if p = [] then x else p @ str ''.'' @ x)\<close>
 
+text \<open>The suffix of an integer literal names its fixed-width type; the lexer reads
+  it, the AST carries it.\<close>
+
+datatype suffix = I8 | I16 | I32 | I64 | U8 | U16 | U32 | U64
+
 text \<open>An operator's fixity lives under a \<open>%fix.\<close> key:\<close>
 
 definition fix_key :: \<open>name \<Rightarrow> name\<close> where
