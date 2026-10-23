@@ -88,7 +88,6 @@ where
 | \<open>subst_imp tab (EFn ps b) = EFn ps (subst_imp tab b)\<close>
 | \<open>subst_imp tab (EFnMod b e) = EFnMod b (subst_imp tab e)\<close>
 | \<open>subst_imp tab (ELet p e b) = ELet p (subst_imp tab e) (subst_imp tab b)\<close>
-| \<open>subst_imp tab (EBind p e b) = EBind p (subst_imp tab e) (subst_imp tab b)\<close>
 | \<open>subst_imp tab (ESeq e\<^sub>1 e\<^sub>2) = ESeq (subst_imp tab e\<^sub>1) (subst_imp tab e\<^sub>2)\<close>
 | \<open>subst_imp tab (EIf c t e) =
      EIf (subst_imp tab c) (subst_imp tab t) (map_option (subst_imp tab) e)\<close>
@@ -97,12 +96,17 @@ where
 | \<open>subst_imp tab (EHandle e cls) = EHandle (subst_imp tab e) (map (subst_imp_cls tab) cls)\<close>
 | \<open>subst_imp tab (EHandler cls) = EHandler (map (subst_imp_cls tab) cls)\<close>
 | \<open>subst_imp tab (EMask l e) = EMask l (subst_imp tab e)\<close>
-| \<open>subst_imp tab (EFnName x e) = EFnName x (subst_imp tab e)\<close>
 | \<open>subst_imp tab (EHandlerN cls) = EHandlerN (map (subst_imp_cls tab) cls)\<close>
-| \<open>subst_imp tab (EHandleN x cls e) = EHandleN x (map (subst_imp_cls tab) cls) (subst_imp tab e)\<close>
+| \<open>subst_imp tab (EWith x h e) = EWith x (subst_imp tab h) (subst_imp tab e)\<close>
+| \<open>subst_imp tab (ELetFun f mbs cls b) =
+     ELetFun f mbs (map (\<lambda>(ps, e). (ps, subst_imp tab e)) cls) (subst_imp tab b)\<close>
+| \<open>subst_imp tab (EGuards alts) =
+     EGuards (map (\<lambda>(gs, e). (map (subst_imp tab) gs, subst_imp tab e)) alts)\<close>
 | \<open>subst_imp tab EErr = EErr\<close>
 | \<open>subst_imp_atom tab (AParen es) = AParen (map (subst_imp tab) es)\<close>
 | \<open>subst_imp_atom tab (AList es) = AList (map (subst_imp tab) es)\<close>
+| \<open>subst_imp_atom tab (ARec fs) = ARec (map (\<lambda>(x, e). (x, subst_imp tab e)) fs)\<close>
+| \<open>subst_imp_atom tab (ADot a x) = ADot (subst_imp_atom tab a) x\<close>
 | \<open>subst_imp_atom tab (AMod p sg) =
      (case path_nms p of
         [x] \<Rightarrow> (case map_of tab x of Some P \<Rightarrow> AMod (MkPath [mk_nm P]) sg | None \<Rightarrow> AMod p sg)
@@ -141,25 +145,11 @@ where
            else None)
       | _ \<Rightarrow> None)\<close>
 | \<open>infer_pat uf B (PatApp _) n = None\<close>
-| \<open>infer_pat uf B (PatAs [a] x) n =
+| \<open>infer_pat uf B (PatAs p x) n =
      (if nm_ok (n_txt x)
-      then infer_patom uf B a n \<bind> (\<lambda>(s, \<tau>, \<Gamma>, n'). Some (s, \<tau>, (n_txt x, \<tau>) # \<Gamma>, n'))
+      then infer_pat uf B p n \<bind> (\<lambda>(s, \<tau>, \<Gamma>, n'). Some (s, \<tau>, (n_txt x, \<tau>) # \<Gamma>, n'))
       else None)\<close>
-| \<open>infer_pat uf B (PatAs (PQid p # as) x) n =
-     (case tlookup B (path_nms p) of
-        Some (TEcon \<sigma> m) \<Rightarrow>
-          (if m = length as \<and> as \<noteq> [] \<and> nm_ok (n_txt x)
-           then (case inst_scheme n \<sigma> of (\<tau>\<^sub>c, n\<^sub>1) \<Rightarrow>
-                  (case con_ty m \<tau>\<^sub>c of
-                     Some (\<tau>s, \<tau>) \<Rightarrow>
-                       infer_patoms uf B as n\<^sub>1 \<bind> (\<lambda>(sp, \<tau>s', \<Gamma>, n\<^sub>2).
-                         unis uf (zip \<tau>s' (map (sapp sp) \<tau>s)) n\<^sub>2 \<bind> (\<lambda>(s\<^sub>1, n\<^sub>3).
-                           Some (s\<^sub>1 \<odot> sp, sapp s\<^sub>1 (sapp sp \<tau>),
-                                 (n_txt x, sapp s\<^sub>1 (sapp sp \<tau>)) # map (apsnd (sapp s\<^sub>1)) \<Gamma>, n\<^sub>3)))
-                   | None \<Rightarrow> None))
-           else None)
-      | _ \<Rightarrow> None)\<close>
-| \<open>infer_pat uf B (PatAs _ _) n = None\<close>
+| \<open>infer_pat uf B (PatOp _ _ _) n = None\<close>
 | \<open>infer_pat uf B (PatAnn p ty) n =
      infer_pat uf B p n \<bind> (\<lambda>(s, \<tau>, \<Gamma>, n\<^sub>1).
        ty_stat (sappe s B) True ([], []) n\<^sub>1 ty \<bind> (\<lambda>(\<tau>\<^sub>a, _, n\<^sub>2).
@@ -175,9 +165,11 @@ where
      (case tlookup B (path_nms p) of
         Some (TEcon \<sigma> 0) \<Rightarrow> (case inst_scheme n \<sigma> of (\<tau>, n\<^sub>1) \<Rightarrow> Some (sid, \<tau>, [], n\<^sub>1))
       | _ \<Rightarrow> None)\<close>
-| \<open>infer_patom uf B (PNum l) n = read_nat (n_txt l) \<bind> (\<lambda>_. Some (sid, TC nat_ty [], [], n))\<close>
-| \<open>infer_patom uf B (PStr l) n = read_string (n_txt l) \<bind> (\<lambda>_. Some (sid, TC string_ty [], [], n))\<close>
-| \<open>infer_patom uf B (PChar l) n = read_char (n_txt l) \<bind> (\<lambda>_. Some (sid, TC char_ty [], [], n))\<close>
+| \<open>infer_patom uf B (PNum l v None) n =
+     (if 0 \<le> v then Some (sid, TC nat_ty [], [], n) else None)\<close>
+| \<open>infer_patom uf B (PNum l v (Some _)) n = None\<close>
+| \<open>infer_patom uf B (PStr l cs) n = Some (sid, TC string_ty [], [], n)\<close>
+| \<open>infer_patom uf B (PChar l c) n = Some (sid, TC char_ty [], [], n)\<close>
 | \<open>infer_patom uf B (PParen [p]) n = infer_pat uf B p n\<close>
 | \<open>infer_patom uf B (PParen ps) n =
      infer_pats uf B ps n \<bind> (\<lambda>(s, \<tau>s, \<Gamma>, n'). Some (s, tuple \<tau>s, \<Gamma>, n'))\<close>
@@ -185,6 +177,7 @@ where
      infer_pats uf B ps n \<bind> (\<lambda>(s, \<tau>s, \<Gamma>, n\<^sub>1).
        unis uf (map (\<lambda>\<tau>. (\<tau>, TV n\<^sub>1)) \<tau>s) (Suc n\<^sub>1) \<bind> (\<lambda>(s\<^sub>2, n\<^sub>2).
          Some (s\<^sub>2 \<odot> s, TC list_ty [sapp s\<^sub>2 (TV n\<^sub>1)], map (apsnd (sapp s\<^sub>2)) \<Gamma>, n\<^sub>2)))\<close>
+| \<open>infer_patom uf B (PRec _ _) n = None\<close>
 | \<open>infer_patoms uf B [] n = Some (sid, [], [], n)\<close>
 | \<open>infer_patoms uf B (a # as) n =
      infer_patom uf B a n \<bind> (\<lambda>(s\<^sub>1, \<tau>, \<Gamma>\<^sub>1, n\<^sub>1).
@@ -255,7 +248,7 @@ where
           (case (tlookup B [x], tlookup B [op]) of
              (Some (TEval \<sigma>), Some (TEop lop ps \<tau>\<^sub>1 \<tau>\<^sub>2)) \<Rightarrow>
                (case eff_of_op B lop of
-                  Some (l, ls, ar, pr) \<Rightarrow>
+                  Some (l, ls, ar) \<Rightarrow>
                     (case inst_scheme n \<sigma> of (\<tau>\<^sub>x, n\<^sub>1) \<Rightarrow>
                       (let args = map TV [n\<^sub>1 ..< n\<^sub>1 + length ps]; n\<^sub>2 = n\<^sub>1 + length ps
                        in uni uf \<tau>\<^sub>x (TEv (eff_ty l args) (TV n\<^sub>2) (tuple args)) (Suc n\<^sub>2)
@@ -269,16 +262,14 @@ where
            | _ \<Rightarrow> None)
       | _ \<Rightarrow> None)\<close>
 
-text \<open>Applying a function to one more argument (rules \<open>G_app\<close> and \<open>G_act\<close>):
-  when both the parameter and the argument are actions, the parameter's
-  scope binder, when disjoint from the basis's abstract types, is renamed to the
-  argument's before unification, and an action parameter of an effect with a
-  protocol demands a literal action that conforms to it. The protocol check
-  inspects the source atom.\<close>
+text \<open>Applying a function to one more argument (rule \<open>G_app\<close>, and the
+  installation of a named handler, rule \<open>W_with\<close>): when both the parameter and
+  the argument are actions, the parameter's scope binder, when disjoint from the
+  basis's abstract types, is renamed to the argument's before unification.\<close>
 
-definition app_arg :: \<open>nat \<Rightarrow> tenv \<Rightarrow> krow \<Rightarrow> pend \<Rightarrow> kty \<Rightarrow> matom \<Rightarrow> kty \<Rightarrow> nat
+definition app_arg :: \<open>nat \<Rightarrow> tenv \<Rightarrow> krow \<Rightarrow> pend \<Rightarrow> kty \<Rightarrow> kty \<Rightarrow> nat
                        \<Rightarrow> (ksub \<times> kty \<times> pend \<times> nat) option\<close> where
-  \<open>app_arg uf B A pd \<tau>\<^sub>h a \<tau>\<^sub>a n =
+  \<open>app_arg uf B A pd \<tau>\<^sub>h \<tau>\<^sub>a n =
      (let \<tau>\<^sub>h' = (case (\<tau>\<^sub>h, \<tau>\<^sub>a) of
                    (TFn (TAct lt K \<epsilon>\<^sub>0 \<tau>\<^sub>0) \<epsilon>\<^sub>l \<tau>\<^sub>2, TAct lt' K' \<epsilon>\<^sub>0' \<tau>\<^sub>0') \<Rightarrow>
                      (if length K = length K' \<and> set K \<inter> ktv_env B = {} \<and> set K \<inter> ktv \<tau>\<^sub>0 = {}
@@ -286,19 +277,65 @@ definition app_arg :: \<open>nat \<Rightarrow> tenv \<Rightarrow> krow \<Rightar
                       else \<tau>\<^sub>h)
                  | _ \<Rightarrow> \<tau>\<^sub>h)
       in uni uf \<tau>\<^sub>h' (TFn \<tau>\<^sub>a A (TV n)) (Suc n) \<bind> (\<lambda>(s, n').
-           (case sapp s \<tau>\<^sub>h' of
-              TFn (TAct lt K \<epsilon>\<^sub>0 \<tau>\<^sub>0) \<epsilon>\<^sub>l \<tau>\<^sub>2 \<Rightarrow>
-                (case eff_of_ty lt of
-                   Some l \<Rightarrow> (if prot_arg (sappe s B) l a
-                             then Some (s, sapp s (TV n), sub_pend s pd, n')
-                             else None)
-                 | None \<Rightarrow> None)
-            | _ \<Rightarrow> Some (s, sapp s (TV n), sub_pend s pd, n'))))\<close>
+           Some (s, sapp s (TV n), sub_pend s pd, n')))\<close>
 
 text \<open>The variables a pattern binds, as monomorphic entries under a substitution.\<close>
 
 definition mono_env :: \<open>ksub \<Rightarrow> (name \<times> kty) list \<Rightarrow> tenv\<close> where
   \<open>mono_env s \<Gamma> = map (\<lambda>(x, \<tau>). (x, TEval (kmono (sapp s \<tau>)))) \<Gamma>\<close>
+
+text \<open>The local function groups in a term, counted: the termination measure of the
+  inference leads with it, since a group is inferred through its lowering, which is
+  larger than its clauses.\<close>
+
+fun nlf :: \<open>expr \<Rightarrow> nat\<close> and nlf_atom :: \<open>matom \<Rightarrow> nat\<close> and nlf_cl :: \<open>hclause \<Rightarrow> nat\<close> where
+  \<open>nlf (ESpine as) = sum_list (map nlf_atom as)\<close>
+| \<open>nlf (EOp as _ e) = sum_list (map nlf_atom as) + nlf e\<close>
+| \<open>nlf (EAnn e _) = nlf e\<close>
+| \<open>nlf (EFn _ e) = nlf e\<close>
+| \<open>nlf (EFnMod _ e) = nlf e\<close>
+| \<open>nlf (ELet _ e b) = nlf e + nlf b\<close>
+| \<open>nlf (ELetFun _ _ cls b) = Suc (sum_list (map (\<lambda>(_, e). nlf e) cls) + nlf b)\<close>
+| \<open>nlf (ESeq a b) = nlf a + nlf b\<close>
+| \<open>nlf (EIf c t None) = nlf c + nlf t\<close>
+| \<open>nlf (EIf c t (Some e)) = nlf c + nlf t + nlf e\<close>
+| \<open>nlf (EMatch e arms) = nlf e + sum_list (map (\<lambda>(_, e). nlf e) arms)\<close>
+| \<open>nlf (EGuards alts) = sum_list (map (\<lambda>(gs, e). sum_list (map nlf gs) + nlf e) alts)\<close>
+| \<open>nlf (EHandle e cls) = nlf e + sum_list (map nlf_cl cls)\<close>
+| \<open>nlf (EHandler cls) = sum_list (map nlf_cl cls)\<close>
+| \<open>nlf (EHandlerN cls) = sum_list (map nlf_cl cls)\<close>
+| \<open>nlf (EWith _ h e) = nlf h + nlf e\<close>
+| \<open>nlf (EMask _ e) = nlf e\<close>
+| \<open>nlf EErr = 0\<close>
+| \<open>nlf_atom (AParen es) = sum_list (map nlf es)\<close>
+| \<open>nlf_atom (AList es) = sum_list (map nlf es)\<close>
+| \<open>nlf_atom (ARec fs) = sum_list (map (\<lambda>(_, e). nlf e) fs)\<close>
+| \<open>nlf_atom (ADot a _) = nlf_atom a\<close>
+| \<open>nlf_atom _ = 0\<close>
+| \<open>nlf_cl (HOp _ _ _ e) = nlf e\<close>
+| \<open>nlf_cl (HRet _ e) = nlf e\<close>
+| \<open>nlf_cl (HFin e) = nlf e\<close>
+| \<open>nlf_cl HErr = 0\<close>
+
+lemma nlf_foldr_EFn: \<open>nlf (foldr (\<lambda>a. EFn (g a)) xs e) = nlf e\<close>
+  by (induction xs) auto
+
+lemma nlf_dfun_rhs [simp]:
+  \<open>nlf (foldr EFnMod mbs (dfun_rhs cls)) = sum_list (map (\<lambda>(_, e). nlf e) cls)\<close>
+proof -
+  have arms: \<open>(\<lambda>(_, y). nlf y) \<circ> (\<lambda>(ps, y). (f ps, y)) = (\<lambda>(_, y). nlf y)\<close>
+    for f :: \<open>mpat list \<Rightarrow> mpat\<close> by auto
+  have \<open>nlf (dfun_rhs cls) = sum_list (map (\<lambda>(_, e). nlf e) cls)\<close>
+    by (cases cls rule: dfun_rhs.cases)
+       (simp_all add: nlf_foldr_EFn Let_def arms o_def[of nlf] case_prod_beta split: list.split)
+  then show ?thesis by (induction mbs) auto
+qed
+
+text \<open>The alternatives of a guarded term.\<close>
+
+fun guards_of :: \<open>expr \<Rightarrow> (expr list \<times> expr) list\<close> where
+  \<open>guards_of (EGuards alts) = alts\<close>
+| \<open>guards_of _ = []\<close>
 
 function (sequential) infer :: \<open>nat \<Rightarrow> tenv \<Rightarrow> krow \<Rightarrow> pend \<Rightarrow> expr \<Rightarrow> nat
               \<Rightarrow> (ksub \<times> expr \<times> kty \<times> pend \<times> nat) option\<close>
@@ -367,18 +404,6 @@ where
                 then infer uf (\<Gamma>' @ B') A' pd' b n\<^sub>3 \<bind> (\<lambda>(s\<^sub>3, b', \<tau>, pd\<^sub>3, n\<^sub>4).
                        Some (s\<^sub>3 \<odot> s, ELet p e' b', \<tau>, pd\<^sub>3, n\<^sub>4))
                 else None)))))\<close>
-| \<open>infer uf B A pd (EBind p e b) n =
-     infer uf B A pd e n \<bind> (\<lambda>(s\<^sub>1, e', \<tau>\<^sub>e, pd\<^sub>1, n\<^sub>1).
-       infer_pat uf (sappe s\<^sub>1 B) p n\<^sub>1 \<bind> (\<lambda>(sp, \<tau>\<^sub>p, \<Gamma>, n\<^sub>2).
-         uni uf (sapp sp \<tau>\<^sub>e) \<tau>\<^sub>p n\<^sub>2 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>3).
-           (let s = s\<^sub>2 \<odot> sp \<odot> s\<^sub>1; B' = sappe s B; A' = sappr s A; pd' = sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1;
-                \<tau>\<^sub>e' = sapp s\<^sub>2 \<tau>\<^sub>p;
-                (as, rs) = (if val_exp B e' then gen_p B' A' pd' n \<tau>\<^sub>e' else ({}, {}));
-                \<Gamma>' = map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (sapp s\<^sub>2 \<tau>)))) \<Gamma>
-            in (if covers B' \<tau>\<^sub>e' [p] \<and> btv_list \<tau>\<^sub>e' = [] \<and> brv_list \<tau>\<^sub>e' = []
-                then infer uf (\<Gamma>' @ B') A' pd' b n\<^sub>3 \<bind> (\<lambda>(s\<^sub>3, b', \<tau>, pd\<^sub>3, n\<^sub>4).
-                       Some (s\<^sub>3 \<odot> s, EBind p e' b', \<tau>, pd\<^sub>3, n\<^sub>4))
-                else None)))))\<close>
 | \<open>infer uf B A pd (ESeq e\<^sub>1 e\<^sub>2) n =
      infer uf B A pd e\<^sub>1 n \<bind> (\<lambda>(s\<^sub>1, e\<^sub>1', \<tau>\<^sub>1, pd\<^sub>1, n\<^sub>1).
        infer uf (sappe s\<^sub>1 B) (sappr s\<^sub>1 A) pd\<^sub>1 e\<^sub>2 n\<^sub>1 \<bind> (\<lambda>(s\<^sub>2, e\<^sub>2', \<tau>, pd\<^sub>2, n\<^sub>2).
@@ -432,6 +457,32 @@ where
               (\<lambda>(s\<^sub>2, e', \<tau>, pd\<^sub>2, n\<^sub>2).
               Some (s\<^sub>2 \<odot> s\<^sub>1, EMask l e', \<tau>, pd\<^sub>2, n\<^sub>2)))
       | _ \<Rightarrow> None)\<close>
+| \<open>infer uf B A pd (ELetFun f mbs cls b) n =
+     (let r = foldr EFnMod mbs (dfun_rhs cls)
+      in (if cls = [] \<or> \<not> is_fn r \<or> \<not> nm_ok (n_txt f) then None else
+          infer uf ((n_txt f, TEval (kmono (TV n))) # B) A pd r (Suc n) \<bind>
+            (\<lambda>(s\<^sub>1, r', \<tau>', pd\<^sub>1, n\<^sub>1).
+            uni uf (sapp s\<^sub>1 (TV n)) \<tau>' n\<^sub>1 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>2).
+              (let s = s\<^sub>2 \<odot> s\<^sub>1; B' = sappe s B; A' = sappr s A; pd' = sub_pend s\<^sub>2 pd\<^sub>1;
+                   \<tau> = sapp s\<^sub>2 \<tau>'; (as, rs) = gen_p B' A' pd' n \<tau>
+               in (if btv_list \<tau> = [] \<and> brv_list \<tau> = []
+                   then infer uf ((n_txt f, TEval (close_sch as rs \<tau>)) # B') A' pd' b n\<^sub>2 \<bind>
+                          (\<lambda>(s\<^sub>3, b', \<tau>\<^sub>b, pd\<^sub>3, n\<^sub>3).
+                          Some (s\<^sub>3 \<odot> s, ELetFun f [] [([], r')] b', \<tau>\<^sub>b, pd\<^sub>3, n\<^sub>3))
+                   else None))))))\<close>
+| \<open>infer uf B A pd (EGuards []) n = None\<close>
+| \<open>infer uf B A pd (EGuards ((gs, e) # alts)) n =
+     infer_exps uf B A pd gs n \<bind> (\<lambda>(s\<^sub>1, gs', \<tau>s, pd\<^sub>1, n\<^sub>1).
+       unis uf (map (\<lambda>\<tau>. (\<tau>, TC bool_ty [])) \<tau>s) n\<^sub>1 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>2).
+         (let s = s\<^sub>2 \<odot> s\<^sub>1 in
+          infer uf (sappe s B) (sappr s A) (sub_pend s\<^sub>2 pd\<^sub>1) e n\<^sub>2 \<bind> (\<lambda>(s\<^sub>3, e', \<tau>\<^sub>e, pd\<^sub>3, n\<^sub>3).
+            (if alts = [] then Some (s\<^sub>3 \<odot> s, EGuards [(gs', e')], \<tau>\<^sub>e, pd\<^sub>3, n\<^sub>3)
+             else (let s' = s\<^sub>3 \<odot> s in
+               infer uf (sappe s' B) (sappr s' A) pd\<^sub>3 (EGuards alts) n\<^sub>3 \<bind>
+                 (\<lambda>(s\<^sub>4, g', \<tau>\<^sub>g, pd\<^sub>4, n\<^sub>4).
+                 uni uf \<tau>\<^sub>g (sapp s\<^sub>4 \<tau>\<^sub>e) n\<^sub>4 \<bind> (\<lambda>(s\<^sub>5, n\<^sub>5).
+                   Some (s\<^sub>5 \<odot> s\<^sub>4 \<odot> s', EGuards ((gs', e') # guards_of g'),
+                         sapp s\<^sub>5 \<tau>\<^sub>g, sub_pend s\<^sub>5 pd\<^sub>4, n\<^sub>5)))))))))\<close>
 | \<open>infer uf B A pd EErr n = None\<close>
 
 | \<open>infer_head uf B A pd (APath p) n =
@@ -458,12 +509,10 @@ where
       | Some (TEffi s \<sigma>) \<Rightarrow> (case inst_scheme n \<sigma> of (\<tau>, n') \<Rightarrow> Some (sid, APath p, \<tau>, pd, n'))
       | Some _ \<Rightarrow> None
       | None \<Rightarrow> infer_opn uf B pd p n)\<close>
-| \<open>infer_atom uf B A pd (ANum l) n =
-     read_nat (n_txt l) \<bind> (\<lambda>_. Some (sid, ANum l, TC nat_ty [], pd, n))\<close>
-| \<open>infer_atom uf B A pd (AStr l) n =
-     read_string (n_txt l) \<bind> (\<lambda>_. Some (sid, AStr l, TC string_ty [], pd, n))\<close>
-| \<open>infer_atom uf B A pd (AChar l) n =
-     read_char (n_txt l) \<bind> (\<lambda>_. Some (sid, AChar l, TC char_ty [], pd, n))\<close>
+| \<open>infer_atom uf B A pd (ANum l v None) n =
+     (if 0 \<le> v then Some (sid, ANum l v None, TC nat_ty [], pd, n) else None)\<close>
+| \<open>infer_atom uf B A pd (AStr l cs) n = Some (sid, AStr l cs, TC string_ty [], pd, n)\<close>
+| \<open>infer_atom uf B A pd (AChar l c) n = Some (sid, AChar l c, TC char_ty [], pd, n)\<close>
 | \<open>infer_atom uf B A pd (AParen [e]) n =
      infer uf B A pd e n \<bind> (\<lambda>(s, e', \<tau>, pd', n'). Some (s, AParen [e'], \<tau>, pd', n'))\<close>
 | \<open>infer_atom uf B A pd (AParen es) n =
@@ -472,7 +521,12 @@ where
      infer_exps uf B A pd es n \<bind> (\<lambda>(s\<^sub>1, es', \<tau>s, pd\<^sub>1, n\<^sub>1).
        unis uf (map (\<lambda>\<tau>. (\<tau>, TV n\<^sub>1)) \<tau>s) (Suc n\<^sub>1) \<bind> (\<lambda>(s\<^sub>2, n\<^sub>2).
          Some (s\<^sub>2 \<odot> s\<^sub>1, AList es', TC list_ty [sapp s\<^sub>2 (TV n\<^sub>1)], sub_pend s\<^sub>2 pd\<^sub>1, n\<^sub>2)))\<close>
+| \<open>infer_atom uf B A pd (ANum _ _ (Some _)) n = None\<close>
+| \<open>infer_atom uf B A pd (AFloat _) n = None\<close>
+| \<open>infer_atom uf B A pd (ARec _) n = None\<close>
+| \<open>infer_atom uf B A pd (ADot _ _) n = None\<close>
 | \<open>infer_atom uf B A pd (AMod p sg) n = None\<close>
+| \<open>infer_atom uf B A pd (ABind _ _) n = None\<close>
 
 | \<open>infer_args uf B A pd d \<tau>\<^sub>0 as n =
      (case \<tau>\<^sub>0 of
@@ -514,7 +568,7 @@ where
              [] \<Rightarrow> Some (sid, [], \<tau>\<^sub>0, pd, n)
            | a # rest \<Rightarrow>
                infer_atom uf B A pd a n \<bind> (\<lambda>(s\<^sub>1, a', \<tau>\<^sub>a, pd\<^sub>1, n\<^sub>1).
-                 app_arg uf (sappe s\<^sub>1 B) (sappr s\<^sub>1 A) pd\<^sub>1 (sapp s\<^sub>1 \<tau>\<^sub>0) a \<tau>\<^sub>a n\<^sub>1 \<bind>
+                 app_arg uf (sappe s\<^sub>1 B) (sappr s\<^sub>1 A) pd\<^sub>1 (sapp s\<^sub>1 \<tau>\<^sub>0) \<tau>\<^sub>a n\<^sub>1 \<bind>
                    (\<lambda>(s\<^sub>2, \<tau>\<^sub>r, pd\<^sub>2, n\<^sub>2).
                    (let s = s\<^sub>2 \<odot> s\<^sub>1 in
                     infer_args uf (sappe s B) (sappr s A) pd\<^sub>2 d \<tau>\<^sub>r rest n\<^sub>2 \<bind>
@@ -598,28 +652,17 @@ where
               else None))))\<close>
 | \<open>infer_cls uf B A pd nm \<tau>\<^sub>0 targs (_ # cls) n = None\<close>
 
-  \<comment> \<open>Named handlers: a name-taking action (rule \<open>W_fnname\<close>, the
-     \<open>EFnMod\<close> pattern with one scope variable), a first-class named handler
-     (\<open>W_handlern\<close>), and the sugar, typed as its desugaring (\<open>W_handlen\<close>).\<close>
-| \<open>infer uf B A pd (EFnName x e) n =
-     (let k = n; lt = TV (Suc n); targs = TV (Suc (Suc n)); n\<^sub>1 = Suc (Suc (Suc n))
-      in (if k \<in> ktv_env B then None else
-          infer uf ((n_txt x, TEval (kmono (TEv lt (TK k) targs))) # B) (RV n\<^sub>1) pd e (Suc n\<^sub>1) \<bind>
-            (\<lambda>(s, e', \<tau>, pd', n\<^sub>2).
-              (if k \<notin> ktv \<tau> \<and> list_all (\<lambda>a. k \<notin> ktv (fst s a)) [0 ..< Suc n\<^sub>1] \<and>
-                  act_ok B (sapp s lt) (n_txt x) e \<and> nm_ok (n_txt x)
-               then Some (sproj (Suc n\<^sub>1) s, EFnName x e',
-                          TAct (sapp s lt) [k] (sappr s (RV n\<^sub>1)) \<tau>, pd', n\<^sub>2)
-               else None))))\<close>
+  \<comment> \<open>Named handlers: a first-class named handler (\<open>W_handlern\<close>), and its
+     installation (\<open>W_with\<close>), whose body is typed as an action with one scope
+     variable and applied to the handler as by \<^const>\<open>app_arg\<close>.\<close>
 | \<open>infer uf B A pd (EHandlerN cls) n =
      (case hlabels B cls of
         [] \<Rightarrow> None
       | lbl # _ \<Rightarrow>
           (case eff_of_op B lbl of
              None \<Rightarrow> None
-           | Some (l, ls, ar, pr) \<Rightarrow>
-               (if set (hlabels B cls) = set (map (mangle l) ls) \<and>
-                   (pr \<noteq> None \<longrightarrow> list_all linear_cls cls)
+           | Some (l, ls, ar) \<Rightarrow>
+               (if set (hlabels B cls) = set (map (mangle l) ls)
                 then (let args = map TV [n ..< n + ar]; k = n + ar;
                           n\<^sub>1 = Suc (n + ar); n\<^sub>2 = Suc n\<^sub>1
                       in (if k \<in> ktv_env B then None else
@@ -636,22 +679,33 @@ where
                                             pd', n')
                                  else None)))))
                 else None)))\<close>
-| \<open>infer uf B A pd (EHandleN x cls e) n =
-     (case cls of
-        [] \<Rightarrow> None
-      | _ # _ \<Rightarrow>
-          infer uf B A pd (EHandlerN cls) n \<bind> (\<lambda>(s\<^sub>1, h', \<tau>\<^sub>h, pd\<^sub>1, n\<^sub>1).
-            infer uf (sappe s\<^sub>1 B) (sappr s\<^sub>1 A) pd\<^sub>1 (EFnName x e) n\<^sub>1 \<bind>
-              (\<lambda>(s\<^sub>2, a', \<tau>\<^sub>a, pd\<^sub>2, n\<^sub>2).
-              (let s = s\<^sub>2 \<odot> s\<^sub>1 in
-               app_arg uf (sappe s B) (sappr s A) pd\<^sub>2 (sapp s\<^sub>2 \<tau>\<^sub>h)
-                 (AParen [EFnName x e]) \<tau>\<^sub>a n\<^sub>2 \<bind>
-                 (\<lambda>(s\<^sub>3, \<tau>, pd\<^sub>3, n\<^sub>3).
-                 Some (s\<^sub>3 \<odot> s, ESpine [AParen [h'], AParen [a']], \<tau>, pd\<^sub>3, n\<^sub>3))))))\<close>
+| \<open>infer uf B A pd (EWith x h e) n =
+     infer uf B A pd h n \<bind> (\<lambda>(s\<^sub>1, h', \<tau>\<^sub>h, pd\<^sub>1, n\<^sub>1).
+       (let B\<^sub>1 = sappe s\<^sub>1 B; k = n\<^sub>1; lt = TV (Suc n\<^sub>1); targs = TV (Suc (Suc n\<^sub>1));
+            n\<^sub>2 = Suc (Suc (Suc n\<^sub>1))
+        in (if k \<in> ktv_env B\<^sub>1 \<or> \<not> nm_ok (n_txt x) then None else
+            infer uf ((n_txt x, TEval (kmono (TEv lt (TK k) targs))) # B\<^sub>1) (RV n\<^sub>2) pd\<^sub>1 e (Suc n\<^sub>2) \<bind>
+              (\<lambda>(s\<^sub>2, e', \<tau>\<^sub>0, pd\<^sub>2, n\<^sub>3).
+                (if k \<notin> ktv \<tau>\<^sub>0 \<and> list_all (\<lambda>a. k \<notin> ktv (fst s\<^sub>2 a)) [0 ..< Suc n\<^sub>2]
+                 then (let s\<^sub>2' = sproj (Suc n\<^sub>2) s\<^sub>2; s = s\<^sub>2' \<odot> s\<^sub>1
+                       in app_arg uf (sappe s B) (sappr s A) pd\<^sub>2 (sapp s\<^sub>2' \<tau>\<^sub>h)
+                            (TAct (sapp s\<^sub>2 lt) [k] (sappr s\<^sub>2 (RV n\<^sub>2)) \<tau>\<^sub>0) n\<^sub>3 \<bind>
+                            (\<lambda>(s\<^sub>3, \<tau>, pd\<^sub>3, n\<^sub>4). Some (s\<^sub>3 \<odot> s, EWith x h' e', \<tau>, pd\<^sub>3, n\<^sub>4)))
+                 else None)))))\<close>
   by pat_completeness auto
 
 termination
   by (relation \<open>measures [\<lambda>x. case x of
+        Inl (Inl (Inl (uf, B, A, pd, e, n))) \<Rightarrow> nlf e
+      | Inl (Inl (Inr (uf, B, A, pd, a, n))) \<Rightarrow> nlf_atom a
+      | Inl (Inr (Inl (uf, B, A, pd, a, n))) \<Rightarrow> nlf_atom a
+      | Inl (Inr (Inr (uf, B, A, pd, d, \<tau>\<^sub>0, as, n))) \<Rightarrow> sum_list (map nlf_atom as)
+      | Inr (Inl (Inl (uf, B, A, pd, es, n))) \<Rightarrow> sum_list (map nlf es)
+      | Inr (Inl (Inr (uf, B, A, pd, e, n))) \<Rightarrow> nlf e
+      | Inr (Inr (Inl (uf, B, A, pd, \<tau>\<^sub>0, \<tau>\<^sub>r, arms, n))) \<Rightarrow>
+          sum_list (map (\<lambda>(_, e). nlf e) arms)
+      | Inr (Inr (Inr (uf, B, A, pd, nm, \<tau>\<^sub>0, targs, cls, n))) \<Rightarrow> sum_list (map nlf_cl cls),
+      \<lambda>x. case x of
         Inl (Inl (Inl (uf, B, A, pd, e, n))) \<Rightarrow> 2 * size e + 1
       | Inl (Inl (Inr (uf, B, A, pd, a, n))) \<Rightarrow> 2 * size a + 1
       | Inl (Inr (Inl (uf, B, A, pd, a, n))) \<Rightarrow> 2 * size a
@@ -663,8 +717,7 @@ termination
       | Inr (Inr (Inr (uf, B, A, pd, nm, \<tau>\<^sub>0, targs, cls, n))) \<Rightarrow> 2 * size_list size cls,
       \<lambda>x. case x of
         Inl (Inr (Inr (uf, B, A, pd, d, \<tau>\<^sub>0, as, n))) \<Rightarrow> d
-      | Inl (Inl (Inl (uf, B, A, pd, e, n))) \<Rightarrow> (case e of EHandleN _ _ _ \<Rightarrow> 1 | _ \<Rightarrow> 0)
-      | _ \<Rightarrow> 0]\<close>) auto
+      | _ \<Rightarrow> 0]\<close>) (auto, (drule (1) bspec; simp)+)
 
 lemmas infer_induct =
   infer_infer_head_infer_atom_infer_args_infer_exps_infer_chain_infer_arms_infer_cls.induct[
@@ -678,7 +731,7 @@ lemma infer_args_Cons_plain:
   assumes \<open>\<forall>i sg m \<epsilon> t. \<tau>\<^sub>0 \<noteq> TDep i sg m \<epsilon> t\<close>
   shows \<open>infer_args uf B A pd d \<tau>\<^sub>0 (a # rest) n =
     infer_atom uf B A pd a n \<bind> (\<lambda>(s\<^sub>1, a', \<tau>\<^sub>a, pd\<^sub>1, n\<^sub>1).
-      app_arg uf (sappe s\<^sub>1 B) (sappr s\<^sub>1 A) pd\<^sub>1 (sapp s\<^sub>1 \<tau>\<^sub>0) a \<tau>\<^sub>a n\<^sub>1 \<bind>
+      app_arg uf (sappe s\<^sub>1 B) (sappr s\<^sub>1 A) pd\<^sub>1 (sapp s\<^sub>1 \<tau>\<^sub>0) \<tau>\<^sub>a n\<^sub>1 \<bind>
         (\<lambda>(s\<^sub>2, \<tau>\<^sub>r, pd\<^sub>2, n\<^sub>2).
         infer_args uf (sappe (s\<^sub>2 \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) pd\<^sub>2 d \<tau>\<^sub>r rest n\<^sub>2 \<bind>
           (\<lambda>(s\<^sub>3, rest', \<tau>, pd\<^sub>3, n\<^sub>3). Some (s\<^sub>3 \<odot> (s\<^sub>2 \<odot> s\<^sub>1), a' # rest', \<tau>, pd\<^sub>3, n\<^sub>3))))\<close>
@@ -781,38 +834,22 @@ text \<open>A value declaration \<open>let x [: ty] = e\<close>. A function is i
   \<^cite>\<open>wright1995\<close>.\<close>
 
 definition infer_let ::
-  \<open>nat \<Rightarrow> tenv \<Rightarrow> nm \<Rightarrow> ty option \<Rightarrow> expr \<Rightarrow> nat \<Rightarrow> (mdecl \<times> tenv \<times> nat) option\<close>
+  \<open>nat \<Rightarrow> tenv \<Rightarrow> nm \<Rightarrow> expr \<Rightarrow> nat \<Rightarrow> (mdecl \<times> tenv \<times> nat) option\<close>
 where
-  \<open>infer_let uf B x to e n =
+  \<open>infer_let uf B x e n =
      (if is_fn e
       then infer uf ((n_txt x, TEval (kmono (TV n))) # B) RNil [] e (Suc n) \<bind>
              (\<lambda>(s\<^sub>1, e', \<tau>', pd, n\<^sub>1).
              uni uf (sapp s\<^sub>1 (TV n)) \<tau>' n\<^sub>1 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>2).
                resolve_pend (sub_pend s\<^sub>2 pd) \<bind> (\<lambda>tab.
-                 (let \<tau> = sapp s\<^sub>2 \<tau>'; \<sigma> = gen B RNil \<tau>
+                 (let \<tau> = sapp s\<^sub>2 \<tau>'
                   in (if \<not> bfree_x \<tau> then None else
-                      (case to of
-                        None \<Rightarrow> Some (DLet x to (subst_imp tab e'), [(n_txt x, TEval \<sigma>)], n\<^sub>2)
-                      | Some ty \<Rightarrow>
-                          ty_stat B True ([], []) n\<^sub>2 ty \<bind> (\<lambda>(\<tau>\<^sub>a, _, n\<^sub>3).
-                            (let \<sigma>' = close_sch (set [n\<^sub>2 ..< n\<^sub>3]) (set [n\<^sub>2 ..< n\<^sub>3]) \<tau>\<^sub>a
-                             in (if \<sigma> \<sqsupseteq> \<sigma>'
-                                 then Some (DLet x to (subst_imp tab e'),
-                                            [(n_txt x, TEval \<sigma>')], n\<^sub>3)
-                                 else None)))))))))
+                      Some (DLet x (subst_imp tab e'), [(n_txt x, TEval (gen B RNil \<tau>))], n\<^sub>2))))))
       else infer uf B RNil [] e n \<bind> (\<lambda>(s\<^sub>1, e', \<tau>, pd, n\<^sub>1).
              resolve_pend pd \<bind> (\<lambda>tab.
-               (let \<sigma> = gen B RNil \<tau>
-                in (if \<not> bfree_x \<tau> \<or> \<not> ((ftv \<tau> \<subseteq> ftv_env B \<and> frv \<tau> \<subseteq> frv_env B) \<or> val_exp B e')
-                    then None else
-                    (case to of
-                      None \<Rightarrow> Some (DLet x to (subst_imp tab e'), [(n_txt x, TEval \<sigma>)], n\<^sub>1)
-                    | Some ty \<Rightarrow>
-                        ty_stat B True ([], []) n\<^sub>1 ty \<bind> (\<lambda>(\<tau>\<^sub>a, _, n\<^sub>3).
-                          (let \<sigma>' = close_sch (set [n\<^sub>1 ..< n\<^sub>3]) (set [n\<^sub>1 ..< n\<^sub>3]) \<tau>\<^sub>a
-                           in (if \<sigma> \<sqsupseteq> \<sigma>'
-                               then Some (DLet x to (subst_imp tab e'), [(n_txt x, TEval \<sigma>')], n\<^sub>3)
-                               else None)))))))))\<close>
+               (if \<not> bfree_x \<tau> \<or> \<not> ((ftv \<tau> \<subseteq> ftv_env B \<and> frv \<tau> \<subseteq> frv_env B) \<or> val_exp B e')
+                then None
+                else Some (DLet x (subst_imp tab e'), [(n_txt x, TEval (gen B RNil \<tau>))], n\<^sub>1)))))\<close>
 
 text \<open>Declarations, declaration lists and module expressions under the module prefix
   \<open>pre\<close>: each returns the elaborated syntax, the basis it adds and its foreign
@@ -825,24 +862,23 @@ and infer_decls ::
 and infer_mexp ::
   \<open>nat \<Rightarrow> tenv \<Rightarrow> name \<Rightarrow> mexpr \<Rightarrow> nat \<Rightarrow> (mexpr \<times> tentry \<times> fenv \<times> nat) option\<close>
 where
-  \<open>infer_decl uf B pre (DLet x to e) n =
+  \<open>infer_decl uf B pre (DLet x e) n =
      (if rebind_ok B (n_txt x) \<and> nm_ok (n_txt x)
-      then infer_let uf B x to e n \<bind> (\<lambda>(d', E, n'). Some (d', E, [], n'))
+      then infer_let uf B x e n \<bind> (\<lambda>(d', E, n'). Some (d', E, [], n'))
       else None)\<close>
 | \<open>infer_decl uf B pre (DFun f mbs cls) n =
      (if cls = [] \<or> \<not> rebind_ok B (n_txt f) \<or> \<not> nm_ok (n_txt f) then None
-      else infer_let uf B f None (foldr EFnMod mbs (dfun_rhs cls)) n \<bind>
+      else infer_let uf B f (foldr EFnMod mbs (dfun_rhs cls)) n \<bind>
              (\<lambda>(d', E, n'). Some (d', E, [], n')))\<close>
 | \<open>infer_decl uf B pre (DExtern x ty sy) n =
      (if take (length functor_pre) pre \<noteq> functor_pre then
-     read_string (n_txt sy) \<bind> (\<lambda>s.
        ty_stat B True ([], []) n ty \<bind> (\<lambda>(\<tau>, _, n').
          (case \<tau> of
             TFn _ _ _ \<Rightarrow>
               Some (DExtern x ty sy,
-                    [(n_txt x, TEffi s (close_sch (set [n ..< n']) (set [n ..< n']) \<tau>))],
-                    [(s, close_sch (set [n ..< n']) (set [n ..< n']) \<tau>)], n')
-          | _ \<Rightarrow> None))) else None)\<close>
+                    [(n_txt x, TEffi (n_txt sy) (close_sch (set [n ..< n']) (set [n ..< n']) \<tau>))],
+                    [(n_txt sy, close_sch (set [n ..< n']) (set [n ..< n']) \<tau>)], n')
+          | _ \<Rightarrow> None)) else None)\<close>
 | \<open>infer_decl uf B pre (DType t as ty) n =
      (let ps = [n ..< n + length as]
       in ty_stat B False (zip (map n_txt as) (map TV ps), []) (n + length as) ty \<bind> (\<lambda>(\<tau>, _, n').
@@ -861,15 +897,15 @@ where
 | \<open>infer_decl uf B pre (DFix f prec opr) n =
      read_nat (n_txt prec) \<bind>
        (\<lambda>p. Some (DFix f prec opr, [(fix_key (n_txt opr), TEfix f p)], [], n))\<close>
-| \<open>infer_decl uf B pre (DEff x as ops pr) n =
-     (if distinct (map n_txt as) \<and> prot_wf pr ops \<and> take (length functor_pre) pre \<noteq> functor_pre \<and>
+| \<open>infer_decl uf B pre (DEff x as ops) n =
+     (if distinct (map n_txt as) \<and> take (length functor_pre) pre \<noteq> functor_pre \<and>
          eff_lookup B (mangle pre (n_txt x)) = None \<and>
          nm_ok (n_txt x) \<and> list_all (\<lambda>(opn, _). nm_ok (n_txt opn)) ops
       then ops_stat B (mangle pre (n_txt x)) (eff_ps as n) (eff_ve as n) (n + length as) ops \<bind>
              (\<lambda>(es, n').
-             Some (DEff x as ops pr,
+             Some (DEff x as ops,
                    es @ [(n_txt x, TEeff (mangle pre (n_txt x)) (map fst es)
-                                     (length as) (prot_of pr))], [], n'))
+                                     (length as))], [], n'))
       else None)\<close>
 | \<open>infer_decl uf B pre (DMod x [] so m) n =
      (if fresh_mod B (n_txt x) \<and> nm_ok (n_txt x) then
@@ -924,13 +960,6 @@ where
        (if set [n ..< n'] \<inter> stamps_env B = {} \<and> fresh_sig B (n_txt x) \<and> sig_wf (snd \<Sigma>) \<and>
            take (length functor_pre) pre \<noteq> functor_pre
         then Some (DSig x sg, [(n_txt x, TEsig \<Sigma>)], [], n') else None))\<close>
-| \<open>infer_decl uf B pre (DInst p m) n =
-     (case path_nms p of
-        [x] \<Rightarrow> (if fresh_mod B x \<and> nm_ok x then
-                infer_mexp uf B (mangle pre x) m n \<bind> (\<lambda>(m', ent, F, n').
-                  (case ent of TEstr E \<Rightarrow> Some (DInst p m', [(x, TEinst E)], F, n') | _ \<Rightarrow> None))
-              else None)
-      | _ \<Rightarrow> None)\<close>
 | \<open>infer_decl uf B pre (DOpen p) n =
      (case tlookup B (path_nms p) of Some (TEstr E) \<Rightarrow> Some (DOpen p, E, [], n) | _ \<Rightarrow> None)\<close>
 | \<open>infer_decl uf B pre (DInc m) n =
@@ -1012,7 +1041,7 @@ where
 | \<open>bnd_ent (TEinst ex) = bnd_env ex\<close>
 | \<open>bnd_ent (TEop l ps t\<^sub>1 t\<^sub>2) = Max ({kty_bnd t\<^sub>1, kty_bnd t\<^sub>2} \<union> Suc ` (stamps t\<^sub>1 \<union> stamps t\<^sub>2))\<close>
 | \<open>bnd_ent (TEffi s \<sigma>) = bnd_sch \<sigma>\<close>
-| \<open>bnd_ent (TEeff l ls ar pr) = 0\<close>
+| \<open>bnd_ent (TEeff l ls ar) = 0\<close>
 | \<open>bnd_env [] = first_stamp\<close>
 | \<open>bnd_env ((x, e) # ex) = max (bnd_ent e) (bnd_env ex)\<close>
 

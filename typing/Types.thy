@@ -121,14 +121,6 @@ definition nlbl :: \<open>name \<Rightarrow> name\<close> where
 lemma nlbl_inj[simp]: \<open>nlbl l = nlbl l' \<longleftrightarrow> l = l'\<close>
   by (simp add: nlbl_def)
 
-fun eff_of_ty :: \<open>kty \<Rightarrow> name option\<close> where
-  \<open>eff_of_ty (TC (st, nm, cs) ts) =
-     (if st = 0 \<and> cs = [] \<and> take 5 nm = str ''%eff.'' then Some (drop 5 nm) else None)\<close>
-| \<open>eff_of_ty _ = None\<close>
-
-lemma eff_of_ty_eff_ty[simp]: \<open>eff_of_ty (eff_ty l ts) = Some l\<close>
-  by (simp add: eff_ty_def)
-
 lemma eff_ty_inj[simp]: \<open>eff_ty l ts = eff_ty l' ts' \<longleftrightarrow> l = l' \<and> ts = ts'\<close>
   by (simp add: eff_ty_def)
 

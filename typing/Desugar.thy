@@ -50,7 +50,7 @@ text \<open>The lowering, through structures, functor applications and sealings.
 fun dsg_decl :: \<open>mdecl \<Rightarrow> mdecl\<close> and
   dsg_mexpr :: \<open>mexpr \<Rightarrow> mexpr\<close>
 where
-  \<open>dsg_decl (DFun f mbs cls) = DLet f None (foldr EFnMod mbs (dfun_rhs cls))\<close>
+  \<open>dsg_decl (DFun f mbs cls) = DLet f (foldr EFnMod mbs (dfun_rhs cls))\<close>
 | \<open>dsg_decl (DMod x ps s m) = DMod x ps s (dsg_mexpr m)\<close>
 | \<open>dsg_decl (DImpl x ps s m) = DImpl x ps s (dsg_mexpr m)\<close>
 | \<open>dsg_decl d = d\<close>

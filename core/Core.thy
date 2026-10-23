@@ -1,5 +1,5 @@
 theory Core
-  imports CaraML_Prelude.Named_Cases CaraML_Syntax.Names CaraML_Syntax.Protocol
+  imports CaraML_Prelude.Named_Cases CaraML_Syntax.Names
 begin
 
 section \<open>The module-free core language and its semantics\<close>
@@ -11,11 +11,10 @@ text \<open>The target of static interpretation: a module-free core with functio
   constructor names \<^const>\<open>tuple_con\<close>.
 
   An unnamed handler \<^text>\<open>Chandle l h b\<close> catches the operations of label
-  \<open>l\<close> performed in \<open>b\<close>. A named handler \<^text>\<open>Chandlen l h \<phi> b\<close>
+  \<open>l\<close> performed in \<open>b\<close>. A named handler \<^text>\<open>Chandlen l h b\<close>
   \<^cite>\<open>\<open>Sect. 2.3\<close> in xie2021names\<close> mints a fresh handler name, applies the
   action \<open>b\<close> to it, and catches the operations performed on that name
-  (\<^text>\<open>Cperformn x op a\<close>), its frame keeps the residual of the effect's
-  protocol \<open>\<phi>\<close>.\<close>
+  (\<^text>\<open>Cperformn x op a\<close>).\<close>
 
 datatype lit = LNat nat | LStr name | LChr nat
 
@@ -40,10 +39,9 @@ datatype cexp =
                                       handler \<open>h\<close> for label \<open>l\<close>\<close>
   | Cmask name cexp               \<comment> \<open>skip the innermost \<open>l\<close>-handler\<close>
   | Cperformn cexp name cexp      \<comment> \<open>\<open>x.op a\<close>: invoke \<open>op\<close> on the handler named by \<open>x\<close>\<close>
-  | Chandlen name cexp \<open>name ltlf option\<close> cexp
-                                  \<comment> \<open>\<open>handle l with h under \<phi> applied to b\<close>: a fresh
-                                      name for the action \<open>b\<close>, its operations caught
-                                      by \<open>h\<close>, its trace checked against \<open>\<phi>\<close>\<close>
+  | Chandlen name cexp cexp        \<comment> \<open>\<open>handle l with h applied to b\<close>: a fresh name
+                                      for the action \<open>b\<close>, its operations caught by
+                                      \<open>h\<close>\<close>
 
 text \<open>A captured continuation is a list of evaluation-context frames (innermost
   first). Continuations apply like functions, so handlers have full control,
@@ -66,8 +64,7 @@ and cframe =
   | CFperfn1 \<open>(name \<times> cval) list\<close> name cexp   \<comment> \<open>name pending, then the argument\<close>
   | CFperfn2 cval name                        \<comment> \<open>name done, argument pending\<close>
   | CFhandle name cval                        \<comment> \<open>re-entering this handler's scope\<close>
-  | CFhandlen name nat cval \<open>name ltlf option\<close>
-                                              \<comment> \<open>named handler: label, name, handler, residual\<close>
+  | CFhandlen name nat cval                    \<comment> \<open>named handler: label, name, handler\<close>
   | CFmask name
 
 text \<open>The name supply a value needs: one above every handler name it holds.\<close>
@@ -94,7 +91,7 @@ and fsup :: \<open>cframe \<Rightarrow> nat\<close> and fssup :: \<open>cframe l
 | \<open>fsup (CFperfn1 env op a) = esup env\<close>
 | \<open>fsup (CFperfn2 v op) = vsup v\<close>
 | \<open>fsup (CFhandle l hv) = vsup hv\<close>
-| \<open>fsup (CFhandlen l i hv \<phi>) = max (Suc i) (vsup hv)\<close>
+| \<open>fsup (CFhandlen l i hv) = max (Suc i) (vsup hv)\<close>
 | \<open>fsup (CFmask l) = 0\<close>
 | \<open>fssup [] = 0\<close>
 | \<open>fssup (f # fs) = max (fsup f) (fssup fs)\<close>
@@ -176,15 +173,11 @@ text \<open>\<^const>\<open>Cperform\<close> yields a bubble that rises through 
 
   Names are generative \<^cite>\<open>\<open>Sect. 4\<close> in milner1997\<close>
   \<^cite>\<open>\<open>Sect. 2.3\<close> in xie2021names\<close>: a supply \<open>ns\<close> is threaded through the
-  evaluator, and \<^const>\<open>Chandlen\<close> takes the next number. Its frame
-  \<^const>\<open>CFhandlen\<close> carries the protocol residual. A named bubble caught by
-  the frame with its number steps the residual by \<^const>\<open>nfderiv\<close>, and is
-  stuck when that is \<open>Ff\<close>; the handler receives the operation's name with the
-  payload and the resumption, since one handler value serves every operation
-  of the effect. Leaving the frame normally is stuck unless the residual is
-  nullable. A handler that discards its continuation drops the frame without
-  leaving it, so an abort is not checked. Unnamed bubbles pass named frames;
-  named bubbles pass unnamed frames and masks.\<close>
+  evaluator, and \<^const>\<open>Chandlen\<close> takes the next number. A named bubble
+  is caught by the frame \<^const>\<open>CFhandlen\<close> with its number; the handler
+  receives the operation's name with the payload and the resumption, since one
+  handler value serves every operation of the effect. Unnamed bubbles pass
+  named frames; named bubbles pass unnamed frames and masks.\<close>
 
 fun push :: \<open>cframe \<Rightarrow> hres \<Rightarrow> hres\<close> where
   \<open>push f (HRop l m w fr) = HRop l m w (fr @ [f])\<close>
@@ -252,186 +245,120 @@ fun maskr :: \<open>name \<Rightarrow> hres \<Rightarrow> hres\<close> where
   \<open>maskr l (HRop l' m w fr) = HRop l' (if l' = l then Suc m else m) w (fr @ [CFmask l])\<close>
 | \<open>maskr l r = push (CFmask l) r\<close>
 
-text \<open>The protocol residual: stepping by an operation, and the exit test.\<close>
-
-definition step_prot :: \<open>name \<Rightarrow> name ltlf option \<Rightarrow> name ltlf option option\<close> where
-  \<open>step_prot op \<phi> =
-     (case \<phi> of None \<Rightarrow> Some None
-      | Some \<psi> \<Rightarrow> (let \<psi>' = nfderiv op \<psi> in if \<psi>' = Ff then None else Some (Some \<psi>')))\<close>
-
-fun exit_prot :: \<open>name ltlf option \<Rightarrow> bool\<close> where
-  \<open>exit_prot None = True\<close>
-| \<open>exit_prot (Some \<psi>) = fnull \<psi>\<close>
-
 fun performn :: \<open>cval \<Rightarrow> name \<Rightarrow> cval \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> where
   \<open>performn (Vname i) op av ns = (HRopn i op av [], ns)\<close>
 | \<open>performn _ op av ns = (HRerr, ns)\<close>
 
-text \<open>The evaluator has a strict and a relaxed mode. Where the strict mode is
-  stuck at a protocol violation, the relaxed one raises a \<^emph>\<open>marker\<close>: a
-  bubble on the reserved label \<open>%viol\<close>, which no handler catches
-  (theory \<open>Relaxed\<close>).\<close>
-
-definition viol_lbl :: name where
-  \<open>viol_lbl = str ''%viol''\<close>
-
-abbreviation viol_ev :: \<open>cval \<Rightarrow> ffi_ev\<close> where
-  \<open>viol_ev w \<equiv> FFIev viol_lbl w FErr\<close>
-
-lemma ffi_sym_viol[simp]: \<open>ffi_sym viol_lbl = None\<close>
-  by (simp add: ffi_sym_def viol_lbl_def)
-
-lemma viol_not_ffi[simp]: \<open>viol_lbl \<noteq> ffi_label sy\<close> \<open>ffi_label sy \<noteq> viol_lbl\<close>
-  by (simp_all add: ffi_label_def viol_lbl_def)
-
-definition viol :: \<open>hres \<Rightarrow> bool\<close> where
-  \<open>viol r \<longleftrightarrow> (\<exists>m w fr. r = HRop viol_lbl m w fr)\<close>
-
-lemma viol_simps[simp]:
-  \<open>\<not> viol (HRval v)\<close> \<open>\<not> viol HRtimeout\<close> \<open>\<not> viol HRerr\<close> \<open>\<not> viol (HRopn i op w fr)\<close>
-  \<open>viol (HRop l m w fr) \<longleftrightarrow> l = viol_lbl\<close>
-  by (simp_all add: viol_def)
-
-text \<open>The relaxed mode lets a marker through a guarded position (a violation
-  inside a handler position stays a violation).\<close>
-
-definition mguardr :: \<open>bool \<Rightarrow> hres \<times> nat \<Rightarrow> (cval \<Rightarrow> nat \<Rightarrow> hres \<times> nat) \<Rightarrow> hres \<times> nat\<close>
+function (sequential) ceval :: \<open>nat \<Rightarrow> (name \<times> cval) list \<Rightarrow> cexp \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> and
+  cevcon :: \<open>nat \<Rightarrow> (name \<times> cval) list \<Rightarrow> name \<Rightarrow> cval list \<Rightarrow> cexp list \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> and
+  cevalm :: \<open>nat \<Rightarrow> (name \<times> cval) list \<Rightarrow> cval \<Rightarrow> (cpat \<times> cexp) list \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> and
+  capply :: \<open>nat \<Rightarrow> cval \<Rightarrow> cval \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> and
+  cstep :: \<open>nat \<Rightarrow> cval \<Rightarrow> cframe \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> and
+  cunwind :: \<open>nat \<Rightarrow> cval \<Rightarrow> cframe list \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> and
+  cresume :: \<open>nat \<Rightarrow> hres \<Rightarrow> cframe list \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> and
+  cthrow :: \<open>nat \<Rightarrow> name \<Rightarrow> nat \<Rightarrow> cval \<Rightarrow> cframe list \<Rightarrow> cframe list \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> and
+  cthrown :: \<open>nat \<Rightarrow> nat \<Rightarrow> name \<Rightarrow> cval \<Rightarrow> cframe list \<Rightarrow> cframe list \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close>
 where
-  \<open>mguardr rx p g = (if rx \<and> viol (fst p) then p else guardr p g)\<close>
-
-lemma mguardr_simps[simp]:
-  \<open>mguardr False p g = guardr p g\<close>
-  \<open>mguardr rx (HRval v, ns) g = g v ns\<close>
-  \<open>mguardr rx (HRtimeout, ns) g = (HRtimeout, ns)\<close>
-  \<open>mguardr rx (HRerr, ns) g = (HRerr, ns)\<close>
-  \<open>mguardr rx (HRop l m w fr, ns) g =
-     (if rx \<and> l = viol_lbl then (HRop l m w fr, ns) else (HRerr, ns))\<close>
-  \<open>mguardr rx (HRopn i op w fr, ns) g = (HRerr, ns)\<close>
-  by (simp_all add: mguardr_def)
-
-lemma mguardr_cong[fundef_cong]:
-  \<open>p = p' \<Longrightarrow> (\<And>v ns. p' = (HRval v, ns) \<Longrightarrow> g v ns = g' v ns) \<Longrightarrow>
-   mguardr rx p g = mguardr rx p' g'\<close>
-  by (auto simp: mguardr_def intro: guardr_cong)
-
-context
-  fixes rx :: bool
-begin
-
-function (sequential) mceval :: \<open>nat \<Rightarrow> (name \<times> cval) list \<Rightarrow> cexp \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> and
-  mcevcon :: \<open>nat \<Rightarrow> (name \<times> cval) list \<Rightarrow> name \<Rightarrow> cval list \<Rightarrow> cexp list \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> and
-  mcevalm :: \<open>nat \<Rightarrow> (name \<times> cval) list \<Rightarrow> cval \<Rightarrow> (cpat \<times> cexp) list \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> and
-  mcapply :: \<open>nat \<Rightarrow> cval \<Rightarrow> cval \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> and
-  mcstep :: \<open>nat \<Rightarrow> cval \<Rightarrow> cframe \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> and
-  mcunwind :: \<open>nat \<Rightarrow> cval \<Rightarrow> cframe list \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> and
-  mcresume :: \<open>nat \<Rightarrow> hres \<Rightarrow> cframe list \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> and
-  mcthrow :: \<open>nat \<Rightarrow> name \<Rightarrow> nat \<Rightarrow> cval \<Rightarrow> cframe list \<Rightarrow> cframe list \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close> and
-  mcthrown :: \<open>nat \<Rightarrow> nat \<Rightarrow> name \<Rightarrow> cval \<Rightarrow> cframe list \<Rightarrow> cframe list \<Rightarrow> nat \<Rightarrow> hres \<times> nat\<close>
-where
-  \<open>mceval 0 env e ns = (HRtimeout, ns)\<close>
-| \<open>mceval (Suc k) env (Cvar x) ns =
+  \<open>ceval 0 env e ns = (HRtimeout, ns)\<close>
+| \<open>ceval (Suc k) env (Cvar x) ns =
      (case map_of env x of Some v \<Rightarrow> (HRval v, ns) | None \<Rightarrow> (HRerr, ns))\<close>
-| \<open>mceval (Suc k) env (Clit l) ns = (HRval (Vlit l), ns)\<close>
-| \<open>mceval (Suc k) env (Clam x b) ns = (HRval (Vclos env x b), ns)\<close>
-| \<open>mceval (Suc k) env (Capp f a) ns =
-     bindr (mceval k env f ns) (CFapp1 env a) (\<lambda>fv ns\<^sub>1.
-       bindr (mceval k env a ns\<^sub>1) (CFapp2 fv) (\<lambda>av ns\<^sub>2. mcapply k fv av ns\<^sub>2))\<close>
-| \<open>mceval (Suc k) env (Clet x e b) ns =
-     bindr (mceval k env e ns) (CFlet x env b) (\<lambda>v ns\<^sub>1. mceval k ((x, v) # env) b ns\<^sub>1)\<close>
-| \<open>mceval (Suc k) env (Cletrec f x e b) ns =
-     mceval k ((f, Vclosrec env f x e) # env) b ns\<close>
-| \<open>mceval (Suc k) env (Ccon c es) ns = mcevcon k env c [] es ns\<close>
-| \<open>mceval (Suc k) env (Cmatch e cls) ns =
-     bindr (mceval k env e ns) (CFmatch env cls) (\<lambda>v ns\<^sub>1. mcevalm k env v cls ns\<^sub>1)\<close>
-| \<open>mceval (Suc k) env (Cperform l a) ns =
-     bindr (mceval k env a ns) (CFperf l) (\<lambda>av ns\<^sub>1. (HRop l 0 av [], ns\<^sub>1))\<close>
-| \<open>mceval (Suc k) env (Chandle l h b) ns =
-     mguardr rx (mceval k env h ns) (\<lambda>hv ns\<^sub>1.
-       thenr (mceval k env b ns\<^sub>1) (\<lambda>r ns\<^sub>2. mcresume k r [CFhandle l hv] ns\<^sub>2))\<close>
-| \<open>mceval (Suc k) env (Cmask l e) ns = thenr (mceval k env e ns) (\<lambda>r ns\<^sub>1. (maskr l r, ns\<^sub>1))\<close>
-| \<open>mceval (Suc k) env (Cperformn x op a) ns =
-     bindr (mceval k env x ns) (CFperfn1 env op a) (\<lambda>xv ns\<^sub>1.
-       bindr (mceval k env a ns\<^sub>1) (CFperfn2 xv op) (\<lambda>av ns\<^sub>2. performn xv op av ns\<^sub>2))\<close>
-| \<open>mceval (Suc k) env (Chandlen l h \<phi> b) ns =
-     mguardr rx (mceval k env h ns) (\<lambda>hv ns\<^sub>1.
-       mguardr rx (mceval k env b ns\<^sub>1) (\<lambda>bv ns\<^sub>2.
-         thenr (mcapply k bv (Vname ns\<^sub>2) (Suc ns\<^sub>2))
-               (\<lambda>r ns\<^sub>3. mcresume k r [CFhandlen l ns\<^sub>2 hv \<phi>] ns\<^sub>3)))\<close>
+| \<open>ceval (Suc k) env (Clit l) ns = (HRval (Vlit l), ns)\<close>
+| \<open>ceval (Suc k) env (Clam x b) ns = (HRval (Vclos env x b), ns)\<close>
+| \<open>ceval (Suc k) env (Capp f a) ns =
+     bindr (ceval k env f ns) (CFapp1 env a) (\<lambda>fv ns\<^sub>1.
+       bindr (ceval k env a ns\<^sub>1) (CFapp2 fv) (\<lambda>av ns\<^sub>2. capply k fv av ns\<^sub>2))\<close>
+| \<open>ceval (Suc k) env (Clet x e b) ns =
+     bindr (ceval k env e ns) (CFlet x env b) (\<lambda>v ns\<^sub>1. ceval k ((x, v) # env) b ns\<^sub>1)\<close>
+| \<open>ceval (Suc k) env (Cletrec f x e b) ns =
+     ceval k ((f, Vclosrec env f x e) # env) b ns\<close>
+| \<open>ceval (Suc k) env (Ccon c es) ns = cevcon k env c [] es ns\<close>
+| \<open>ceval (Suc k) env (Cmatch e cls) ns =
+     bindr (ceval k env e ns) (CFmatch env cls) (\<lambda>v ns\<^sub>1. cevalm k env v cls ns\<^sub>1)\<close>
+| \<open>ceval (Suc k) env (Cperform l a) ns =
+     bindr (ceval k env a ns) (CFperf l) (\<lambda>av ns\<^sub>1. (HRop l 0 av [], ns\<^sub>1))\<close>
+| \<open>ceval (Suc k) env (Chandle l h b) ns =
+     guardr (ceval k env h ns) (\<lambda>hv ns\<^sub>1.
+       thenr (ceval k env b ns\<^sub>1) (\<lambda>r ns\<^sub>2. cresume k r [CFhandle l hv] ns\<^sub>2))\<close>
+| \<open>ceval (Suc k) env (Cmask l e) ns = thenr (ceval k env e ns) (\<lambda>r ns\<^sub>1. (maskr l r, ns\<^sub>1))\<close>
+| \<open>ceval (Suc k) env (Cperformn x op a) ns =
+     bindr (ceval k env x ns) (CFperfn1 env op a) (\<lambda>xv ns\<^sub>1.
+       bindr (ceval k env a ns\<^sub>1) (CFperfn2 xv op) (\<lambda>av ns\<^sub>2. performn xv op av ns\<^sub>2))\<close>
+| \<open>ceval (Suc k) env (Chandlen l h b) ns =
+     guardr (ceval k env h ns) (\<lambda>hv ns\<^sub>1.
+       guardr (ceval k env b ns\<^sub>1) (\<lambda>bv ns\<^sub>2.
+         thenr (capply k bv (Vname ns\<^sub>2) (Suc ns\<^sub>2))
+               (\<lambda>r ns\<^sub>3. cresume k r [CFhandlen l ns\<^sub>2 hv] ns\<^sub>3)))\<close>
 
-| \<open>mcevcon 0 env c vs es ns = (HRtimeout, ns)\<close>
-| \<open>mcevcon (Suc k) env c vs [] ns = (HRval (Vcon c (rev vs)), ns)\<close>
-| \<open>mcevcon (Suc k) env c vs (e # es) ns =
-     bindr (mceval k env e ns) (CFcon c vs env es) (\<lambda>v ns\<^sub>1. mcevcon k env c (v # vs) es ns\<^sub>1)\<close>
+| \<open>cevcon 0 env c vs es ns = (HRtimeout, ns)\<close>
+| \<open>cevcon (Suc k) env c vs [] ns = (HRval (Vcon c (rev vs)), ns)\<close>
+| \<open>cevcon (Suc k) env c vs (e # es) ns =
+     bindr (ceval k env e ns) (CFcon c vs env es) (\<lambda>v ns\<^sub>1. cevcon k env c (v # vs) es ns\<^sub>1)\<close>
 
-| \<open>mcevalm 0 env v cls ns = (HRtimeout, ns)\<close>
-| \<open>mcevalm (Suc k) env v [] ns = (HRerr, ns)\<close>
-| \<open>mcevalm (Suc k) env v ((p, e) # cls) ns =
+| \<open>cevalm 0 env v cls ns = (HRtimeout, ns)\<close>
+| \<open>cevalm (Suc k) env v [] ns = (HRerr, ns)\<close>
+| \<open>cevalm (Suc k) env v ((p, e) # cls) ns =
      (case cpmatch p v of
-        Some bs \<Rightarrow> mceval k (bs @ env) e ns
-      | None \<Rightarrow> mcevalm k env v cls ns)\<close>
+        Some bs \<Rightarrow> ceval k (bs @ env) e ns
+      | None \<Rightarrow> cevalm k env v cls ns)\<close>
 
-| \<open>mcapply 0 fv av ns = (HRtimeout, ns)\<close>
-| \<open>mcapply (Suc k) (Vclos cenv x b) av ns = mceval k ((x, av) # cenv) b ns\<close>
-| \<open>mcapply (Suc k) (Vclosrec cenv g x b) av ns =
-     mceval k ((x, av) # (g, Vclosrec cenv g x b) # cenv) b ns\<close>
-| \<open>mcapply (Suc k) (VCont fs) av ns = mcunwind k av fs ns\<close>
-| \<open>mcapply (Suc k) fv av ns = (HRerr, ns)\<close>
+| \<open>capply 0 fv av ns = (HRtimeout, ns)\<close>
+| \<open>capply (Suc k) (Vclos cenv x b) av ns = ceval k ((x, av) # cenv) b ns\<close>
+| \<open>capply (Suc k) (Vclosrec cenv g x b) av ns =
+     ceval k ((x, av) # (g, Vclosrec cenv g x b) # cenv) b ns\<close>
+| \<open>capply (Suc k) (VCont fs) av ns = cunwind k av fs ns\<close>
+| \<open>capply (Suc k) fv av ns = (HRerr, ns)\<close>
 
-| \<open>mcstep 0 v f ns = (HRtimeout, ns)\<close>
-| \<open>mcstep (Suc k) v (CFapp1 env a) ns =
-     bindr (mceval k env a ns) (CFapp2 v) (\<lambda>av ns\<^sub>1. mcapply k v av ns\<^sub>1)\<close>
-| \<open>mcstep (Suc k) v (CFapp2 fv) ns = mcapply k fv v ns\<close>
-| \<open>mcstep (Suc k) v (CFlet x env b) ns = mceval k ((x, v) # env) b ns\<close>
-| \<open>mcstep (Suc k) v (CFcon c vs env es) ns = mcevcon k env c (v # vs) es ns\<close>
-| \<open>mcstep (Suc k) v (CFmatch env cls) ns = mcevalm k env v cls ns\<close>
-| \<open>mcstep (Suc k) v (CFperf l) ns = (HRop l 0 v [], ns)\<close>
-| \<open>mcstep (Suc k) v (CFperfn1 env op a) ns =
-     bindr (mceval k env a ns) (CFperfn2 v op) (\<lambda>av ns\<^sub>1. performn v op av ns\<^sub>1)\<close>
-| \<open>mcstep (Suc k) v (CFperfn2 xv op) ns = performn xv op v ns\<close>
-| \<open>mcstep (Suc k) v (CFhandle l hv) ns = (HRval v, ns)\<close>
-| \<open>mcstep (Suc k) v (CFhandlen l i hv \<phi>) ns =
-     (if exit_prot \<phi> then (HRval v, ns)
-      else (if rx then HRop viol_lbl 0 v [] else HRerr, ns))\<close>
-| \<open>mcstep (Suc k) v (CFmask l) ns = (HRval v, ns)\<close>
+| \<open>cstep 0 v f ns = (HRtimeout, ns)\<close>
+| \<open>cstep (Suc k) v (CFapp1 env a) ns =
+     bindr (ceval k env a ns) (CFapp2 v) (\<lambda>av ns\<^sub>1. capply k v av ns\<^sub>1)\<close>
+| \<open>cstep (Suc k) v (CFapp2 fv) ns = capply k fv v ns\<close>
+| \<open>cstep (Suc k) v (CFlet x env b) ns = ceval k ((x, v) # env) b ns\<close>
+| \<open>cstep (Suc k) v (CFcon c vs env es) ns = cevcon k env c (v # vs) es ns\<close>
+| \<open>cstep (Suc k) v (CFmatch env cls) ns = cevalm k env v cls ns\<close>
+| \<open>cstep (Suc k) v (CFperf l) ns = (HRop l 0 v [], ns)\<close>
+| \<open>cstep (Suc k) v (CFperfn1 env op a) ns =
+     bindr (ceval k env a ns) (CFperfn2 v op) (\<lambda>av ns\<^sub>1. performn v op av ns\<^sub>1)\<close>
+| \<open>cstep (Suc k) v (CFperfn2 xv op) ns = performn xv op v ns\<close>
+| \<open>cstep (Suc k) v (CFhandle l hv) ns = (HRval v, ns)\<close>
+| \<open>cstep (Suc k) v (CFhandlen l i hv) ns =
+     (HRval v, ns)\<close>
+| \<open>cstep (Suc k) v (CFmask l) ns = (HRval v, ns)\<close>
 
-| \<open>mcunwind 0 v fs ns = (HRtimeout, ns)\<close>
-| \<open>mcunwind (Suc k) v [] ns = (HRval v, ns)\<close>
-| \<open>mcunwind (Suc k) v (f # fs) ns = thenr (mcstep k v f ns) (\<lambda>r ns\<^sub>1. mcresume k r fs ns\<^sub>1)\<close>
+| \<open>cunwind 0 v fs ns = (HRtimeout, ns)\<close>
+| \<open>cunwind (Suc k) v [] ns = (HRval v, ns)\<close>
+| \<open>cunwind (Suc k) v (f # fs) ns = thenr (cstep k v f ns) (\<lambda>r ns\<^sub>1. cresume k r fs ns\<^sub>1)\<close>
 
-| \<open>mcresume 0 r fs ns = (HRtimeout, ns)\<close>
-| \<open>mcresume (Suc k) (HRval v) fs ns = mcunwind k v fs ns\<close>
-| \<open>mcresume (Suc k) (HRop l m w fr) fs ns =
-     (if rx \<and> l = viol_lbl then (HRop l m w fr, ns) else mcthrow k l m w fr fs ns)\<close>
-| \<open>mcresume (Suc k) (HRopn i op w fr) fs ns = mcthrown k i op w fr fs ns\<close>
-| \<open>mcresume (Suc k) r fs ns = (r, ns)\<close>
+| \<open>cresume 0 r fs ns = (HRtimeout, ns)\<close>
+| \<open>cresume (Suc k) (HRval v) fs ns = cunwind k v fs ns\<close>
+| \<open>cresume (Suc k) (HRop l m w fr) fs ns =
+     cthrow k l m w fr fs ns\<close>
+| \<open>cresume (Suc k) (HRopn i op w fr) fs ns = cthrown k i op w fr fs ns\<close>
+| \<open>cresume (Suc k) r fs ns = (r, ns)\<close>
 
-| \<open>mcthrow 0 l m w fr fs ns = (HRtimeout, ns)\<close>
-| \<open>mcthrow (Suc k) l m w fr [] ns = (HRop l m w fr, ns)\<close>
-| \<open>mcthrow (Suc k) l m w fr (CFhandle l' hv # fs) ns =
+| \<open>cthrow 0 l m w fr fs ns = (HRtimeout, ns)\<close>
+| \<open>cthrow (Suc k) l m w fr [] ns = (HRop l m w fr, ns)\<close>
+| \<open>cthrow (Suc k) l m w fr (CFhandle l' hv # fs) ns =
      (if l' = l then
         (if m = 0 then
-           thenr (mcapply k hv (Vcon (tuple_con 2) [w, VCont (fr @ [CFhandle l' hv])]) ns)
-                 (\<lambda>r ns\<^sub>1. mcresume k r fs ns\<^sub>1)
-         else mcthrow k l (m - 1) w (fr @ [CFhandle l' hv]) fs ns)
-      else mcthrow k l m w (fr @ [CFhandle l' hv]) fs ns)\<close>
-| \<open>mcthrow (Suc k) l m w fr (CFmask l' # fs) ns =
-     (if l' = l then mcthrow k l (Suc m) w (fr @ [CFmask l']) fs ns
-      else mcthrow k l m w (fr @ [CFmask l']) fs ns)\<close>
-| \<open>mcthrow (Suc k) l m w fr (f # fs) ns = mcthrow k l m w (fr @ [f]) fs ns\<close>
+           thenr (capply k hv (Vcon (tuple_con 2) [w, VCont (fr @ [CFhandle l' hv])]) ns)
+                 (\<lambda>r ns\<^sub>1. cresume k r fs ns\<^sub>1)
+         else cthrow k l (m - 1) w (fr @ [CFhandle l' hv]) fs ns)
+      else cthrow k l m w (fr @ [CFhandle l' hv]) fs ns)\<close>
+| \<open>cthrow (Suc k) l m w fr (CFmask l' # fs) ns =
+     (if l' = l then cthrow k l (Suc m) w (fr @ [CFmask l']) fs ns
+      else cthrow k l m w (fr @ [CFmask l']) fs ns)\<close>
+| \<open>cthrow (Suc k) l m w fr (f # fs) ns = cthrow k l m w (fr @ [f]) fs ns\<close>
 
-| \<open>mcthrown 0 i op w fr fs ns = (HRtimeout, ns)\<close>
-| \<open>mcthrown (Suc k) i op w fr [] ns = (HRopn i op w fr, ns)\<close>
-| \<open>mcthrown (Suc k) i op w fr (CFhandlen l j hv \<phi> # fs) ns =
+| \<open>cthrown 0 i op w fr fs ns = (HRtimeout, ns)\<close>
+| \<open>cthrown (Suc k) i op w fr [] ns = (HRopn i op w fr, ns)\<close>
+| \<open>cthrown (Suc k) i op w fr (CFhandlen l j hv # fs) ns =
      (if j = i then
-        (case step_prot op \<phi> of
-           None \<Rightarrow> (if rx then HRop viol_lbl 0 w [] else HRerr, ns)
-         | Some \<phi>' \<Rightarrow>
-             thenr
-               (mcapply k hv
-                  (Vcon (tuple_con 3) [Vlit (LStr op), w, VCont (fr @ [CFhandlen l j hv \<phi>'])]) ns)
-               (\<lambda>r ns\<^sub>1. mcresume k r fs ns\<^sub>1))
-      else mcthrown k i op w (fr @ [CFhandlen l j hv \<phi>]) fs ns)\<close>
-| \<open>mcthrown (Suc k) i op w fr (f # fs) ns = mcthrown k i op w (fr @ [f]) fs ns\<close>
+        thenr
+          (capply k hv
+             (Vcon (tuple_con 3) [Vlit (LStr op), w, VCont (fr @ [CFhandlen l j hv])]) ns)
+          (\<lambda>r ns\<^sub>1. cresume k r fs ns\<^sub>1)
+      else cthrown k i op w (fr @ [CFhandlen l j hv]) fs ns)\<close>
+| \<open>cthrown (Suc k) i op w fr (f # fs) ns = cthrown k i op w (fr @ [f]) fs ns\<close>
   by pat_completeness auto  (* ~50s *)
 
 text \<open>Every call decrements the fuel:\<close>
@@ -455,51 +382,35 @@ text \<open>An operation that escapes a top-level binding is a foreign call if i
   stuckness. \<open>crun\<close> services the foreign calls: it asks the host, records the
   event, and resumes the captured continuation, the whole rest of the binding.
   Its own fuel bounds the number of calls. Every result carries the trace, a
-  timeout too: the trace of a diverging program is the limit of those. In the
-  relaxed mode a marker reaching the top level, and an escaped named
-  operation, end the run with a host event on the marker label.
+  timeout too: the trace of a diverging program is the limit of those.
 
   A finished run returns the name supply, which the program loop threads from
   one top-level binding to the next, starting at \<open>0\<close>, so no name is minted
   twice.\<close>
 
-fun mcrun ::
+fun crun ::
   \<open>nat \<Rightarrow> ffi \<Rightarrow> ffi_ev list \<Rightarrow> hres \<times> nat \<Rightarrow> (cval \<times> nat) cres \<times> ffi_ev list\<close>
 where
-  \<open>mcrun k ffi evs (HRval v, ns) = (Rval (v, ns), evs)\<close>
-| \<open>mcrun k ffi evs (HRtimeout, ns) = (Rtimeout, evs)\<close>
-| \<open>mcrun k ffi evs (HRerr, ns) = (Rerr, evs)\<close>
-| \<open>mcrun k ffi evs (HRopn i op w fr, ns) = (if rx then Rhost (viol_ev w) else Rerr, evs)\<close>
-| \<open>mcrun 0 ffi evs (HRop l m w fr, ns) =
-     (if rx \<and> l = viol_lbl then Rhost (viol_ev w) else Rtimeout, evs)\<close>
-| \<open>mcrun (Suc k) ffi evs (HRop l m w fr, ns) =
+  \<open>crun k ffi evs (HRval v, ns) = (Rval (v, ns), evs)\<close>
+| \<open>crun k ffi evs (HRtimeout, ns) = (Rtimeout, evs)\<close>
+| \<open>crun k ffi evs (HRerr, ns) = (Rerr, evs)\<close>
+| \<open>crun k ffi evs (HRopn i op w fr, ns) = (Rerr, evs)\<close>
+| \<open>crun 0 ffi evs (HRop l m w fr, ns) = (Rtimeout, evs)\<close>
+| \<open>crun (Suc k) ffi evs (HRop l m w fr, ns) =
      (case ffi_sym l of
-        None \<Rightarrow> (if rx \<and> l = viol_lbl then Rhost (viol_ev w) else Rerr, evs)
+        None \<Rightarrow> (Rerr, evs)
       | Some sy \<Rightarrow>
           (case ffi sy evs w of
              None \<Rightarrow> (Rerr, evs)
            | Some FErr \<Rightarrow> (Rhost (FFIev sy w FErr), evs)
            | Some (FRet v) \<Rightarrow>
-               mcrun k ffi (evs @ [FFIev sy w (FRet v)]) (mcunwind k v fr ns)))\<close>
-
-end
+               crun k ffi (evs @ [FFIev sy w (FRet v)]) (cunwind k v fr ns)))\<close>
 
 lemmas ceval_induct =
-  mceval_mcevcon_mcevalm_mcapply_mcstep_mcunwind_mcresume_mcthrow_mcthrown.induct[where rx=False,
+  ceval_cevcon_cevalm_capply_cstep_cunwind_cresume_cthrow_cthrown.induct[
     named_cases ceval cevcon cevalm capply cstep cunwind cresume cthrow cthrown]
 
-lemmas crun_induct = mcrun.induct[where rx=False, named_cases]
-
-abbreviation \<open>ceval \<equiv> mceval False\<close>
-abbreviation \<open>cevcon \<equiv> mcevcon False\<close>
-abbreviation \<open>cevalm \<equiv> mcevalm False\<close>
-abbreviation \<open>capply \<equiv> mcapply False\<close>
-abbreviation \<open>cstep \<equiv> mcstep False\<close>
-abbreviation \<open>cunwind \<equiv> mcunwind False\<close>
-abbreviation \<open>cresume \<equiv> mcresume False\<close>
-abbreviation \<open>cthrow \<equiv> mcthrow False\<close>
-abbreviation \<open>cthrown \<equiv> mcthrown False\<close>
-abbreviation \<open>crun \<equiv> mcrun False\<close>
+lemmas crun_induct = crun.induct[named_cases]
 
 definition sbind :: \<open>'a cres \<times> 's \<Rightarrow> ('a \<Rightarrow> 's \<Rightarrow> 'b cres \<times> 's) \<Rightarrow> 'b cres \<times> 's\<close> where
   \<open>sbind a f =
@@ -527,26 +438,17 @@ text \<open>A core program is a sequence of top-level bindings; its result is th
 
 type_synonym cprog = \<open>(name \<times> cexp) list\<close>
 
-context
-  fixes rx :: bool
-begin
-
-fun mceval_prog :: \<open>nat \<Rightarrow> ffi \<Rightarrow> (name \<times> cval) list \<Rightarrow> nat \<Rightarrow> ffi_ev list \<Rightarrow> cprog \<Rightarrow>
+fun ceval_prog :: \<open>nat \<Rightarrow> ffi \<Rightarrow> (name \<times> cval) list \<Rightarrow> nat \<Rightarrow> ffi_ev list \<Rightarrow> cprog \<Rightarrow>
     ((name \<times> cval) list \<times> nat) cres \<times> ffi_ev list\<close> where
-  \<open>mceval_prog k ffi env ns evs [] = (Rval (env, ns), evs)\<close>
-| \<open>mceval_prog k ffi env ns evs ((x, e) # ds) =
-     sbind (mcrun rx k ffi evs (mceval rx k env e ns))
-       (\<lambda>(v, ns') evs'. mceval_prog k ffi ((x, v) # env) ns' evs' ds)\<close>
+  \<open>ceval_prog k ffi env ns evs [] = (Rval (env, ns), evs)\<close>
+| \<open>ceval_prog k ffi env ns evs ((x, e) # ds) =
+     sbind (crun k ffi evs (ceval k env e ns))
+       (\<lambda>(v, ns') evs'. ceval_prog k ffi ((x, v) # env) ns' evs' ds)\<close>
 
-definition mcentry :: \<open>name \<Rightarrow> ffi \<Rightarrow> cprog \<Rightarrow> nat \<Rightarrow> cval cres \<times> ffi_ev list\<close> where
-  \<open>mcentry x ffi p k =
-     sbind (mceval_prog k ffi [] 0 [] p) (\<lambda>(env, _) evs.
+definition centry :: \<open>name \<Rightarrow> ffi \<Rightarrow> cprog \<Rightarrow> nat \<Rightarrow> cval cres \<times> ffi_ev list\<close> where
+  \<open>centry x ffi p k =
+     sbind (ceval_prog k ffi [] 0 [] p) (\<lambda>(env, _) evs.
        (case map_of env x of Some v \<Rightarrow> Rval v | None \<Rightarrow> Rerr, evs))\<close>
-
-end
-
-abbreviation \<open>ceval_prog \<equiv> mceval_prog False\<close>
-abbreviation \<open>centry \<equiv> mcentry False\<close>
 
 abbreviation csem :: \<open>ffi \<Rightarrow> cprog \<Rightarrow> nat \<Rightarrow> cval cres \<times> ffi_ev list\<close> where
   \<open>csem \<equiv> centry (str ''main'')\<close>
@@ -685,6 +587,6 @@ lemma ceval_prog_le:
      (auto intro!: sbind_le ceval_prog_grows crun_le[OF _ ceval_le])
 
 lemma centry_le: \<open>k \<le> k' \<Longrightarrow> centry x ffi p k \<sqsubseteq>\<^sub>t centry x ffi p k'\<close>
-  by (auto simp: mcentry_def intro!: sbind_le intro: ceval_prog_le split: prod.split)
+  by (auto simp: centry_def intro!: sbind_le intro: ceval_prog_le split: prod.split)
 
 end

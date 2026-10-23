@@ -41,9 +41,8 @@ datatype tentry =
       \<comment> \<open>operation: flat label, the effect's type parameters (bound in the types),
         argument, result\<close>
   | TEffi name scheme                   \<comment> \<open>foreign value: symbol, declared type\<close>
-  | TEeff name \<open>name list\<close> nat \<open>name ltlf option\<close>
-      \<comment> \<open>effect: its label prefix, the names of its operations, its arity, its protocol
-        over the operation names\<close>
+  | TEeff name \<open>name list\<close> nat
+      \<comment> \<open>effect: its label prefix, the names of its operations, its arity\<close>
 
 type_synonym tenv = \<open>(name \<times> tentry) list\<close>
 type_synonym sigsem = \<open>nat list \<times> tenv\<close>
@@ -97,7 +96,7 @@ fun ftv_ent :: \<open>tentry \<Rightarrow> tvar set\<close> and ftv_env :: \<ope
 | \<open>ftv_ent (TEinst ex) = ftv_env ex\<close>
 | \<open>ftv_ent (TEop l ps t\<^sub>1 t\<^sub>2) = ftv t\<^sub>1 \<union> ftv t\<^sub>2\<close>
 | \<open>ftv_ent (TEffi s \<sigma>) = ftv_sch \<sigma>\<close>
-| \<open>ftv_ent (TEeff l ls ar pr) = {}\<close>
+| \<open>ftv_ent (TEeff l ls ar) = {}\<close>
 | \<open>ftv_env [] = {}\<close>
 | \<open>ftv_env ((x, e) # ex) = ftv_ent e \<union> ftv_env ex\<close>
 
@@ -112,7 +111,7 @@ fun frv_ent :: \<open>tentry \<Rightarrow> rvar set\<close> and frv_env :: \<ope
 | \<open>frv_ent (TEinst ex) = frv_env ex\<close>
 | \<open>frv_ent (TEop l ps t\<^sub>1 t\<^sub>2) = frv t\<^sub>1 \<union> frv t\<^sub>2\<close>
 | \<open>frv_ent (TEffi s \<sigma>) = frv_sch \<sigma>\<close>
-| \<open>frv_ent (TEeff l ls ar pr) = {}\<close>
+| \<open>frv_ent (TEeff l ls ar) = {}\<close>
 | \<open>frv_env [] = {}\<close>
 | \<open>frv_env ((x, e) # ex) = frv_ent e \<union> frv_env ex\<close>
 
@@ -138,7 +137,7 @@ fun ktv_ent :: \<open>tentry \<Rightarrow> tvar set\<close> and ktv_env :: \<ope
 | \<open>ktv_ent (TEinst ex) = ktv_env ex\<close>
 | \<open>ktv_ent (TEop l ps t\<^sub>1 t\<^sub>2) = ktv t\<^sub>1 \<union> ktv t\<^sub>2\<close>
 | \<open>ktv_ent (TEffi s \<sigma>) = ktv_sch \<sigma>\<close>
-| \<open>ktv_ent (TEeff l ls ar pr) = {}\<close>
+| \<open>ktv_ent (TEeff l ls ar) = {}\<close>
 | \<open>ktv_env [] = {}\<close>
 | \<open>ktv_env ((x, e) # ex) = ktv_ent e \<union> ktv_env ex\<close>
 
@@ -161,7 +160,7 @@ fun kent :: \<open>(tvar \<Rightarrow> kty) \<Rightarrow> tentry \<Rightarrow> t
 | \<open>kent \<phi> (TEinst ex) = TEinst (kenv \<phi> ex)\<close>
 | \<open>kent \<phi> (TEop l ps t\<^sub>1 t\<^sub>2) = TEop l ps (ksubst \<phi> t\<^sub>1) (ksubst \<phi> t\<^sub>2)\<close>
 | \<open>kent \<phi> (TEffi s \<sigma>) = TEffi s (ksch \<phi> \<sigma>)\<close>
-| \<open>kent \<phi> (TEeff l ls ar pr) = TEeff l ls ar pr\<close>
+| \<open>kent \<phi> (TEeff l ls ar) = TEeff l ls ar\<close>
 | \<open>kenv \<phi> [] = []\<close>
 | \<open>kenv \<phi> ((x, e) # ex) = (x, kent \<phi> e) # kenv \<phi> ex\<close>
 
@@ -339,7 +338,7 @@ and real_env :: \<open>realisation \<Rightarrow> tenv \<Rightarrow> tenv\<close>
 | \<open>real_ent \<phi> (TEinst ex) = TEinst (real_env \<phi> ex)\<close>
 | \<open>real_ent \<phi> (TEop l ps t\<^sub>1 t\<^sub>2) = TEop l ps (treal \<phi> t\<^sub>1) (treal \<phi> t\<^sub>2)\<close>
 | \<open>real_ent \<phi> (TEffi s \<sigma>) = TEffi s (real_scheme \<phi> \<sigma>)\<close>
-| \<open>real_ent \<phi> (TEeff l ls ar pr) = TEeff l ls ar pr\<close>
+| \<open>real_ent \<phi> (TEeff l ls ar) = TEeff l ls ar\<close>
 | \<open>real_env \<phi> [] = []\<close>
 | \<open>real_env \<phi> ((x, e) # ex) = (x, real_ent \<phi> e) # real_env \<phi> ex\<close>
 
@@ -415,7 +414,7 @@ fun stamps_ent :: \<open>tentry \<Rightarrow> nat set\<close> and stamps_env :: 
 | \<open>stamps_ent (TEinst ex) = stamps_env ex\<close>
 | \<open>stamps_ent (TEop l ps t\<^sub>1 t\<^sub>2) = stamps t\<^sub>1 \<union> stamps t\<^sub>2\<close>
 | \<open>stamps_ent (TEffi s \<sigma>) = stamps_sch \<sigma>\<close>
-| \<open>stamps_ent (TEeff l ls ar pr) = {}\<close>
+| \<open>stamps_ent (TEeff l ls ar) = {}\<close>
 | \<open>stamps_env [] = {}\<close>
 | \<open>stamps_env ((x, e) # ex) = stamps_ent e \<union> stamps_env ex\<close>
 
@@ -449,8 +448,33 @@ fun tn_ent :: \<open>tentry \<Rightarrow> tyname set\<close> and tn_env :: \<ope
 | \<open>tn_ent (TEinst ex) = tn_env ex\<close>
 | \<open>tn_ent (TEop l ps t\<^sub>1 t\<^sub>2) = tn t\<^sub>1 \<union> tn t\<^sub>2\<close>
 | \<open>tn_ent (TEffi s \<sigma>) = tn_sch \<sigma>\<close>
-| \<open>tn_ent (TEeff l ls ar pr) = {}\<close>
+| \<open>tn_ent (TEeff l ls ar) = {}\<close>
 | \<open>tn_env [] = {}\<close>
 | \<open>tn_env ((x, e) # E) = tn_ent e \<union> tn_env E\<close>
+
+subsection \<open>Effects of a basis\<close>
+
+text \<open>The effect entries of a basis, nested through structures; the effect
+  owning a label prefix, and the one owning an operation label. An effect
+  is \<^emph>\<open>plain\<close> when it has no type parameters: only those may be handled by
+  an unnamed handler.\<close>
+
+fun effs :: \<open>tenv \<Rightarrow> (name \<times> name list \<times> nat) list\<close>
+and effs_ent :: \<open>tentry \<Rightarrow> (name \<times> name list \<times> nat) list\<close> where
+  \<open>effs [] = []\<close>
+| \<open>effs ((x, e) # ex) = effs_ent e @ effs ex\<close>
+| \<open>effs_ent (TEeff l ls ar) = [(l, ls, ar)]\<close>
+| \<open>effs_ent (TEstr ex) = effs ex\<close>
+| \<open>effs_ent (TEinst ex) = effs ex\<close>
+| \<open>effs_ent _ = []\<close>
+
+definition eff_lookup :: \<open>tenv \<Rightarrow> name \<Rightarrow> (name list \<times> nat) option\<close> where
+  \<open>eff_lookup B l = map_of (effs B) l\<close>
+
+definition eff_of_op :: \<open>tenv \<Rightarrow> name \<Rightarrow> (name \<times> name list \<times> nat) option\<close> where
+  \<open>eff_of_op B lbl = find (\<lambda>(l, ls, _). lbl \<in> set (map (mangle l) ls)) (effs B)\<close>
+
+definition plain_eff :: \<open>tenv \<Rightarrow> name \<Rightarrow> bool\<close> where
+  \<open>plain_eff B lbl \<longleftrightarrow> (case eff_of_op B lbl of Some (l, ls, ar) \<Rightarrow> ar = 0 | None \<Rightarrow> False)\<close>
 
 end

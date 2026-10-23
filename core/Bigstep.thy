@@ -17,7 +17,7 @@ fun plain_frame :: \<open>cframe \<Rightarrow> bool\<close> where
 | \<open>plain_frame f = True\<close>
 
 fun plainn_frame :: \<open>cframe \<Rightarrow> bool\<close> where
-  \<open>plainn_frame (CFhandlen l i hv \<phi>) = False\<close>
+  \<open>plainn_frame (CFhandlen l i hv) = False\<close>
 | \<open>plainn_frame f = True\<close>
 
 fun bubble :: \<open>hres \<Rightarrow> bool\<close> where
@@ -119,8 +119,8 @@ where
 
 | EvHandlen: \<open>env \<turnstile> h,ns \<Down> (HRval hv),ns\<^sub>1 \<Longrightarrow> env \<turnstile> b,ns\<^sub>1 \<Down> (HRval bv),ns\<^sub>2 \<Longrightarrow>
               bv \<sqdot> (Vname ns\<^sub>2),(Suc ns\<^sub>2) \<Down> r,ns\<^sub>3 \<Longrightarrow>
-              resume r [CFhandlen l ns\<^sub>2 hv \<phi>],ns\<^sub>3 \<Down> r',ns\<^sub>4 \<Longrightarrow>
-              env \<turnstile> (Chandlen l h \<phi> b),ns \<Down> r',ns\<^sub>4\<close>
+              resume r [CFhandlen l ns\<^sub>2 hv],ns\<^sub>3 \<Down> r',ns\<^sub>4 \<Longrightarrow>
+              env \<turnstile> (Chandlen l h b),ns \<Down> r',ns\<^sub>4\<close>
 
 | EcNil: \<open>env \<turnstile> c \<langle>vs;[]\<rangle>,ns \<Down> (HRval (Vcon c (rev vs))),ns\<close>
 | EcCons: \<open>env \<turnstile> e,ns \<Down> (HRval v),ns\<^sub>1 \<Longrightarrow> env \<turnstile> c \<langle>(v # vs);es\<rangle>,ns\<^sub>1 \<Down> r,ns\<^sub>2 \<Longrightarrow>
@@ -154,7 +154,7 @@ where
                 v \<Zdres> (CFperfn1 env op a),ns \<Down> r',ns\<^sub>1\<close>
 | StPerfn2: \<open>v \<Zdres> (CFperfn2 (Vname i) op),ns \<Down> (HRopn i op v []),ns\<close>
 | StHandle: \<open>v \<Zdres> (CFhandle l hv),ns \<Down> (HRval v),ns\<close>
-| StHandlen: \<open>exit_prot \<phi> \<Longrightarrow> v \<Zdres> (CFhandlen l i hv \<phi>),ns \<Down> (HRval v),ns\<close>
+| StHandlen: \<open>v \<Zdres> (CFhandlen l i hv),ns \<Down> (HRval v),ns\<close>
 | StMask: \<open>v \<Zdres> (CFmask l),ns \<Down> (HRval v),ns\<close>
 
 | UwNil: \<open>v \<leadsto> [],ns \<Down> (HRval v),ns\<close>
@@ -181,13 +181,12 @@ where
             throw l \<^bold>@ m  w \<parallel> fr \<parallel> (f # fs),ns \<Down> r,ns'\<close>
 
 | TnNil: \<open>thrown i op  w \<parallel> fr \<parallel> [],ns \<Down> (HRopn i op w fr),ns\<close>
-| TnCatch: \<open>step_prot op \<phi> = Some \<phi>' \<Longrightarrow>
-            hv \<sqdot> (Vcon (tuple_con 3) [Vlit (LStr op), w, VCont (fr @ [CFhandlen l i hv \<phi>'])]),ns
+| TnCatch: \<open>hv \<sqdot> (Vcon (tuple_con 3) [Vlit (LStr op), w, VCont (fr @ [CFhandlen l i hv])]),ns
               \<Down> r,ns\<^sub>1 \<Longrightarrow>
             resume r fs,ns\<^sub>1 \<Down> r',ns\<^sub>2 \<Longrightarrow>
-            thrown i op  w \<parallel> fr \<parallel> (CFhandlen l i hv \<phi> # fs),ns \<Down> r',ns\<^sub>2\<close>
-| TnOther: \<open>j \<noteq> i \<Longrightarrow> thrown i op  w \<parallel> (fr @ [CFhandlen l j hv \<phi>]) \<parallel> fs,ns \<Down> r,ns' \<Longrightarrow>
-            thrown i op  w \<parallel> fr \<parallel> (CFhandlen l j hv \<phi> # fs),ns \<Down> r,ns'\<close>
+            thrown i op  w \<parallel> fr \<parallel> (CFhandlen l i hv # fs),ns \<Down> r',ns\<^sub>2\<close>
+| TnOther: \<open>j \<noteq> i \<Longrightarrow> thrown i op  w \<parallel> (fr @ [CFhandlen l j hv]) \<parallel> fs,ns \<Down> r,ns' \<Longrightarrow>
+            thrown i op  w \<parallel> fr \<parallel> (CFhandlen l j hv # fs),ns \<Down> r,ns'\<close>
 | TnPlain: \<open>plainn_frame f \<Longrightarrow> thrown i op  w \<parallel> (fr @ [f]) \<parallel> fs,ns \<Down> r,ns' \<Longrightarrow>
             thrown i op  w \<parallel> fr \<parallel> (f # fs),ns \<Down> r,ns'\<close>
 
@@ -504,15 +503,15 @@ next
   then obtain k where \<open>ceval k env x ns = (r, ns\<^sub>1)\<close> by blast
   then show ?case using EvPerformnBub1.hyps by (intro exI[of _ \<open>Suc k\<close>]) simp
 next
-  case (EvHandlen env h ns hv ns\<^sub>1 b bv ns\<^sub>2 r ns\<^sub>3 l \<phi> r' ns\<^sub>4)
+  case (EvHandlen env h ns hv ns\<^sub>1 b bv ns\<^sub>2 r ns\<^sub>3 l r' ns\<^sub>4)
   from EvHandlen.IH obtain k\<^sub>1 k\<^sub>2 k\<^sub>3 k\<^sub>4 where
     h\<^sub>1: \<open>ceval k\<^sub>1 env h ns = (HRval hv, ns\<^sub>1)\<close> and
     h\<^sub>2: \<open>ceval k\<^sub>2 env b ns\<^sub>1 = (HRval bv, ns\<^sub>2)\<close> and
     h\<^sub>3: \<open>capply k\<^sub>3 bv (Vname ns\<^sub>2) (Suc ns\<^sub>2) = (r, ns\<^sub>3)\<close> and
-    h\<^sub>4: \<open>cresume k\<^sub>4 r [CFhandlen l ns\<^sub>2 hv \<phi>] ns\<^sub>3 = (r', ns\<^sub>4)\<close> by blast
+    h\<^sub>4: \<open>cresume k\<^sub>4 r [CFhandlen l ns\<^sub>2 hv] ns\<^sub>3 = (r', ns\<^sub>4)\<close> by blast
   define K where \<open>K = max k\<^sub>1 (max k\<^sub>2 (max k\<^sub>3 k\<^sub>4))\<close>
   have le: \<open>k\<^sub>1 \<le> K\<close> \<open>k\<^sub>2 \<le> K\<close> \<open>k\<^sub>3 \<le> K\<close> \<open>k\<^sub>4 \<le> K\<close> by (simp_all add: K_def)
-  have \<open>ceval (Suc K) env (Chandlen l h \<phi> b) ns = (r', ns\<^sub>4)\<close>
+  have \<open>ceval (Suc K) env (Chandlen l h b) ns = (r', ns\<^sub>4)\<close>
     using EvHandlen.hyps D_ne
     by (simp add: ceval_ne_mono[OF h\<^sub>1] ceval_ne_mono[OF h\<^sub>2] capply_ne_mono[OF h\<^sub>3]
                   cresume_ne_mono[OF h\<^sub>4] le)
@@ -642,18 +641,18 @@ next
       using ThPlain.hyps h by (cases f) simp_all
   qed
 next
-  case (TnCatch op \<phi> \<phi>' hv w fr l i ns r ns\<^sub>1 fs r' ns\<^sub>2)
+  case (TnCatch hv op w fr l i ns r ns\<^sub>1 fs r' ns\<^sub>2)
   from TnCatch.IH obtain k\<^sub>1 k\<^sub>2 where
-    h\<^sub>1: \<open>capply k\<^sub>1 hv (Vcon (tuple_con 3) [Vlit (LStr op), w, VCont (fr @ [CFhandlen l i hv \<phi>'])])
+    h\<^sub>1: \<open>capply k\<^sub>1 hv (Vcon (tuple_con 3) [Vlit (LStr op), w, VCont (fr @ [CFhandlen l i hv])])
       ns = (r, ns\<^sub>1)\<close>
     and h\<^sub>2: \<open>cresume k\<^sub>2 r fs ns\<^sub>1 = (r', ns\<^sub>2)\<close> by blast
-  have \<open>cthrown (Suc (max k\<^sub>1 k\<^sub>2)) i op w fr (CFhandlen l i hv \<phi> # fs) ns = (r', ns\<^sub>2)\<close>
+  have \<open>cthrown (Suc (max k\<^sub>1 k\<^sub>2)) i op w fr (CFhandlen l i hv # fs) ns = (r', ns\<^sub>2)\<close>
     using TnCatch.hyps D_ne
     by (simp add: capply_ne_mono[OF h\<^sub>1 _ max.cobounded1] cresume_ne_mono[OF h\<^sub>2 _ max.cobounded2])
   then show ?case by blast
 next
-  case (TnOther j i op w fr l hv \<phi> fs ns r ns')
-  then obtain k where \<open>cthrown k i op w (fr @ [CFhandlen l j hv \<phi>]) fs ns = (r, ns')\<close> by blast
+  case (TnOther j i op w fr l hv fs ns r ns')
+  then obtain k where \<open>cthrown k i op w (fr @ [CFhandlen l j hv]) fs ns = (r, ns')\<close> by blast
   then show ?case using TnOther.hyps by (intro exI[of _ \<open>Suc k\<close>]) simp
 next
   case (TnPlain f i op w fr fs ns r ns')

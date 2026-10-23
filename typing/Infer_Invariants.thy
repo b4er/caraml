@@ -1366,9 +1366,9 @@ next
     qed
   qed
 next
-  case (spec_stat_Cons_SpEff B n T acc x as ops pr ss)
+  case (spec_stat_Cons_SpEff B n T acc x as ops ss)
   show ?case
-  proof (cases \<open>distinct (map n_txt as) \<and> prot_wf pr ops\<close>)
+  proof (cases \<open>distinct (map n_txt as)\<close>)
     case False then show ?thesis by (simp only: spec_stat.simps if_not_P[OF False] if_False)
   next
     case True
@@ -1975,6 +1975,9 @@ next
   next
     case (TParen ts)
     then show ?thesis using spine_stat_Cons.prems spine_stat_Cons.IH by (auto split: if_split_asm)
+  next
+    case (TName x)
+    then show ?thesis using spine_stat_Cons.prems by (simp split: if_split_asm)
   qed
 next
   case (atom_stat_TPath B fr ve n p)
@@ -2417,24 +2420,8 @@ next
   note ih = infer_pat_PatApp_Cons_PQid_Cons.IH[OF lk refl mlen inst[symmetric] cty refl pa wf]
   show ?case unfolding e by (rule con_pat_step[OF wf lk inst cty ih un])
 next
-  case (infer_pat_PatAs_Cons_Nil uf B a x n)
+  case (infer_pat_PatAs uf B p x n)
   then show ?case by (auto split: Option.bind_split_asm prod.split_asm if_split_asm)
-next
-  case (infer_pat_PatAs_Cons_PQid_Cons uf B p v va x n)
-  from infer_pat_PatAs_Cons_PQid_Cons.prems
-  obtain \<sigma> m \<tau>\<^sub>c n\<^sub>1 \<tau>s \<tau>\<^sub>0 sp \<tau>s' \<Gamma>\<^sub>1 n\<^sub>2 s\<^sub>1 where
-    wf: \<open>cenv B\<close> \<open>bfree_env B\<close> \<open>ktv_env B \<subseteq> FK\<close> and
-    lk: \<open>tlookup B (path_nms p) = Some (TEcon \<sigma> m)\<close> and
-    mlen: \<open>m = length (v # va) \<and> v # va \<noteq> [] \<and> nm_ok (n_txt x)\<close> and
-    inst: \<open>inst_scheme n \<sigma> = (\<tau>\<^sub>c, n\<^sub>1)\<close> and cty: \<open>con_ty m \<tau>\<^sub>c = Some (\<tau>s, \<tau>\<^sub>0)\<close> and
-    pa: \<open>infer_patoms uf B (v # va) n\<^sub>1 = Some (sp, \<tau>s', \<Gamma>\<^sub>1, n\<^sub>2)\<close> and
-    un: \<open>unis uf (zip \<tau>s' (map (sapp sp) \<tau>s)) n\<^sub>2 = Some (s\<^sub>1, n')\<close> and
-    e: \<open>s = s\<^sub>1 \<odot> sp\<close> \<open>\<tau> = sapp s\<^sub>1 (sapp sp \<tau>\<^sub>0)\<close>
-      \<open>\<Gamma> = (n_txt x, sapp s\<^sub>1 (sapp sp \<tau>\<^sub>0)) # map (apsnd (sapp s\<^sub>1)) \<Gamma>\<^sub>1\<close>
-    by (auto split: option.split_asm tentry.split_asm if_split_asm prod.split_asm
-        Option.bind_split_asm)
-  note ih = infer_pat_PatAs_Cons_PQid_Cons.IH[OF lk refl mlen inst[symmetric] cty refl pa wf]
-  show ?case unfolding e using con_pat_step[OF wf lk inst cty ih un] by simp
 next
   case (infer_pat_PatAnn uf B p ty n)
   from infer_pat_PatAnn.prems obtain s\<^sub>1 \<tau>\<^sub>1 \<Gamma>\<^sub>1 n\<^sub>1 \<tau>\<^sub>a ve n\<^sub>2 s\<^sub>2 where
@@ -2497,14 +2484,14 @@ next
     by (auto split: option.split_asm tentry.split_asm nat.split_asm prod.split_asm)
   show ?case using con_inst_fresh[OF wf lk inst(1)] inst by simp
 next
-  case (infer_patom_PNum uf B l n)
-  then show ?case by (auto simp: fresh_ok_TC0 split: Option.bind_split_asm)
+  case (infer_patom_PNum_None uf B l v n)
+  then show ?case by (auto simp: fresh_ok_TC0 split: if_split_asm)
 next
-  case (infer_patom_PStr uf B l n)
-  then show ?case by (auto simp: fresh_ok_TC0 split: Option.bind_split_asm)
+  case (infer_patom_PStr uf B l cs n)
+  then show ?case by (auto simp: fresh_ok_TC0)
 next
-  case (infer_patom_PChar uf B l n)
-  then show ?case by (auto simp: fresh_ok_TC0 split: Option.bind_split_asm)
+  case (infer_patom_PChar uf B l c n)
+  then show ?case by (auto simp: fresh_ok_TC0)
 next
   case (infer_patom_PParen_Cons_Nil uf B p n)
   then show ?case by simp

@@ -39,7 +39,7 @@ and fv_arms :: \<open>(cpat \<times> cexp) list \<Rightarrow> name set\<close> w
 | \<open>fv (Chandle l h b) = fv h \<union> fv b\<close>
 | \<open>fv (Cmask l e) = fv e\<close>
 | \<open>fv (Cperformn x op a) = fv x \<union> fv a\<close>
-| \<open>fv (Chandlen l h \<phi> b) = fv h \<union> fv b\<close>
+| \<open>fv (Chandlen l h b) = fv h \<union> fv b\<close>
 | \<open>fv_list [] = {}\<close>
 | \<open>fv_list (e # es) = fv e \<union> fv_list es\<close>
 | \<open>fv_arms [] = {}\<close>
@@ -89,7 +89,7 @@ where
             CFperfn1 e\<^sub>1 op a \<approx>\<^sub>f CFperfn1 e\<^sub>2 op a\<close>
 | FPerfn2: \<open>xv\<^sub>1 \<approx>\<^sub>v xv\<^sub>2 \<Longrightarrow> CFperfn2 xv\<^sub>1 op \<approx>\<^sub>f CFperfn2 xv\<^sub>2 op\<close>
 | FHandle: \<open>hv\<^sub>1 \<approx>\<^sub>v hv\<^sub>2 \<Longrightarrow> CFhandle l hv\<^sub>1 \<approx>\<^sub>f CFhandle l hv\<^sub>2\<close>
-| FHandlen: \<open>hv\<^sub>1 \<approx>\<^sub>v hv\<^sub>2 \<Longrightarrow> CFhandlen l i hv\<^sub>1 \<phi> \<approx>\<^sub>f CFhandlen l i hv\<^sub>2 \<phi>\<close>
+| FHandlen: \<open>hv\<^sub>1 \<approx>\<^sub>v hv\<^sub>2 \<Longrightarrow> CFhandlen l i hv\<^sub>1 \<approx>\<^sub>f CFhandlen l i hv\<^sub>2\<close>
 | FMask: \<open>CFmask l \<approx>\<^sub>f CFmask l\<close>
 
 text \<open>Environment agreement on a set of names is pointwise on the lookups, so
@@ -291,7 +291,7 @@ inductive_simps cfeq_shape:
   \<open>CFperfn1 e op a \<approx>\<^sub>f g\<close>
   \<open>CFperfn2 v op \<approx>\<^sub>f g\<close>
   \<open>CFhandle l hv \<approx>\<^sub>f g\<close>
-  \<open>CFhandlen l i hv \<phi> \<approx>\<^sub>f g\<close>
+  \<open>CFhandlen l i hv \<approx>\<^sub>f g\<close>
   \<open>CFmask l \<approx>\<^sub>f g\<close>
 
 lemma cfeq_plain: \<open>f \<approx>\<^sub>f g \<Longrightarrow> plain_frame g = plain_frame f\<close>
@@ -502,7 +502,7 @@ next
           hreq_push[OF hr cfeq_perfn1I[OF aa]]
     by blast
 next
-  case (EvHandlen env h ns hv ns\<^sub>1 b bv ns\<^sub>2 r ns\<^sub>3 l \<phi> r' ns\<^sub>4 env\<^sub>2)
+  case (EvHandlen env h ns hv ns\<^sub>1 b bv ns\<^sub>2 r ns\<^sub>3 l r' ns\<^sub>4 env\<^sub>2)
   from EvHandlen.prems have ah: \<open>aenv (fv h) env env\<^sub>2\<close> and ab: \<open>aenv (fv b) env env\<^sub>2\<close>
     by (auto simp: aenv_def)
   from ah obtain hv' where h\<^sub>2: \<open>env\<^sub>2 \<turnstile> h,ns \<Down> (HRval hv'),ns\<^sub>1\<close> and ehv: \<open>hv \<approx>\<^sub>v hv'\<close>
@@ -512,10 +512,10 @@ next
   from ebv obtain r\<^sub>2
     where ap\<^sub>2: \<open>bv' \<sqdot> (Vname ns\<^sub>2),(Suc ns\<^sub>2) \<Down> r\<^sub>2,ns\<^sub>3\<close> and hr: \<open>hreq r r\<^sub>2\<close>
     by (blast dest: EvHandlen.IH intro: QName)
-  have gs: \<open>list_all2 (\<approx>\<^sub>f) [CFhandlen l ns\<^sub>2 hv \<phi>] [CFhandlen l ns\<^sub>2 hv' \<phi>]\<close>
+  have gs: \<open>list_all2 (\<approx>\<^sub>f) [CFhandlen l ns\<^sub>2 hv] [CFhandlen l ns\<^sub>2 hv']\<close>
     using ehv by (auto intro: FHandlen)
   from hr gs obtain r\<^sub>2'
-    where t\<^sub>2: \<open>resume r\<^sub>2 [CFhandlen l ns\<^sub>2 hv' \<phi>],ns\<^sub>3 \<Down> r\<^sub>2',ns\<^sub>4\<close>
+    where t\<^sub>2: \<open>resume r\<^sub>2 [CFhandlen l ns\<^sub>2 hv'],ns\<^sub>3 \<Down> r\<^sub>2',ns\<^sub>4\<close>
       and hr': \<open>hreq r' r\<^sub>2'\<close> by (auto dest: EvHandlen.IH)
   show ?case using h\<^sub>2 b\<^sub>2 ap\<^sub>2 t\<^sub>2 hr' by (auto intro: Dintros)
 next
@@ -781,33 +781,33 @@ next
     where t\<^sub>2: \<open>throw l \<^bold>@ m  w\<^sub>2 \<parallel> (gr\<^sub>2 @ [g]) \<parallel> gs',ns \<Down> r\<^sub>2,ns'\<close> and hr: \<open>hreq r r\<^sub>2\<close> by auto
   show ?case unfolding gs\<^sub>2 using t\<^sub>2 hr plg by (auto intro: Dintros)
 next
-  case (TnCatch op \<phi> \<phi>' hv w fr l i ns r ns\<^sub>1 fs r' ns\<^sub>2 w\<^sub>2 gr\<^sub>2 gs\<^sub>2)
+  case (TnCatch hv op w fr l i ns r ns\<^sub>1 fs r' ns\<^sub>2 w\<^sub>2 gr\<^sub>2 gs\<^sub>2)
   from TnCatch.prems have ew: \<open>w \<approx>\<^sub>v w\<^sub>2\<close> and egr: \<open>list_all2 (\<approx>\<^sub>f) fr gr\<^sub>2\<close>
-    and lg: \<open>list_all2 (\<approx>\<^sub>f) (CFhandlen l i hv \<phi> # fs) gs\<^sub>2\<close> by auto
-  from lg obtain hv\<^sub>2 gs' where gs\<^sub>2: \<open>gs\<^sub>2 = CFhandlen l i hv\<^sub>2 \<phi> # gs'\<close>
+    and lg: \<open>list_all2 (\<approx>\<^sub>f) (CFhandlen l i hv # fs) gs\<^sub>2\<close> by auto
+  from lg obtain hv\<^sub>2 gs' where gs\<^sub>2: \<open>gs\<^sub>2 = CFhandlen l i hv\<^sub>2 # gs'\<close>
     and ehv: \<open>hv \<approx>\<^sub>v hv\<^sub>2\<close> and lgs: \<open>list_all2 (\<approx>\<^sub>f) fs gs'\<close>
     by (auto simp: list_all2_Cons1 cfeq_shape)
-  have argeq: \<open>Vcon (tuple_con 3) [Vlit (LStr op), w, VCont (fr @ [CFhandlen l i hv \<phi>'])]
-               \<approx>\<^sub>v Vcon (tuple_con 3) [Vlit (LStr op), w\<^sub>2, VCont (gr\<^sub>2 @ [CFhandlen l i hv\<^sub>2 \<phi>'])]\<close>
+  have argeq: \<open>Vcon (tuple_con 3) [Vlit (LStr op), w, VCont (fr @ [CFhandlen l i hv])]
+               \<approx>\<^sub>v Vcon (tuple_con 3) [Vlit (LStr op), w\<^sub>2, VCont (gr\<^sub>2 @ [CFhandlen l i hv\<^sub>2])]\<close>
     using ew egr ehv by (auto intro: QCon QCont QLit list_all2_appendI FHandlen)
   from ehv argeq obtain r\<^sub>2 where
     a\<^sub>2: \<open>hv\<^sub>2 \<sqdot> (Vcon (tuple_con 3)
-            [Vlit (LStr op), w\<^sub>2, VCont (gr\<^sub>2 @ [CFhandlen l i hv\<^sub>2 \<phi>'])]),ns \<Down> r\<^sub>2,ns\<^sub>1\<close>
+            [Vlit (LStr op), w\<^sub>2, VCont (gr\<^sub>2 @ [CFhandlen l i hv\<^sub>2])]),ns \<Down> r\<^sub>2,ns\<^sub>1\<close>
     and hr: \<open>hreq r r\<^sub>2\<close> by (auto dest: TnCatch.IH)
   from hr lgs obtain r\<^sub>2' where u\<^sub>2: \<open>resume r\<^sub>2 gs',ns\<^sub>1 \<Down> r\<^sub>2',ns\<^sub>2\<close> and hr': \<open>hreq r' r\<^sub>2'\<close>
     by (auto dest: TnCatch.IH)
   show ?case unfolding gs\<^sub>2 using a\<^sub>2 u\<^sub>2 hr' TnCatch.hyps by (auto intro: Dintros)
 next
-  case (TnOther j i op w fr l hv \<phi> fs ns r ns' w\<^sub>2 gr\<^sub>2 gs\<^sub>2)
+  case (TnOther j i op w fr l hv fs ns r ns' w\<^sub>2 gr\<^sub>2 gs\<^sub>2)
   from TnOther.prems have ew: \<open>w \<approx>\<^sub>v w\<^sub>2\<close> and egr: \<open>list_all2 (\<approx>\<^sub>f) fr gr\<^sub>2\<close>
-    and lg: \<open>list_all2 (\<approx>\<^sub>f) (CFhandlen l j hv \<phi> # fs) gs\<^sub>2\<close> by auto
-  from lg obtain hv\<^sub>2 gs' where gs\<^sub>2: \<open>gs\<^sub>2 = CFhandlen l j hv\<^sub>2 \<phi> # gs'\<close>
+    and lg: \<open>list_all2 (\<approx>\<^sub>f) (CFhandlen l j hv # fs) gs\<^sub>2\<close> by auto
+  from lg obtain hv\<^sub>2 gs' where gs\<^sub>2: \<open>gs\<^sub>2 = CFhandlen l j hv\<^sub>2 # gs'\<close>
     and ehv: \<open>hv \<approx>\<^sub>v hv\<^sub>2\<close> and lgs: \<open>list_all2 (\<approx>\<^sub>f) fs gs'\<close>
     by (auto simp: list_all2_Cons1 cfeq_shape)
-  have \<open>list_all2 (\<approx>\<^sub>f) (fr @ [CFhandlen l j hv \<phi>]) (gr\<^sub>2 @ [CFhandlen l j hv\<^sub>2 \<phi>])\<close>
+  have \<open>list_all2 (\<approx>\<^sub>f) (fr @ [CFhandlen l j hv]) (gr\<^sub>2 @ [CFhandlen l j hv\<^sub>2])\<close>
     using egr ehv by (auto intro: list_all2_appendI FHandlen)
   from TnOther.IH[OF ew this lgs] obtain r\<^sub>2
-    where t\<^sub>2: \<open>thrown i op  w\<^sub>2 \<parallel> (gr\<^sub>2 @ [CFhandlen l j hv\<^sub>2 \<phi>]) \<parallel> gs',ns \<Down> r\<^sub>2,ns'\<close>
+    where t\<^sub>2: \<open>thrown i op  w\<^sub>2 \<parallel> (gr\<^sub>2 @ [CFhandlen l j hv\<^sub>2]) \<parallel> gs',ns \<Down> r\<^sub>2,ns'\<close>
       and hr: \<open>hreq r r\<^sub>2\<close> by auto
   show ?case unfolding gs\<^sub>2 using t\<^sub>2 hr TnOther.hyps by (auto intro: Dintros)
 next

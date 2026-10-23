@@ -7,7 +7,6 @@ session CaraML_Core = CaraML_Syntax +
     Core
     Foreign
     Behaviour
-    Relaxed
     Bigstep
     Closure
   document_files (in "..")

@@ -7,7 +7,6 @@ session CaraML_Typing = CaraML_Core +
     Basis
     Unify
     Desugar
-    Grades
     Typing
     Infer
     Infer_Scope
