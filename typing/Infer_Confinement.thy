@@ -971,8 +971,35 @@ next
     from TParen this cB nfr show ?thesis by (rule spine_stat_Cons.IH)
   next
     case (TName x)
-    then show ?thesis using spine_stat_Cons.prems by (simp split: if_split_asm)
+    with spine_stat_Cons.prems have \<open>as = []\<close> \<open>atom_stat B fr ve n a = Some (\<tau>, ve', n')\<close>
+      by (auto split: if_split_asm)
+    from TName this cB nfr show ?thesis by (rule spine_stat_Cons.IH)
   qed
+next
+  case (ty_stat_THand B fr ve n e a ro b)
+  have cB: \<open>cenv B\<close> and nfr: \<open>\<not> fr\<close> using ty_stat_THand.prems by blast+
+  from ty_stat_THand.prems obtain p as args ve\<^sub>1 n\<^sub>1 \<tau>\<^sub>0 ve\<^sub>2 n\<^sub>2 \<epsilon> ve\<^sub>3 n\<^sub>3 \<tau>\<^sub>1 ve\<^sub>4 n\<^sub>4 l ls where
+    e: \<open>e = TPath p # as\<close> and
+    at: \<open>atoms_stat B fr ve n as = Some (args, ve\<^sub>1, n\<^sub>1)\<close> and
+    sp: \<open>spine_stat B fr ve\<^sub>1 n\<^sub>1 a = Some (\<tau>\<^sub>0, ve\<^sub>2, n\<^sub>2)\<close> and
+    ro: \<open>row_stat B fr ve\<^sub>2 n\<^sub>2 ro = Some (\<epsilon>, ve\<^sub>3, n\<^sub>3)\<close> and
+    sb: \<open>spine_stat B fr ve\<^sub>3 n\<^sub>3 b = Some (\<tau>\<^sub>1, ve\<^sub>4, n\<^sub>4)\<close> and
+    \<tau>: \<open>\<tau> = TFn (TAct (eff_ty l args) [n\<^sub>4] (canon_row (rext (map (nlbl \<circ> mangle l) ls) \<epsilon>)) \<tau>\<^sub>0)
+             \<epsilon> \<tau>\<^sub>1\<close> and
+    ve': \<open>ve' = ve\<^sub>4\<close>
+    by (auto split: list.split_asm tatom.split_asm Option.bind_split_asm prod.split_asm)
+  have ih1: \<open>(\<forall>t \<in> set args. ftv t \<subseteq> tvars ve \<and> frv t \<subseteq> rvars ve) \<and> ve\<^sub>1 = ve\<close>
+    using e refl at cB nfr by (rule ty_stat_THand.IH)
+  have ih2: \<open>ftv \<tau>\<^sub>0 \<subseteq> tvars ve\<^sub>1 \<and> frv \<tau>\<^sub>0 \<subseteq> rvars ve\<^sub>1 \<and> ve\<^sub>2 = ve\<^sub>1\<close>
+    using e refl at refl refl sp cB nfr by (rule ty_stat_THand.IH)
+  have ih3: \<open>frv_row \<epsilon> \<subseteq> rvars ve\<^sub>2 \<and> ve\<^sub>3 = ve\<^sub>2\<close>
+    using e refl at refl refl sp refl refl ro cB nfr by (rule ty_stat_THand.IH)
+  have ih4: \<open>ftv \<tau>\<^sub>1 \<subseteq> tvars ve\<^sub>3 \<and> frv \<tau>\<^sub>1 \<subseteq> rvars ve\<^sub>3 \<and> ve\<^sub>4 = ve\<^sub>3\<close>
+    using e refl at refl refl sp refl refl ro refl refl sb cB nfr by (rule ty_stat_THand.IH)
+  show ?case unfolding \<tau> ve' using ih1 ih2 ih3 ih4 by (auto simp: eff_ty_def rext_def)
+next
+  case (atom_stat_TName B fr ve n e)
+  then show ?case by (auto split: list.split_asm tatom.split_asm if_split_asm)
 next
   case (atom_stat_TPath B fr ve n p)
   have cB: \<open>cenv B\<close> and nfr: \<open>\<not> fr\<close> using atom_stat_TPath.prems by blast+

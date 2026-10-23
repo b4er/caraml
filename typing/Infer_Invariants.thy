@@ -1127,6 +1127,9 @@ lemma bind_eq_cong: \<open>x = y \<Longrightarrow> (\<And>v. x = Some v \<Longri
 lemma head_stat_eq: \<open>lookup_eq B B' \<Longrightarrow> head_stat B fr ve n p args = head_stat B' fr ve n p args\<close>
   by (cases rule: lookup_eqE[of B B' \<open>path_nms p\<close>]) (cases ve, auto)+
 
+lemma eff_at_eq: \<open>lookup_eq B B' \<Longrightarrow> eff_at B p ar = eff_at B' p ar\<close>
+  by (cases rule: lookup_eqE[of B B' \<open>path_nms p\<close>]) (auto simp: eff_at_def)
+
 lemma label_stat_eq:
   assumes \<open>lookup_eq B B'\<close>
   shows \<open>label_stat B t = label_stat B' t\<close>
@@ -1190,6 +1193,64 @@ next
       then show ?thesis using \<open>ts = t # ts'\<close> Cons by simp
     qed
   qed
+next
+  case (atom_stat_TName B fr ve n e)
+  show ?case
+  proof (cases e)
+    case (Cons x as)
+    show ?thesis
+    proof (cases x)
+      case (TPath p)
+      have \<open>atoms_stat B fr ve n as = atoms_stat B' fr ve n as\<close> if fr
+        using Cons TPath that atom_stat_TName.prems by (rule atom_stat_TName.IH)
+      then show ?thesis
+        unfolding Cons TPath
+        by (auto simp: eff_at_eq[OF atom_stat_TName.prems] split: prod.split cong: Option.bind_cong)
+    qed (use Cons in simp_all)
+  qed simp
+next
+  case (ty_stat_THand B fr ve n e a ro b)
+  show ?case
+  proof (cases e)
+    case (Cons x as)
+    show ?thesis
+    proof (cases x)
+      case (TPath p)
+      have IH1: \<open>atoms_stat B fr ve n as = atoms_stat B' fr ve n as\<close>
+        using Cons TPath ty_stat_THand.prems by (rule ty_stat_THand.IH)
+      show ?thesis
+        unfolding Cons TPath ty_stat.simps list.case tatom.case
+      proof (rule bind_eq_cong[OF IH1], goal_cases args)
+        case (args v)
+        obtain ts ve\<^sub>1 n\<^sub>1 where v: \<open>v = (ts, ve\<^sub>1, n\<^sub>1)\<close> by (cases v) auto
+        have IH2: \<open>spine_stat B fr ve\<^sub>1 n\<^sub>1 a = spine_stat B' fr ve\<^sub>1 n\<^sub>1 a\<close>
+          using Cons TPath args[unfolded v] refl refl ty_stat_THand.prems by (rule ty_stat_THand.IH)
+        show ?case
+          unfolding v prod.case
+        proof (rule bind_eq_cong[OF IH2], goal_cases act)
+          case (act w)
+          obtain \<tau>\<^sub>0 ve\<^sub>2 n\<^sub>2 where w: \<open>w = (\<tau>\<^sub>0, ve\<^sub>2, n\<^sub>2)\<close> by (cases w) auto
+          have IH3: \<open>row_stat B fr ve\<^sub>2 n\<^sub>2 ro = row_stat B' fr ve\<^sub>2 n\<^sub>2 ro\<close>
+            using Cons TPath args[unfolded v] refl refl act[unfolded w] refl refl
+              ty_stat_THand.prems
+            by (rule ty_stat_THand.IH)
+          show ?case
+            unfolding w prod.case
+          proof (rule bind_eq_cong[OF IH3], goal_cases row)
+            case (row u)
+            obtain \<epsilon> ve\<^sub>3 n\<^sub>3 where u: \<open>u = (\<epsilon>, ve\<^sub>3, n\<^sub>3)\<close> by (cases u) auto
+            have IH4: \<open>spine_stat B fr ve\<^sub>3 n\<^sub>3 b = spine_stat B' fr ve\<^sub>3 n\<^sub>3 b\<close>
+              using Cons TPath args[unfolded v] refl refl act[unfolded w] refl refl
+                row[unfolded u] refl refl ty_stat_THand.prems
+              by (rule ty_stat_THand.IH)
+            show ?case
+              unfolding u prod.case
+              by (rule bind_eq_cong[OF IH4]) (auto simp: eff_at_eq[OF ty_stat_THand.prems])
+          qed
+        qed
+      qed
+    qed (use Cons in simp_all)
+  qed simp
 next
   case (atoms_stat_Cons B fr ve n a as)
   have IH1: \<open>atom_stat B fr ve n a = atom_stat B' fr ve n a\<close>
@@ -1758,6 +1819,19 @@ lemma fresh_ty_TFn:
    fresh_ty ve n n' B t\<^sub>2 \<Longrightarrow> fresh_ty ve n n' B (TFn t\<^sub>1 e t\<^sub>2)\<close>
   by (auto simp: fresh_ty_def bfree_def)
 
+lemma fresh_ty_TEv:
+  \<open>fresh_ty ve n n' B l \<Longrightarrow> fresh_ty ve n n' B s \<Longrightarrow> fresh_ty ve n n' B t \<Longrightarrow>
+   fresh_ty ve n n' B (TEv l s t)\<close>
+  by (auto simp: fresh_ty_def bfree_def)
+
+lemma fresh_ty_TAct:
+  \<open>fresh_ty ve n n' B l \<Longrightarrow> frv_row e \<subseteq> rvars ve \<union> {n ..< n'} \<Longrightarrow> brv_row e = {} \<Longrightarrow>
+   fresh_ty ve n n' B t \<Longrightarrow> fresh_ty ve n n' B (TAct l K e t)\<close>
+  by (auto simp: fresh_ty_def bfree_def)
+
+lemma fresh_ty_eff_ty: \<open>\<forall>\<tau> \<in> set \<tau>s. fresh_ty ve n n' B \<tau> \<Longrightarrow> fresh_ty ve n n' B (eff_ty l \<tau>s)\<close>
+  by (auto simp: fresh_ty_def bfree_def eff_ty_def)
+
 lemma fresh_ty_tuple: \<open>\<forall>\<tau> \<in> set \<tau>s. fresh_ty ve n n' B \<tau> \<Longrightarrow> fresh_ty ve n n' B (tuple \<tau>s)\<close>
   by (auto simp: fresh_ty_def bfree_def)
 
@@ -1994,14 +2068,82 @@ next
     then show ?thesis using spine_stat_Cons.prems spine_stat_Cons.IH by (auto split: if_split_asm)
   next
     case (TName x)
-    then show ?thesis using spine_stat_Cons.prems by (simp split: if_split_asm)
+    then show ?thesis using spine_stat_Cons.prems spine_stat_Cons.IH by (auto split: if_split_asm)
   qed
+next
+  case (ty_stat_THand B fr ve n e a ro b)
+  from ty_stat_THand.prems obtain p as args ve\<^sub>1 n\<^sub>1 \<tau>\<^sub>0 ve\<^sub>2 n\<^sub>2 \<epsilon> ve\<^sub>3 n\<^sub>3 \<tau>\<^sub>1 ve\<^sub>4 n\<^sub>4 l ls where
+    e: \<open>e = TPath p # as\<close> and
+    at: \<open>atoms_stat B fr ve n as = Some (args, ve\<^sub>1, n\<^sub>1)\<close> and
+    sp: \<open>spine_stat B fr ve\<^sub>1 n\<^sub>1 a = Some (\<tau>\<^sub>0, ve\<^sub>2, n\<^sub>2)\<close> and
+    ro: \<open>row_stat B fr ve\<^sub>2 n\<^sub>2 ro = Some (\<epsilon>, ve\<^sub>3, n\<^sub>3)\<close> and
+    sb: \<open>spine_stat B fr ve\<^sub>3 n\<^sub>3 b = Some (\<tau>\<^sub>1, ve\<^sub>4, n\<^sub>4)\<close> and
+    \<tau>: \<open>\<tau> = TFn (TAct (eff_ty l args) [n\<^sub>4] (canon_row (rext (map (nlbl \<circ> mangle l) ls) \<epsilon>)) \<tau>\<^sub>0)
+             \<epsilon> \<tau>\<^sub>1\<close> and
+    ve': \<open>ve' = ve\<^sub>4\<close> and n': \<open>n' = Suc n\<^sub>4\<close>
+    by (auto split: list.split_asm tatom.split_asm Option.bind_split_asm prod.split_asm)
+  have ih1: \<open>tve_step ve n ve\<^sub>1 n\<^sub>1 \<and> (\<forall>\<tau> \<in> set args. fresh_ty ve n n\<^sub>1 B \<tau>)\<close>
+    using e refl at \<open>cenv B\<close> \<open>tve_ok ve\<close> by (rule ty_stat_THand.IH)
+  have ih2: \<open>tve_step ve\<^sub>1 n\<^sub>1 ve\<^sub>2 n\<^sub>2 \<and> fresh_ty ve\<^sub>1 n\<^sub>1 n\<^sub>2 B \<tau>\<^sub>0\<close>
+    using e refl at refl refl sp \<open>cenv B\<close> tve_step_ok[OF ih1[THEN conjunct1]]
+    by (rule ty_stat_THand.IH)
+  have ih3: \<open>tve_step ve\<^sub>2 n\<^sub>2 ve\<^sub>3 n\<^sub>3 \<and> frv_row \<epsilon> \<subseteq> rvars ve\<^sub>2 \<union> {n\<^sub>2 ..< n\<^sub>3} \<and> brv_row \<epsilon> = {}\<close>
+    using e refl at refl refl sp refl refl ro \<open>cenv B\<close> tve_step_ok[OF ih2[THEN conjunct1]]
+    by (rule ty_stat_THand.IH)
+  have ih4: \<open>tve_step ve\<^sub>3 n\<^sub>3 ve\<^sub>4 n\<^sub>4 \<and> fresh_ty ve\<^sub>3 n\<^sub>3 n\<^sub>4 B \<tau>\<^sub>1\<close>
+    using e refl at refl refl sp refl refl ro refl refl sb \<open>cenv B\<close>
+      tve_step_ok[OF ih3[THEN conjunct1]]
+    by (rule ty_stat_THand.IH)
+  have st\<^sub>2: \<open>tve_step ve n ve\<^sub>2 n\<^sub>2\<close>
+    using tve_step_trans[OF ih1[THEN conjunct1] ih2[THEN conjunct1]] .
+  have st\<^sub>3: \<open>tve_step ve n ve\<^sub>3 n\<^sub>3\<close> using tve_step_trans[OF st\<^sub>2 ih3[THEN conjunct1]] .
+  have st\<^sub>4: \<open>tve_step ve n ve\<^sub>4 n\<^sub>4\<close> using tve_step_trans[OF st\<^sub>3 ih4[THEN conjunct1]] .
+  have le: \<open>n \<le> n\<^sub>1\<close> \<open>n\<^sub>1 \<le> n\<^sub>2\<close> \<open>n\<^sub>2 \<le> n\<^sub>3\<close> \<open>n\<^sub>3 \<le> n\<^sub>4\<close>
+    using tve_step_le[OF ih1[THEN conjunct1]] tve_step_le[OF ih2[THEN conjunct1]]
+      tve_step_le[OF ih3[THEN conjunct1]] tve_step_le[OF ih4[THEN conjunct1]] .
+  then have le': \<open>n\<^sub>1 \<le> Suc n\<^sub>4\<close> \<open>n\<^sub>2 \<le> Suc n\<^sub>4\<close> \<open>n\<^sub>3 \<le> Suc n\<^sub>4\<close> \<open>n\<^sub>4 \<le> Suc n\<^sub>4\<close> \<open>n \<le> n\<^sub>3\<close>
+    by linarith+
+  have args: \<open>\<forall>\<tau> \<in> set args. fresh_ty ve n (Suc n\<^sub>4) B \<tau>\<close>
+    using ih1 by (blast intro: fresh_ty_mono[OF _ le_refl le'(1)])
+  have t\<^sub>0: \<open>fresh_ty ve n (Suc n\<^sub>4) B \<tau>\<^sub>0\<close>
+    using fresh_ty_step[OF ih2[THEN conjunct2] ih1[THEN conjunct1] le(1) le'(2) le'(1)] .
+  have row: \<open>frv_row \<epsilon> \<subseteq> rvars ve \<union> {n ..< Suc n\<^sub>4}\<close>
+    using frv_row_step[OF ih3[THEN conjunct2, THEN conjunct1] st\<^sub>2 le'(3) le'(2)] .
+  have t\<^sub>1: \<open>fresh_ty ve n (Suc n\<^sub>4) B \<tau>\<^sub>1\<close>
+    using fresh_ty_step[OF ih4[THEN conjunct2] st\<^sub>3 le'(5) le'(4) le'(3)] .
+  have act: \<open>fresh_ty ve n (Suc n\<^sub>4) B
+      (TAct (eff_ty l args) [n\<^sub>4] (canon_row (rext (map (nlbl \<circ> mangle l) ls) \<epsilon>)) \<tau>\<^sub>0)\<close>
+    by (rule fresh_ty_TAct[OF fresh_ty_eff_ty[OF args] _ _ t\<^sub>0])
+       (use row ih3 in \<open>simp_all add: rext_def\<close>)
+  show ?case
+    using tve_step_mono[OF st\<^sub>4 le_refl le'(4)]
+      fresh_ty_TFn[OF act row ih3[THEN conjunct2, THEN conjunct2] t\<^sub>1]
+    unfolding \<tau> ve' n' by simp
 next
   case (atom_stat_TPath B fr ve n p)
   then show ?case using head_stat_wf[OF _ \<open>cenv B\<close> \<open>tve_ok ve\<close>, of fr n p \<open>[]\<close> \<tau> ve' n' n] by simp
 next
   case (atom_stat_TWild B fr ve n x)
   then show ?case by (auto simp: tve_step_def fresh_ty_def bfree_def split: if_split_asm)
+next
+  case (atom_stat_TName B fr ve n e)
+  from atom_stat_TName.prems obtain p as args ve\<^sub>1 n\<^sub>1 l where
+    e: \<open>e = TPath p # as\<close> and fr: \<open>fr\<close> and
+    at: \<open>atoms_stat B fr ve n as = Some (args, ve\<^sub>1, n\<^sub>1)\<close> and
+    \<tau>: \<open>\<tau> = TEv (eff_ty l args) (TV n\<^sub>1) (tuple args)\<close> and ve': \<open>ve' = ve\<^sub>1\<close> and n': \<open>n' = Suc n\<^sub>1\<close>
+    by (auto split: list.split_asm tatom.split_asm if_split_asm Option.bind_split_asm
+                    prod.split_asm)
+  have ih: \<open>tve_step ve n ve\<^sub>1 n\<^sub>1 \<and> (\<forall>\<tau> \<in> set args. fresh_ty ve n n\<^sub>1 B \<tau>)\<close>
+    using e refl fr at \<open>cenv B\<close> \<open>tve_ok ve\<close> by (rule atom_stat_TName.IH)
+  have args: \<open>\<forall>\<tau> \<in> set args. fresh_ty ve n (Suc n\<^sub>1) B \<tau>\<close>
+    using ih by (blast intro: fresh_ty_mono[OF _ le_refl le_SucI[OF le_refl]])
+  have \<open>fresh_ty ve n (Suc n\<^sub>1) B (TV n\<^sub>1)\<close>
+    using tve_step_le[OF ih[THEN conjunct1]] tve_step_ok[OF ih[THEN conjunct1]]
+    by (auto simp: fresh_ty_def bfree_def)
+  then show ?case
+    using tve_step_mono[OF ih[THEN conjunct1] le_refl le_SucI[OF le_refl]]
+      fresh_ty_TEv[OF fresh_ty_eff_ty[OF args] _ fresh_ty_tuple[OF args]]
+    unfolding \<tau> ve' n' by simp
 next
   case (atom_stat_TParen B fr ve n ts)
   consider (nil) \<open>ts = []\<close> | (single) t where \<open>ts = [t]\<close>

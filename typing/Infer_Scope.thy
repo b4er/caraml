@@ -561,6 +561,39 @@ next
   next
   qed (use spine_stat_Cons.IH spine_stat_Cons.prems in \<open>auto split: if_split_asm\<close>)
 next
+  case (ty_stat_THand B fr ve n e a ro b)
+  from ty_stat_THand.prems obtain p as args v\<^sub>1 n\<^sub>1 \<tau>\<^sub>0 v\<^sub>2 n\<^sub>2 r v\<^sub>3 n\<^sub>3 \<tau>\<^sub>1 v\<^sub>4 n\<^sub>4 l ls where
+    e: \<open>e = TPath p # as\<close> and
+    at: \<open>atoms_stat B fr ve n as = Some (args, v\<^sub>1, n\<^sub>1)\<close> and
+    sp: \<open>spine_stat B fr v\<^sub>1 n\<^sub>1 a = Some (\<tau>\<^sub>0, v\<^sub>2, n\<^sub>2)\<close> and
+    ro: \<open>row_stat B fr v\<^sub>2 n\<^sub>2 ro = Some (r, v\<^sub>3, n\<^sub>3)\<close> and
+    sb: \<open>spine_stat B fr v\<^sub>3 n\<^sub>3 b = Some (\<tau>\<^sub>1, v\<^sub>4, n\<^sub>4)\<close> and
+    \<tau>: \<open>\<tau> = TFn (TAct (eff_ty l args) [n\<^sub>4] (canon_row (rext (map (nlbl \<circ> mangle l) ls) r)) \<tau>\<^sub>0)
+             r \<tau>\<^sub>1\<close> and
+    ve': \<open>ve' = v\<^sub>4\<close>
+    by (auto simp: bind_eq_Some_conv split: list.split_asm tatom.split_asm)
+  from ty_stat_THand.prems have B: \<open>sigs_in B X\<close> and v: \<open>tsigs_ve ve \<subseteq> X\<close> by blast+
+  have a: \<open>(\<forall>t \<in> set args. tsigs t \<subseteq> X) \<and> tsigs_ve v\<^sub>1 \<subseteq> X\<close>
+    using e refl at B v by (rule ty_stat_THand.IH)
+  have b: \<open>tsigs \<tau>\<^sub>0 \<subseteq> X \<and> tsigs_ve v\<^sub>2 \<subseteq> X\<close>
+    using e refl at refl refl sp B a[THEN conjunct2] by (rule ty_stat_THand.IH)
+  have c: \<open>tsigs_ve v\<^sub>3 \<subseteq> X\<close>
+    using e refl at refl refl sp refl refl ro B b[THEN conjunct2] by (rule ty_stat_THand.IH)
+  have d: \<open>tsigs \<tau>\<^sub>1 \<subseteq> X \<and> tsigs_ve v\<^sub>4 \<subseteq> X\<close>
+    using e refl at refl refl sp refl refl ro refl refl sb B c by (rule ty_stat_THand.IH)
+  show ?case using a b d unfolding \<tau> ve' by (auto simp: eff_ty_def)
+next
+  case (atom_stat_TName B fr ve n e)
+  from atom_stat_TName.prems obtain p as args v m l where
+    e: \<open>e = TPath p # as\<close> and fr: \<open>fr\<close> and
+    at: \<open>atoms_stat B fr ve n as = Some (args, v, m)\<close> and
+    \<tau>: \<open>\<tau> = TEv (eff_ty l args) (TV m) (tuple args)\<close> and ve': \<open>ve' = v\<close>
+    by (auto simp: bind_eq_Some_conv split: list.split_asm tatom.split_asm if_split_asm)
+  from atom_stat_TName.prems have B: \<open>sigs_in B X\<close> and v: \<open>tsigs_ve ve \<subseteq> X\<close> by blast+
+  have \<open>(\<forall>t \<in> set args. tsigs t \<subseteq> X) \<and> tsigs_ve v \<subseteq> X\<close>
+    using e refl fr at B v by (rule atom_stat_TName.IH)
+  then show ?case unfolding \<tau> ve' by (auto simp: eff_ty_def)
+next
   case (atom_stat_TPath B fr ve n p)
   then show ?case using head_stat_sigs[of B fr ve n p \<open>[]\<close> \<tau> ve' n' X] by simp
 next

@@ -286,6 +286,32 @@ fun head_stat :: \<open>tenv \<Rightarrow> bool \<Rightarrow> tvenv \<Rightarrow
                      else None))
            | _ \<Rightarrow> None))\<close>
 
+text \<open>The effect a path names, at a given arity: its label prefix and its operations.\<close>
+
+definition eff_at :: \<open>tenv \<Rightarrow> mpath \<Rightarrow> nat \<Rightarrow> (name \<times> name list) option\<close> where
+  \<open>eff_at B p ar =
+     (case tlookup B (path_nms p) of
+        Some (TEeff l ls ar') \<Rightarrow> (if ar' = ar then Some (l, ls) else None)
+      | _ \<Rightarrow> None)\<close>
+
+text \<open>A row extended by a list of labels.\<close>
+
+definition rext :: \<open>name list \<Rightarrow> krow \<Rightarrow> krow\<close> where
+  \<open>rext ls \<epsilon> = foldr RCons ls \<epsilon>\<close>
+
+text \<open>A name type \<open>[E as]\<close> is the type of a handler name for the effect \<open>E\<close> at the
+  arguments \<open>as\<close>. Its scope is a fresh variable, which the handler installing the
+  name fixes (rule \<open>W_with\<close>); only an open annotation can mint it, so a closed one
+  has no name types.
+
+  A handler type \<open>handler [E as] a \<rightarrow> [\<rho>] b\<close> is the type rule \<open>W_handlern\<close> gives a
+  named handler: a function with latent row \<open>\<rho>\<close> from an action for \<open>E\<close> to \<open>b\<close>, where
+  the action returns \<open>a\<close> and performs \<open>E\<close>'s operations on its name on top of \<open>\<rho>\<close>. The
+  scope the action binds is fresh.
+
+  A name-dependent arrow \<open>(f : [E as]) \<rightarrow> \<tau>\<close> is an action type as well, but the AST
+  carries no row for it, so it stays rejected.\<close>
+
 function (sequential) ty_stat :: \<open>tenv \<Rightarrow> bool \<Rightarrow> tvenv \<Rightarrow> nat \<Rightarrow> ty \<Rightarrow> (kty \<times> tvenv \<times> nat) option\<close> and
   atoms_stat :: \<open>tenv \<Rightarrow> bool \<Rightarrow> tvenv \<Rightarrow> nat \<Rightarrow> tatom list \<Rightarrow> (kty list \<times> tvenv \<times> nat) option\<close> and
   atom_stat :: \<open>tenv \<Rightarrow> bool \<Rightarrow> tvenv \<Rightarrow> nat \<Rightarrow> tatom \<Rightarrow> (kty \<times> tvenv \<times> nat) option\<close> and
@@ -318,7 +344,19 @@ where
 | \<open>ty_stat B fr ve n (TRow ls ro) = None\<close>
 | \<open>ty_stat B fr ve n TErr = None\<close>
 | \<open>ty_stat B fr ve n (TArrowName _ _ _) = None\<close>
-| \<open>ty_stat B fr ve n (THand _ _ _ _) = None\<close>
+| \<open>ty_stat B fr ve n (THand e a ro b) =
+     (case e of
+        TPath p # as \<Rightarrow>
+          atoms_stat B fr ve n as \<bind> (\<lambda>(args, ve\<^sub>1, n\<^sub>1).
+            spine_stat B fr ve\<^sub>1 n\<^sub>1 a \<bind> (\<lambda>(\<tau>\<^sub>0, ve\<^sub>2, n\<^sub>2).
+              row_stat B fr ve\<^sub>2 n\<^sub>2 ro \<bind> (\<lambda>(\<epsilon>, ve\<^sub>3, n\<^sub>3).
+                spine_stat B fr ve\<^sub>3 n\<^sub>3 b \<bind> (\<lambda>(\<tau>, ve\<^sub>4, n\<^sub>4).
+                  eff_at B p (length args) \<bind> (\<lambda>(l, ls).
+                    Some (TFn (TAct (eff_ty l args) [n\<^sub>4]
+                                (canon_row (rext (map (nlbl \<circ> mangle l) ls) \<epsilon>)) \<tau>\<^sub>0)
+                              \<epsilon> \<tau>,
+                          ve\<^sub>4, Suc n\<^sub>4))))))
+      | _ \<Rightarrow> None)\<close>
 | \<open>ty_stat B fr ve n (TRec _ _) = None\<close>
 
 | \<open>spine_stat B fr ve n [] = None\<close>
@@ -333,7 +371,15 @@ where
      (case ts of
         [t] \<Rightarrow> ty_stat B fr ve n t
       | _ \<Rightarrow> tys_stat B fr ve n ts \<bind> (\<lambda>(ts', ve', n'). Some (tuple ts', ve', n')))\<close>
-| \<open>atom_stat B fr ve n (TName _) = None\<close>
+| \<open>atom_stat B fr ve n (TName e) =
+     (case e of
+        TPath p # as \<Rightarrow>
+          (if fr
+           then atoms_stat B fr ve n as \<bind> (\<lambda>(args, ve', n').
+                  eff_at B p (length args) \<bind> (\<lambda>(l, ls).
+                    Some (TEv (eff_ty l args) (TV n') (tuple args), ve', Suc n')))
+           else None)
+      | _ \<Rightarrow> None)\<close>
 
 | \<open>atoms_stat B fr ve n [] = Some ([], ve, n)\<close>
 | \<open>atoms_stat B fr ve n (a # as) =
@@ -1048,9 +1094,6 @@ fun hlabels :: \<open>tenv \<Rightarrow> hclause list \<Rightarrow> name list\<c
 | \<open>hlabels B (_ # cls) = hlabels B cls\<close>
 
 lemmas hlabels_induct = hlabels.induct[named_cases hlabels]
-
-definition rext :: \<open>name list \<Rightarrow> krow \<Rightarrow> krow\<close> where
-  \<open>rext ls \<epsilon> = foldr RCons ls \<epsilon>\<close>
 
 abbreviation binders :: \<open>(name \<times> kty) list \<Rightarrow> tenv\<close> where
   \<open>binders \<Gamma> \<equiv> map (\<lambda>(x, \<tau>). (x, TEval (kmono \<tau>))) \<Gamma>\<close>
