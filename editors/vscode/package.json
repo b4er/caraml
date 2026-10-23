@@ -1,10 +1,11 @@
 {
   "name": "caraml",
   "displayName": "CaraML",
-  "description": "Language support for CaraML backed by the Haskell LSP.",
-  "version": "0.1.0",
+  "description": "Language support for CaraML backed by the language server.",
+  "version": "0.0.0",
   "publisher": "b4er",
   "license": "BSD-3-Clause",
+  "icon": "images/caraml-logo.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/b4er/caraml"
@@ -27,7 +28,11 @@
         "id": "caraml",
         "aliases": ["CaraML", "caraml"],
         "extensions": [".caraml"],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./images/caraml-icon.png",
+          "dark": "./images/caraml-icon.png"
+        }
       }
     ],
     "grammars": [
@@ -121,9 +126,10 @@
     ]
   },
   "scripts": {
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "vscode:prepublish": "npm run compile"
+    "check": "tsc -p ./ --noEmit",
+    "compile": "npm run check && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=out/extension.js --sourcemap",
+    "watch": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=out/extension.js --sourcemap --watch",
+    "vscode:prepublish": "npm run check && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=out/extension.js --minify"
   },
   "dependencies": {
     "vscode-languageclient": "^10.1.2"
@@ -131,6 +137,7 @@
   "devDependencies": {
     "@types/node": "^20.19.0",
     "@types/vscode": "^1.91.0",
+    "esbuild": "^0.25.12",
     "typescript": "^7.0.2"
   }
 }

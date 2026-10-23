@@ -2,7 +2,7 @@
 
 ;; Author: b4er
 ;; SPDX-License-Identifier: BSD-3-Clause
-;; Version: 0.1.0
+;; Version: 0.0.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: languages
 
