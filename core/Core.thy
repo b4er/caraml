@@ -658,8 +658,14 @@ lemma sbind_grows:
   assumes a: \<open>\<exists>es. snd a = evs @ es\<close> and f: \<open>\<And>v s. \<exists>es. snd (f v s) = s @ es\<close>
   shows \<open>\<exists>es. snd (sbind a f) = evs @ es\<close>
 proof -
-  obtain r es where \<open>a = (r, evs @ es)\<close> using a by (cases a) auto
-  then show ?thesis using f[of _ \<open>evs @ es\<close>] by (cases r) (auto simp: sbind_def)
+  obtain r es where a': \<open>a = (r, evs @ es)\<close> using a by (cases a) auto
+  show ?thesis
+  proof (cases r)
+    case (Rval v)
+    obtain es' where \<open>snd (f v (evs @ es)) = (evs @ es) @ es'\<close> using f by blast
+    then have \<open>snd (sbind a f) = evs @ (es @ es')\<close> by (simp add: a' Rval)
+    then show ?thesis ..
+  qed (auto simp: a')
 qed
 
 lemma sbind_le:
