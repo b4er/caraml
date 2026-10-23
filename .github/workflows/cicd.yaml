@@ -68,8 +68,8 @@ jobs:
           path: afp
           key: ${{env.AFP}}
 
-      - if: steps.afp.outputs.cache-hit != 'true'
-        name: Download AFP
+      - name: Download AFP
+        if: steps.afp.outputs.cache-hit != 'true'
         run: |
           mkdir afp
           curl -sSfL "https://www.isa-afp.org/release/$AFP.tar.gz" \
@@ -165,8 +165,8 @@ jobs:
         with:
           name: sdist
 
-      - id: unpack
-        name: Unpack sources
+      - name: Unpack sources
+        id: unpack
         run: |
           sdist=$(echo caraml-*.tar.gz)
           version=${sdist#caraml-}; version=${version%.tar.gz}
@@ -225,6 +225,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      id-token: write
     env:
       VSCE: 4.0.0
       OVSX: 1.2.0
@@ -235,7 +236,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: Package vsix
+      - name: Package .vsix
         working-directory: editors/vscode
         run: |
           npm ci
@@ -247,9 +248,8 @@ jobs:
           path: caraml.vsix
           if-no-files-found: error
 
-      # a release is the first push to main that carries a version without a tag
-      - id: versions
-        name: Check editor versions
+      - name: Check editor versions
+        id: versions
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           new() { git ls-remote --exit-code --tags origin "refs/tags/$1" > /dev/null && echo false || echo true; }
@@ -260,23 +260,29 @@ jobs:
             echo "emacs=$e";   echo "emacs_new=$(new "emacs-v$e")"
           } >> "$GITHUB_OUTPUT"
 
-      - if: steps.versions.outputs.vscode_new == 'true'
-        name: Publish vsix
-        env:
-          VSCE_PAT: ${{secrets.VSCE_PAT}}
-          OVSX_PAT: ${{secrets.OVSX_PAT}}
-        run: |
-          npx --yes "@vscode/vsce@$VSCE" publish --packagePath caraml.vsix
-          npx --yes "ovsx@$OVSX" publish caraml.vsix
-          git tag "vscode-v${{steps.versions.outputs.vscode}}"
-          git push origin "vscode-v${{steps.versions.outputs.vscode}}"
+      - uses: azure/login@v3
+        if: steps.versions.outputs.vscode_new == 'true'
+        with:
+          client-id: ${{vars.AZURE_CLIENT_ID}}
+          tenant-id: ${{vars.AZURE_TENANT_ID}}
+          allow-no-subscriptions: true
 
-      # MELPA builds from the repository; the tag is the stable release
-      - if: steps.versions.outputs.emacs_new == 'true'
-        name: Tag emacs
+      - name: Publish .vsix
+        if: steps.versions.outputs.vscode_new == 'true'
+        env:
+          VERSION: vscode-v${{steps.versions.outputs.vscode}}
         run: |
-          git tag "emacs-v${{steps.versions.outputs.emacs}}"
-          git push origin "emacs-v${{steps.versions.outputs.emacs}}"
+          npx --yes "@vscode/vsce@$VSCE" publish --azure-credential --packagePath caraml.vsix --skip-duplicate
+          # npx --yes "ovsx@$OVSX" publish caraml.vsix --skip-duplicate
+
+          git tag "$VERSION" && git push origin "$VERSION"
+
+      - name: Tag emacs
+        if: steps.versions.outputs.emacs_new == 'true'
+        env:
+          VERSION: emacs-v${{steps.versions.outputs.emacs}}
+        run: |
+          git tag "$VERSION" && git push origin "$VERSION"
 
   release:
     name: Release
@@ -288,8 +294,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - id: version
-        name: Check release version
+      - name: Check release version
+        id: version
         run: |
           v=$(sed -n 's/^version: *//p' haskell/caraml.cabal)
           echo "tag=v$v" >> "$GITHUB_OUTPUT"
@@ -306,8 +312,8 @@ jobs:
           merge-multiple: true
           pattern: "{sdist,caraml-*}"
 
-      - if: steps.version.outputs.new == 'true'
-        name: Create release
+      - name: Create release
+        if: steps.version.outputs.new == 'true'
         env:
           GH_TOKEN: ${{github.token}}
         run: gh release create "${{steps.version.outputs.tag}}" dist/* --target "$GITHUB_SHA" --generate-notes
