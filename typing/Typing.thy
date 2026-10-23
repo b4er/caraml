@@ -255,9 +255,36 @@ definition dep_vars :: \<open>nat list \<Rightarrow> tvar list \<Rightarrow> rea
 
 type_synonym tvenv = \<open>(name \<times> kty) list \<times> (name \<times> krow) list\<close>
 
+text \<open>A binder is a lexical identifier: it is not empty, and it contains
+  neither the path separator \<open>.\<close> (\<^const>\<open>mangle\<close>), nor \<open>%\<close>, with which the
+  elaborator's own binders start, nor \<open>(\<close>, with which a tuple's constructor tag
+  starts (\<^const>\<open>tuple_con\<close>). The rules that bind a name demand it.\<close>
+
+definition nm_ok :: \<open>name \<Rightarrow> bool\<close> where
+  \<open>nm_ok x \<longleftrightarrow> x \<noteq> [] \<and> 0x2E \<notin> set x \<and> 0x25 \<notin> set x \<and> 0x28 \<notin> set x\<close>
+
+text \<open>A row entry names an effect, whose operations it lists, or a name bound by a
+  name-dependent arrow, whose operations it lists under the name prefix. While its
+  type is elaborated, the bound name lives in the type environment under a reserved
+  key, as a fixity does, as the effect of its named operations.\<close>
+
+definition nkey :: \<open>name \<Rightarrow> name\<close> where
+  \<open>nkey x = str ''%name.'' @ x\<close>
+
+definition name_at :: \<open>tenv \<Rightarrow> mpath \<Rightarrow> (name \<times> name list) option\<close> where
+  \<open>name_at B p =
+     (case path_nms p of
+        [x] \<Rightarrow> (case map_of B (nkey x) of Some (TEeff l ls ar) \<Rightarrow> Some (l, ls) | _ \<Rightarrow> None)
+      | _ \<Rightarrow> None)\<close>
+
 fun label_stat :: \<open>tenv \<Rightarrow> ty \<Rightarrow> name list option\<close> where
   \<open>label_stat B (TSpine [TPath p]) =
-     (case tlookup B (path_nms p) of Some (TEeff l ls ar) \<Rightarrow> Some (map (mangle l) ls) | _ \<Rightarrow> None)\<close>
+     (case name_at B p of
+        Some (l, ls) \<Rightarrow> Some (map (nlbl \<circ> mangle l) ls)
+      | None \<Rightarrow>
+          (case tlookup B (path_nms p) of
+             Some (TEeff l ls ar) \<Rightarrow> Some (map (mangle l) ls)
+           | _ \<Rightarrow> None))\<close>
 | \<open>label_stat B _ = None\<close>
 
 lemmas label_stat_cases = label_stat.cases[named_cases label_stat]
@@ -302,7 +329,9 @@ definition rext :: \<open>name list \<Rightarrow> krow \<Rightarrow> krow\<close
 text \<open>A name type \<open>[E as]\<close> is the type of a handler name for the effect \<open>E\<close> at the
   arguments \<open>as\<close>. Its scope is a fresh variable, which the handler installing the
   name fixes (rule \<open>W_with\<close>); only an open annotation can mint it, so a closed one
-  has no name types.
+  has no name types. A datatype cannot store a name either: a stored name would
+  need its scope as a parameter of the datatype, and a name type has no syntax
+  for its scope.
 
   A handler type \<open>handler [E as] a \<rightarrow> [\<rho>] b\<close> is the type rule \<open>W_handlern\<close> gives a
   named handler: a function with latent row \<open>\<rho>\<close> from an action for \<open>E\<close> to \<open>b\<close>, where
@@ -311,7 +340,11 @@ text \<open>A name type \<open>[E as]\<close> is the type of a handler name for 
 
   A name-dependent arrow \<open>(f : [E as]) \<rightarrow> [\<rho>] \<tau>\<close> is that action type itself: it returns
   \<open>\<tau>\<close> and performs \<open>E\<close>'s operations on \<open>f\<close> on top of \<open>\<rho>\<close>. An absent row is read as for a
-  plain arrow. The bound name \<open>f\<close> is not yet visible in \<open>\<rho>\<close> or \<open>\<tau>\<close>.\<close>
+  plain arrow. The bound name \<open>f\<close> is in scope in \<open>\<rho>\<close> and \<open>\<tau>\<close> as a row entry
+  (\<^const>\<open>name_at\<close>), for the types inside \<open>\<tau>\<close> that perform on \<open>f\<close> (the arrow's own
+  row carries \<open>f\<close>'s operations already, so naming \<open>f\<close> there lists them twice). A name
+  bound by \<open>with\<close> is not in scope: inference learns its effect only after its body, so
+  an annotation in the body cannot name it. A handler type binds no name.\<close>
 
 function (sequential) ty_stat :: \<open>tenv \<Rightarrow> bool \<Rightarrow> tvenv \<Rightarrow> nat \<Rightarrow> ty \<Rightarrow> (kty \<times> tvenv \<times> nat) option\<close> and
   atoms_stat :: \<open>tenv \<Rightarrow> bool \<Rightarrow> tvenv \<Rightarrow> nat \<Rightarrow> tatom list \<Rightarrow> (kty list \<times> tvenv \<times> nat) option\<close> and
@@ -347,13 +380,17 @@ where
 | \<open>ty_stat B fr ve n (TArrowName f e ro t) =
      (case e of
         TPath p # as \<Rightarrow>
-          atoms_stat B fr ve n as \<bind> (\<lambda>(args, ve\<^sub>1, n\<^sub>1).
-            row_stat B fr ve\<^sub>1 n\<^sub>1 ro \<bind> (\<lambda>(\<epsilon>, ve\<^sub>2, n\<^sub>2).
-              ty_stat B fr ve\<^sub>2 n\<^sub>2 t \<bind> (\<lambda>(\<tau>, ve\<^sub>3, n\<^sub>3).
-                eff_at B p (length args) \<bind> (\<lambda>(l, ls).
-                  Some (TAct (eff_ty l args) [n\<^sub>3]
-                          (canon_row (rext (map (nlbl \<circ> mangle l) ls) \<epsilon>)) \<tau>,
-                        ve\<^sub>3, Suc n\<^sub>3)))))
+          (if nm_ok (n_txt f)
+           then atoms_stat B fr ve n as \<bind> (\<lambda>(args, ve\<^sub>1, n\<^sub>1).
+                  eff_at B p (length args) \<bind> (\<lambda>(l, ls).
+                    row_stat ((nkey (n_txt f), TEeff l ls (length args)) # B) fr ve\<^sub>1 n\<^sub>1 ro \<bind>
+                      (\<lambda>(\<epsilon>, ve\<^sub>2, n\<^sub>2).
+                        ty_stat ((nkey (n_txt f), TEeff l ls (length args)) # B) fr ve\<^sub>2 n\<^sub>2 t \<bind>
+                          (\<lambda>(\<tau>, ve\<^sub>3, n\<^sub>3).
+                            Some (TAct (eff_ty l args) [n\<^sub>3]
+                                    (canon_row (rext (map (nlbl \<circ> mangle l) ls) \<epsilon>)) \<tau>,
+                                  ve\<^sub>3, Suc n\<^sub>3)))))
+           else None)
       | _ \<Rightarrow> None)\<close>
 | \<open>ty_stat B fr ve n (THand e a ro b) =
      (case e of
@@ -503,14 +540,6 @@ fun con_result :: \<open>nat \<Rightarrow> kty \<Rightarrow> kty option\<close> 
 fun is_sch :: \<open>scheme \<Rightarrow> bool\<close> where
   \<open>is_sch (Sch t) = True\<close>
 | \<open>is_sch (Mono t) = False\<close>
-
-text \<open>A binder is a lexical identifier: it is not empty, and it contains
-  neither the path separator \<open>.\<close> (\<^const>\<open>mangle\<close>), nor \<open>%\<close>, with which the
-  elaborator's own binders start, nor \<open>(\<close>, with which a tuple's constructor tag
-  starts (\<^const>\<open>tuple_con\<close>). The rules that bind a name demand it.\<close>
-
-definition nm_ok :: \<open>name \<Rightarrow> bool\<close> where
-  \<open>nm_ok x \<longleftrightarrow> x \<noteq> [] \<and> 0x2E \<notin> set x \<and> 0x25 \<notin> set x \<and> 0x28 \<notin> set x\<close>
 
 text \<open>A refinement \<open>[t = \<tau>]\<close> of a variant spec replicates a datatype: \<open>\<tau>\<close> must be a
   datatype with the spec's constructors (\<open>type t = M.t = A\<close> in OCaml), and not one of the
