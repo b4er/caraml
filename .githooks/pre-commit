@@ -6,5 +6,5 @@ cd "$(git rev-parse --show-toplevel)"
 editors/gen-abbreviations.sh --check
 
 actionlint
-shellcheck editors/gen-abbreviations.sh .githooks/pre-commit
+git ls-files -z '*.sh' | xargs -0 shellcheck "$0"
 (cd haskell && hlint src app)
