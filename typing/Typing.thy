@@ -309,8 +309,9 @@ text \<open>A name type \<open>[E as]\<close> is the type of a handler name for 
   the action returns \<open>a\<close> and performs \<open>E\<close>'s operations on its name on top of \<open>\<rho>\<close>. The
   scope the action binds is fresh.
 
-  A name-dependent arrow \<open>(f : [E as]) \<rightarrow> \<tau>\<close> is an action type as well, but the AST
-  carries no row for it, so it stays rejected.\<close>
+  A name-dependent arrow \<open>(f : [E as]) \<rightarrow> [\<rho>] \<tau>\<close> is that action type itself: it returns
+  \<open>\<tau>\<close> and performs \<open>E\<close>'s operations on \<open>f\<close> on top of \<open>\<rho>\<close>. An absent row is read as for a
+  plain arrow. The bound name \<open>f\<close> is not yet visible in \<open>\<rho>\<close> or \<open>\<tau>\<close>.\<close>
 
 function (sequential) ty_stat :: \<open>tenv \<Rightarrow> bool \<Rightarrow> tvenv \<Rightarrow> nat \<Rightarrow> ty \<Rightarrow> (kty \<times> tvenv \<times> nat) option\<close> and
   atoms_stat :: \<open>tenv \<Rightarrow> bool \<Rightarrow> tvenv \<Rightarrow> nat \<Rightarrow> tatom list \<Rightarrow> (kty list \<times> tvenv \<times> nat) option\<close> and
@@ -343,7 +344,17 @@ where
       | _ \<Rightarrow> None)\<close>
 | \<open>ty_stat B fr ve n (TRow ls ro) = None\<close>
 | \<open>ty_stat B fr ve n TErr = None\<close>
-| \<open>ty_stat B fr ve n (TArrowName _ _ _) = None\<close>
+| \<open>ty_stat B fr ve n (TArrowName f e ro t) =
+     (case e of
+        TPath p # as \<Rightarrow>
+          atoms_stat B fr ve n as \<bind> (\<lambda>(args, ve\<^sub>1, n\<^sub>1).
+            row_stat B fr ve\<^sub>1 n\<^sub>1 ro \<bind> (\<lambda>(\<epsilon>, ve\<^sub>2, n\<^sub>2).
+              ty_stat B fr ve\<^sub>2 n\<^sub>2 t \<bind> (\<lambda>(\<tau>, ve\<^sub>3, n\<^sub>3).
+                eff_at B p (length args) \<bind> (\<lambda>(l, ls).
+                  Some (TAct (eff_ty l args) [n\<^sub>3]
+                          (canon_row (rext (map (nlbl \<circ> mangle l) ls) \<epsilon>)) \<tau>,
+                        ve\<^sub>3, Suc n\<^sub>3)))))
+      | _ \<Rightarrow> None)\<close>
 | \<open>ty_stat B fr ve n (THand e a ro b) =
      (case e of
         TPath p # as \<Rightarrow>

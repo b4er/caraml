@@ -561,6 +561,24 @@ next
   next
   qed (use spine_stat_Cons.IH spine_stat_Cons.prems in \<open>auto split: if_split_asm\<close>)
 next
+  case (ty_stat_TArrowName B fr ve n f e ro t)
+  from ty_stat_TArrowName.prems obtain p as args v\<^sub>1 n\<^sub>1 r v\<^sub>2 n\<^sub>2 \<tau>\<^sub>0 v\<^sub>3 n\<^sub>3 l ls where
+    e: \<open>e = TPath p # as\<close> and
+    at: \<open>atoms_stat B fr ve n as = Some (args, v\<^sub>1, n\<^sub>1)\<close> and
+    ro: \<open>row_stat B fr v\<^sub>1 n\<^sub>1 ro = Some (r, v\<^sub>2, n\<^sub>2)\<close> and
+    tt: \<open>ty_stat B fr v\<^sub>2 n\<^sub>2 t = Some (\<tau>\<^sub>0, v\<^sub>3, n\<^sub>3)\<close> and
+    \<tau>: \<open>\<tau> = TAct (eff_ty l args) [n\<^sub>3] (canon_row (rext (map (nlbl \<circ> mangle l) ls) r)) \<tau>\<^sub>0\<close> and
+    ve': \<open>ve' = v\<^sub>3\<close>
+    by (auto simp: bind_eq_Some_conv split: list.split_asm tatom.split_asm)
+  from ty_stat_TArrowName.prems have B: \<open>sigs_in B X\<close> and v: \<open>tsigs_ve ve \<subseteq> X\<close> by blast+
+  have a: \<open>(\<forall>t \<in> set args. tsigs t \<subseteq> X) \<and> tsigs_ve v\<^sub>1 \<subseteq> X\<close>
+    using e refl at B v by (rule ty_stat_TArrowName.IH)
+  have b: \<open>tsigs_ve v\<^sub>2 \<subseteq> X\<close>
+    using e refl at refl refl ro B a[THEN conjunct2] by (rule ty_stat_TArrowName.IH)
+  have c: \<open>tsigs \<tau>\<^sub>0 \<subseteq> X \<and> tsigs_ve v\<^sub>3 \<subseteq> X\<close>
+    using e refl at refl refl ro refl refl tt B b by (rule ty_stat_TArrowName.IH)
+  show ?case using a b c unfolding \<tau> ve' by (auto simp: eff_ty_def)
+next
   case (ty_stat_THand B fr ve n e a ro b)
   from ty_stat_THand.prems obtain p as args v\<^sub>1 n\<^sub>1 \<tau>\<^sub>0 v\<^sub>2 n\<^sub>2 r v\<^sub>3 n\<^sub>3 \<tau>\<^sub>1 v\<^sub>4 n\<^sub>4 l ls where
     e: \<open>e = TPath p # as\<close> and

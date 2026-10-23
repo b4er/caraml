@@ -27,7 +27,9 @@ datatype ty =
     TSpine \<open>tatom list\<close>                \<comment> \<open>application spine \<open>t \<tau>\<^sub>1 \<dots> \<tau>\<^sub>n\<close>\<close>
   | TArrow \<open>tatom list\<close> \<open>ty option\<close> ty \<comment> \<open>\<open>app \<rightarrow> \<tau>\<close> or \<open>app \<rightarrow> [row] \<tau>\<close> (empty row is total)\<close>
   | TArrowMod mbind ty                 \<comment> \<open>\<open>(M : SIG) \<rightarrow> \<tau>\<close>, \<open>{M : SIG} \<rightarrow> \<tau>\<close>: module-dependent arrow\<close>
-  | TArrowName nm \<open>tatom list\<close> ty     \<comment> \<open>\<open>(f : [E as]) \<rightarrow> \<tau>\<close>: name-dependent arrow\<close>
+  | TArrowName nm \<open>tatom list\<close> \<open>ty option\<close> ty
+                                       \<comment> \<open>\<open>(f : [E as]) \<rightarrow> \<tau>\<close>, \<open>(f : [E as]) \<rightarrow> [row] \<tau>\<close>:
+                                          name-dependent arrow\<close>
   | THand \<open>tatom list\<close> \<open>tatom list\<close> \<open>ty option\<close> \<open>tatom list\<close>
                                        \<comment> \<open>\<open>handler [E as] a \<rightarrow> [row] b\<close>: effect, action type,
                                           row, result\<close>

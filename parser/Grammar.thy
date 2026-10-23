@@ -151,7 +151,7 @@ definition tarrow :: \<open>tatom list \<Rightarrow> ty option \<times> ty \<Rig
 
 definition arrow :: \<open>tatom list \<Rightarrow> ty option \<times> ty \<Rightarrow> ty\<close> where
   \<open>arrow ts rt = (case (ts, rt) of
-     ([TParen [TRec [(f, TSpine [TName e])] None]], (None, t)) \<Rightarrow> TArrowName f e t
+     ([TParen [TRec [(f, TSpine [TName e])] None]], (r, t)) \<Rightarrow> TArrowName f e r t
    | (_, (r, t)) \<Rightarrow> TArrow ts r t)\<close>
 
 definition row1 :: \<open>tatom list \<Rightarrow> ty\<close> where
