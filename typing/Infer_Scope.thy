@@ -136,6 +136,12 @@ lemma tsigs_tsp: \<open>\<forall>(k, t) \<in> set \<phi>. tsigs t \<subseteq> X 
 lemma tsigs_fn_ty: \<open>tsigs (fn_ty \<tau>s) = \<Union>(tsigs ` set \<tau>s)\<close>
   by (cases \<tau>s rule: fn_ty.cases) auto
 
+lemma tsigs_rec_of: \<open>tsigs (rec_of fs t) = \<Union>(tsigs ` snd ` set fs) \<union> tsigs t\<close>
+  by (induction fs) auto
+
+lemma tsigs_rec_of_zipD: \<open>x \<in> tsigs (rec_of (zip ls \<tau>s) TRNil) \<Longrightarrow> \<exists>\<tau> \<in> set \<tau>s. x \<in> tsigs \<tau>\<close>
+  by (auto simp: tsigs_rec_of dest: set_zip_rightD)
+
 lemma tsigs_eff_ty [simp]: \<open>tsigs (eff_ty l ts) = \<Union>(tsigs ` set ts)\<close>
   by (simp add: eff_ty_def)
 
@@ -688,6 +694,26 @@ next
   have \<open>fst ve' = fst ve\<close>
     using row_stat_SomeD'[of B fr tvs rvs n r\<^sub>0 r ve' n'] row_stat_Some.prems ve by auto
   then show ?case using row_stat_Some.prems by (simp add: tsigs_ve_def)
+next
+  case (ty_stat_TRec B fr ve n fs rt)
+  from ty_stat_TRec.prems obtain ts v m where d: \<open>distinct (map (n_txt \<circ> fst) fs)\<close> and
+    ts: \<open>tys_stat B fr ve n (map snd fs) = Some (ts, v, m)\<close>
+    by (auto simp: bind_eq_Some_conv split: if_split_asm)
+  have a: \<open>(\<forall>t \<in> set ts. tsigs t \<subseteq> X) \<and> tsigs_ve v \<subseteq> X\<close>
+    using d ts ty_stat_TRec.prems by (blast dest: ty_stat_TRec.IH)
+  show ?case
+  proof (cases rt)
+    case None
+    then show ?thesis using ty_stat_TRec.prems ts a d by (auto dest!: tsigs_rec_of_zipD)
+  next
+    case (Some t)
+    from ty_stat_TRec.prems obtain u v\<^sub>2 m\<^sub>2 where tu: \<open>ty_stat B fr v m t = Some (u, v\<^sub>2, m\<^sub>2)\<close>
+      and e: \<open>\<tau> = rec_of (zip (map (n_txt \<circ> fst) fs) ts) u\<close> \<open>ve' = v\<^sub>2\<close>
+      using d ts Some by (auto simp: bind_eq_Some_conv) (case_tac a; auto)
+    have b: \<open>tsigs u \<subseteq> X \<and> tsigs_ve v\<^sub>2 \<subseteq> X\<close>
+      using a ty_stat_TRec.prems(2) by (intro ty_stat_TRec.IH(2)[OF d ts refl refl Some tu]; simp)
+    show ?thesis unfolding e using a b by (fastforce simp: tsigs_rec_of dest: set_zip_rightD)
+  qed
 qed (auto split: if_split_asm)
 
 lemma tsigs_close_ty [simp]: \<open>tsigs (close_ty as rs t) = tsigs t\<close>
@@ -963,42 +989,50 @@ subsection \<open>Pending requests\<close>
 text \<open>The signature names in the realisations recorded by pending requests. Hygienic
   substitution and \<^const>\<open>resolve_inner\<close> keep them over \<open>X\<close>.\<close>
 
+fun tsigs_preq :: \<open>preq \<Rightarrow> name set\<close> where
+  \<open>tsigs_preq (PImp K \<phi> E cs r) = (\<Union>(k, t) \<in> set \<phi>. tsigs t)\<close>
+| \<open>tsigs_preq (POff l r) = tsigs r\<close>
+
 definition tsigs_pend :: \<open>pend \<Rightarrow> name set\<close> where
-  \<open>tsigs_pend pd = (\<Union>(x, K, \<phi>, E, cs, r) \<in> set pd. (\<Union>(k, t) \<in> set \<phi>. tsigs t))\<close>
+  \<open>tsigs_pend pd = (\<Union>(x, q) \<in> set pd. tsigs_preq q)\<close>
 
 lemma tsigs_pend_simps [simp]:
   \<open>tsigs_pend [] = {}\<close>
-  \<open>tsigs_pend ((x, K, \<phi>, E, cs, r) # pd) = (\<Union>(k, t) \<in> set \<phi>. tsigs t) \<union> tsigs_pend pd\<close>
+  \<open>tsigs_pend ((x, q) # pd) = tsigs_preq q \<union> tsigs_pend pd\<close>
   by (auto simp: tsigs_pend_def)
+
+lemma tsigs_sub_preq:
+  assumes s: \<open>shyg s X\<close> and q: \<open>tsigs_preq q \<subseteq> X\<close>
+  shows \<open>tsigs_preq (sub_preq s q) \<subseteq> X\<close>
+proof (cases q)
+  case (PImp K \<phi> E cs r)
+  have \<open>(\<Union>(k, t)\<in>set (map (apsnd (sapp s)) \<phi>). tsigs t) \<subseteq> X\<close>
+  proof (rule UN_least)
+    fix kt assume \<open>kt \<in> set (map (apsnd (sapp s)) \<phi>)\<close>
+    then obtain k t where kt: \<open>kt = (k, sapp s t)\<close> and k: \<open>(k, t) \<in> set \<phi>\<close> by auto
+    have \<open>tsigs t \<subseteq> X\<close> using q k PImp by (auto simp: UN_subset_iff)
+    then show \<open>(case kt of (k, t) \<Rightarrow> tsigs t) \<subseteq> X\<close> using tsigs_sapp[OF s] kt by simp
+  qed
+  then show ?thesis using PImp by simp
+qed (use q tsigs_sapp[OF s] in simp)
 
 lemma tsigs_sub_pend:
   assumes s: \<open>shyg s X\<close>
   shows \<open>tsigs_pend pd \<subseteq> X \<Longrightarrow> tsigs_pend (sub_pend s pd) \<subseteq> X\<close>
 proof (induction pd)
-  case (Cons e pd)
-  obtain x K \<phi> E cs r where e: \<open>e = (x, K, \<phi>, E, cs, r)\<close> by (cases e)
-  have \<phi>: \<open>(\<Union>(k, t)\<in>set \<phi>. tsigs t) \<subseteq> X\<close> and pd: \<open>tsigs_pend pd \<subseteq> X\<close>
-    using Cons.prems e by auto
-  have b: \<open>(\<Union>(k, t)\<in>set (map (apsnd (sapp s)) \<phi>). tsigs t) \<subseteq> X\<close>
-  proof (rule UN_least)
-    fix kt assume \<open>kt \<in> set (map (apsnd (sapp s)) \<phi>)\<close>
-    then obtain k t where kt: \<open>kt = (k, sapp s t)\<close> and k: \<open>(k, t) \<in> set \<phi>\<close> by auto
-    have \<open>tsigs t \<subseteq> X\<close> using \<phi> k by (auto simp: UN_subset_iff)
-    then show \<open>(case kt of (k, t) \<Rightarrow> tsigs t) \<subseteq> X\<close> using tsigs_sapp[OF s] kt by simp
-  qed
-  have \<open>sub_pend s (e # pd) = (x, K, map (apsnd (sapp s)) \<phi>, E, cs, r) # sub_pend s pd\<close>
-    by (simp add: sub_pend_def e)
-  then show ?case using b Cons.IH[OF pd] by simp
-qed (simp add: sub_pend_def)
+  case Nil
+  then show ?case by (simp add: sub_pend_def)
+next
+  case (Cons xq pd)
+  obtain x q where xq: \<open>xq = (x, q)\<close> by (cases xq)
+  have \<open>sub_pend s (xq # pd) = (x, sub_preq s q) # sub_pend s pd\<close>
+    by (simp add: sub_pend_def xq)
+  then show ?case using Cons xq tsigs_sub_preq[OF s] by simp
+qed
 
 lemma tsigs_resolve_inner: \<open>resolve_inner K pd = Some pd' \<Longrightarrow> tsigs_pend pd' = tsigs_pend pd\<close>
-proof (induction K pd arbitrary: pd' rule: resolve_inner_induct)
-  case (Cons K x K' \<phi> E cs r pd)
-  from Cons.prems obtain pd'' r' where ri: \<open>resolve_inner K pd = Some pd''\<close>
-    and e: \<open>pd' = (x, K', \<phi>, E, cs, r') # pd''\<close>
-    by (auto simp: bind_eq_Some_conv split: if_split_asm)
-  show ?case using Cons.IH[OF ri] unfolding e by simp
-qed simp
+  by (induction K pd arbitrary: pd' rule: resolve_inner_induct)
+     (fastforce simp: bind_eq_Some_conv split: if_split_asm)+
 
 
 subsection \<open>Patterns\<close>
@@ -1056,31 +1090,31 @@ proof -
 qed
 
 lemma infer_pat_sigs:
-  \<open>infer_pat uf B p n = Some (s, \<tau>, \<Gamma>, n') \<Longrightarrow> sigs_in B X \<Longrightarrow>
+  \<open>infer_pat uf B p n = Some (s, p\<^sub>x, \<tau>, \<Gamma>, n') \<Longrightarrow> sigs_in B X \<Longrightarrow>
      shyg s X \<and> tsigs \<tau> \<subseteq> X \<and> tsigs_bs \<Gamma> \<subseteq> X\<close>
-  \<open>infer_patom uf B a n = Some (s, \<tau>, \<Gamma>, n') \<Longrightarrow> sigs_in B X \<Longrightarrow>
+  \<open>infer_patom uf B a n = Some (s, a\<^sub>x, \<tau>, \<Gamma>, n') \<Longrightarrow> sigs_in B X \<Longrightarrow>
      shyg s X \<and> tsigs \<tau> \<subseteq> X \<and> tsigs_bs \<Gamma> \<subseteq> X\<close>
-  \<open>infer_patoms uf B as n = Some (s, \<tau>s, \<Gamma>, n') \<Longrightarrow> sigs_in B X \<Longrightarrow>
+  \<open>infer_patoms uf B as n = Some (s, as\<^sub>x, \<tau>s, \<Gamma>, n') \<Longrightarrow> sigs_in B X \<Longrightarrow>
      shyg s X \<and> (\<forall>\<tau> \<in> set \<tau>s. tsigs \<tau> \<subseteq> X) \<and> tsigs_bs \<Gamma> \<subseteq> X\<close>
-  \<open>infer_pats uf B ps n = Some (s, \<tau>s, \<Gamma>, n') \<Longrightarrow> sigs_in B X \<Longrightarrow>
+  \<open>infer_pats uf B ps n = Some (s, ps\<^sub>x, \<tau>s, \<Gamma>, n') \<Longrightarrow> sigs_in B X \<Longrightarrow>
      shyg s X \<and> (\<forall>\<tau> \<in> set \<tau>s. tsigs \<tau> \<subseteq> X) \<and> tsigs_bs \<Gamma> \<subseteq> X\<close>
 proof (induction uf B p n and uf B a n and uf B as n and uf B ps n
-    arbitrary: s \<tau> \<Gamma> n' and s \<tau> \<Gamma> n' and s \<tau>s \<Gamma> n' and s \<tau>s \<Gamma> n'
+    arbitrary: s p\<^sub>x \<tau> \<Gamma> n' and s a\<^sub>x \<tau> \<Gamma> n' and s as\<^sub>x \<tau>s \<Gamma> n' and s ps\<^sub>x \<tau>s \<Gamma> n'
     rule: infer_pat_induct)
   case (infer_pat_PatOp uf B as opr p n)
   from infer_pat_PatOp.prems have B: \<open>sigs_in B X\<close> by blast
-  from infer_pat_PatOp.prems obtain q where q: \<open>pat_resolve B (PatOp as opr p) = Some q\<close>
-    and d: \<open>infer_pat uf B q n = Some (s, \<tau>, \<Gamma>, n')\<close>
+  from infer_pat_PatOp.prems obtain q p\<^sub>x where q: \<open>pat_resolve B (PatOp as opr p) = Some q\<close>
+    and d: \<open>infer_pat uf B q n = Some (s, p\<^sub>x, \<tau>, \<Gamma>, n')\<close>
     by (auto simp del: pat_resolve.simps split: option.split_asm)
   show ?case by (rule infer_pat_PatOp.IH[OF q d B])
 next
   case (infer_pat_PatApp_Cons_PQid_Cons uf B p v va n)
   from infer_pat_PatApp_Cons_PQid_Cons.prems have B: \<open>sigs_in B X\<close> by blast
-  from infer_pat_PatApp_Cons_PQid_Cons.prems obtain \<sigma> m \<tau>\<^sub>c n\<^sub>1 \<tau>s \<tau>\<^sub>0 sp \<tau>s' \<Gamma>\<^sub>1 n\<^sub>2 s\<^sub>1 where
+  from infer_pat_PatApp_Cons_PQid_Cons.prems obtain \<sigma> m \<tau>\<^sub>c n\<^sub>1 \<tau>s \<tau>\<^sub>0 sp \<tau>s' \<Gamma>\<^sub>1 n\<^sub>2 s\<^sub>1 as\<^sub>x where
     lk: \<open>tlookup B (path_nms p) = Some (TEcon \<sigma> m)\<close> and
     mlen: \<open>m = length (v # va) \<and> v # va \<noteq> []\<close> and
     inst: \<open>inst_scheme n \<sigma> = (\<tau>\<^sub>c, n\<^sub>1)\<close> and cty: \<open>con_ty m \<tau>\<^sub>c = Some (\<tau>s, \<tau>\<^sub>0)\<close> and
-    pa: \<open>infer_patoms uf B (v # va) n\<^sub>1 = Some (sp, \<tau>s', \<Gamma>\<^sub>1, n\<^sub>2)\<close> and
+    pa: \<open>infer_patoms uf B (v # va) n\<^sub>1 = Some (sp, as\<^sub>x, \<tau>s', \<Gamma>\<^sub>1, n\<^sub>2)\<close> and
     un: \<open>unis uf (zip \<tau>s' (map (sapp sp) \<tau>s)) n\<^sub>2 = Some (s\<^sub>1, n')\<close> and
     e: \<open>s = s\<^sub>1 \<odot> sp\<close> \<open>\<tau> = sapp s\<^sub>1 (sapp sp \<tau>\<^sub>0)\<close> \<open>\<Gamma> = map (apsnd (sapp s\<^sub>1)) \<Gamma>\<^sub>1\<close>
     by (auto split: option.split_asm tentry.split_asm if_split_asm prod.split_asm
@@ -1089,8 +1123,8 @@ next
   show ?case unfolding e by (rule con_pat_sigs[OF B lk inst cty ih un])
 next
   case (infer_pat_PatAs uf B p x n)
-  from infer_pat_PatAs.prems obtain \<Gamma>\<^sub>1 where nm: \<open>nm_ok (n_txt x)\<close>
-    and ip: \<open>infer_pat uf B p n = Some (s, \<tau>, \<Gamma>\<^sub>1, n')\<close>
+  from infer_pat_PatAs.prems obtain \<Gamma>\<^sub>1 p\<^sub>x where nm: \<open>nm_ok (n_txt x)\<close>
+    and ip: \<open>infer_pat uf B p n = Some (s, p\<^sub>x, \<tau>, \<Gamma>\<^sub>1, n')\<close>
     and g: \<open>\<Gamma> = (n_txt x, \<tau>) # \<Gamma>\<^sub>1\<close>
     by (auto split: if_split_asm Option.bind_split_asm prod.split_asm)
   have i: \<open>shyg s X \<and> tsigs \<tau> \<subseteq> X \<and> tsigs_bs \<Gamma>\<^sub>1 \<subseteq> X\<close>
@@ -1099,8 +1133,8 @@ next
 next
   case (infer_pat_PatAnn uf B p ty n)
   from infer_pat_PatAnn.prems have B: \<open>sigs_in B X\<close> by blast
-  from infer_pat_PatAnn.prems obtain s\<^sub>1 \<tau>\<^sub>1 \<Gamma>\<^sub>1 n\<^sub>1 \<tau>\<^sub>a ve n\<^sub>2 s\<^sub>2 where
-    ip: \<open>infer_pat uf B p n = Some (s\<^sub>1, \<tau>\<^sub>1, \<Gamma>\<^sub>1, n\<^sub>1)\<close> and
+  from infer_pat_PatAnn.prems obtain s\<^sub>1 \<tau>\<^sub>1 \<Gamma>\<^sub>1 n\<^sub>1 \<tau>\<^sub>a ve n\<^sub>2 s\<^sub>2 p\<^sub>x where
+    ip: \<open>infer_pat uf B p n = Some (s\<^sub>1, p\<^sub>x, \<tau>\<^sub>1, \<Gamma>\<^sub>1, n\<^sub>1)\<close> and
     ts: \<open>ty_stat (sappe s\<^sub>1 B) True ([], []) n\<^sub>1 ty = Some (\<tau>\<^sub>a, ve, n\<^sub>2)\<close> and
     un: \<open>uni uf \<tau>\<^sub>1 \<tau>\<^sub>a n\<^sub>2 = Some (s\<^sub>2, n')\<close> and
     e: \<open>s = s\<^sub>2 \<odot> s\<^sub>1\<close> \<open>\<tau> = sapp s\<^sub>2 \<tau>\<^sub>1\<close> \<open>\<Gamma> = map (apsnd (sapp s\<^sub>2)) \<Gamma>\<^sub>1\<close>
@@ -1138,8 +1172,8 @@ next
     by auto
 next
   case (infer_patom_PParen_Cons_Cons uf B v vb vc n)
-  from infer_patom_PParen_Cons_Cons.prems obtain s' \<tau>s \<Gamma>' where
-    ps: \<open>infer_pats uf B (v # vb # vc) n = Some (s', \<tau>s, \<Gamma>', n')\<close> and
+  from infer_patom_PParen_Cons_Cons.prems obtain s' \<tau>s \<Gamma>' ps\<^sub>x where
+    ps: \<open>infer_pats uf B (v # vb # vc) n = Some (s', ps\<^sub>x, \<tau>s, \<Gamma>', n')\<close> and
     e: \<open>s = s'\<close> \<open>\<tau> = tuple \<tau>s\<close> \<open>\<Gamma> = \<Gamma>'\<close>
     by (auto split: prod.split_asm Option.bind_split_asm)
   show ?case
@@ -1148,8 +1182,8 @@ next
 next
   case (infer_patom_PList uf B ps n)
   from infer_patom_PList.prems have B: \<open>sigs_in B X\<close> by blast
-  from infer_patom_PList.prems obtain s\<^sub>1 \<tau>s \<Gamma>\<^sub>1 n\<^sub>1 s\<^sub>2 where
-    ps: \<open>infer_pats uf B ps n = Some (s\<^sub>1, \<tau>s, \<Gamma>\<^sub>1, n\<^sub>1)\<close> and
+  from infer_patom_PList.prems obtain s\<^sub>1 \<tau>s \<Gamma>\<^sub>1 n\<^sub>1 s\<^sub>2 ps\<^sub>x where
+    ps: \<open>infer_pats uf B ps n = Some (s\<^sub>1, ps\<^sub>x, \<tau>s, \<Gamma>\<^sub>1, n\<^sub>1)\<close> and
     un: \<open>unis uf (map (\<lambda>\<tau>. (\<tau>, TV n\<^sub>1)) \<tau>s) (Suc n\<^sub>1) = Some (s\<^sub>2, n')\<close> and
     e: \<open>s = s\<^sub>2 \<odot> s\<^sub>1\<close> \<open>\<tau> = TC list_ty [sapp s\<^sub>2 (TV n\<^sub>1)]\<close> \<open>\<Gamma> = map (apsnd (sapp s\<^sub>2)) \<Gamma>\<^sub>1\<close>
     by (auto split: prod.split_asm Option.bind_split_asm)
@@ -1162,9 +1196,9 @@ next
 next
   case (infer_patoms_Cons uf B a as n)
   from infer_patoms_Cons.prems have B: \<open>sigs_in B X\<close> by blast
-  from infer_patoms_Cons.prems obtain s\<^sub>1 \<tau>\<^sub>1 \<Gamma>\<^sub>1 n\<^sub>1 s\<^sub>2 \<tau>s\<^sub>2 \<Gamma>\<^sub>2 where
-    pa: \<open>infer_patom uf B a n = Some (s\<^sub>1, \<tau>\<^sub>1, \<Gamma>\<^sub>1, n\<^sub>1)\<close> and
-    ps: \<open>infer_patoms uf (sappe s\<^sub>1 B) as n\<^sub>1 = Some (s\<^sub>2, \<tau>s\<^sub>2, \<Gamma>\<^sub>2, n')\<close> and
+  from infer_patoms_Cons.prems obtain s\<^sub>1 \<tau>\<^sub>1 \<Gamma>\<^sub>1 n\<^sub>1 s\<^sub>2 \<tau>s\<^sub>2 \<Gamma>\<^sub>2 a\<^sub>x as\<^sub>x where
+    pa: \<open>infer_patom uf B a n = Some (s\<^sub>1, a\<^sub>x, \<tau>\<^sub>1, \<Gamma>\<^sub>1, n\<^sub>1)\<close> and
+    ps: \<open>infer_patoms uf (sappe s\<^sub>1 B) as n\<^sub>1 = Some (s\<^sub>2, as\<^sub>x, \<tau>s\<^sub>2, \<Gamma>\<^sub>2, n')\<close> and
     e: \<open>s = s\<^sub>2 \<odot> s\<^sub>1\<close> \<open>\<tau>s = sapp s\<^sub>2 \<tau>\<^sub>1 # \<tau>s\<^sub>2\<close> \<open>\<Gamma> = map (apsnd (sapp s\<^sub>2)) \<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2\<close>
     by (auto split: prod.split_asm Option.bind_split_asm)
   have ih1: \<open>shyg s\<^sub>1 X \<and> tsigs \<tau>\<^sub>1 \<subseteq> X \<and> tsigs_bs \<Gamma>\<^sub>1 \<subseteq> X\<close>
@@ -1178,9 +1212,9 @@ next
 next
   case (infer_pats_Cons uf B p ps n)
   from infer_pats_Cons.prems have B: \<open>sigs_in B X\<close> by blast
-  from infer_pats_Cons.prems obtain s\<^sub>1 \<tau>\<^sub>1 \<Gamma>\<^sub>1 n\<^sub>1 s\<^sub>2 \<tau>s\<^sub>2 \<Gamma>\<^sub>2 where
-    pa: \<open>infer_pat uf B p n = Some (s\<^sub>1, \<tau>\<^sub>1, \<Gamma>\<^sub>1, n\<^sub>1)\<close> and
-    ps: \<open>infer_pats uf (sappe s\<^sub>1 B) ps n\<^sub>1 = Some (s\<^sub>2, \<tau>s\<^sub>2, \<Gamma>\<^sub>2, n')\<close> and
+  from infer_pats_Cons.prems obtain s\<^sub>1 \<tau>\<^sub>1 \<Gamma>\<^sub>1 n\<^sub>1 s\<^sub>2 \<tau>s\<^sub>2 \<Gamma>\<^sub>2 p\<^sub>x ps\<^sub>x where
+    pa: \<open>infer_pat uf B p n = Some (s\<^sub>1, p\<^sub>x, \<tau>\<^sub>1, \<Gamma>\<^sub>1, n\<^sub>1)\<close> and
+    ps: \<open>infer_pats uf (sappe s\<^sub>1 B) ps n\<^sub>1 = Some (s\<^sub>2, ps\<^sub>x, \<tau>s\<^sub>2, \<Gamma>\<^sub>2, n')\<close> and
     e: \<open>s = s\<^sub>2 \<odot> s\<^sub>1\<close> \<open>\<tau>s = sapp s\<^sub>2 \<tau>\<^sub>1 # \<tau>s\<^sub>2\<close> \<open>\<Gamma> = map (apsnd (sapp s\<^sub>2)) \<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2\<close>
     by (auto split: prod.split_asm Option.bind_split_asm)
   have ih1: \<open>shyg s\<^sub>1 X \<and> tsigs \<tau>\<^sub>1 \<subseteq> X \<and> tsigs_bs \<Gamma>\<^sub>1 \<subseteq> X\<close>
@@ -1191,9 +1225,29 @@ next
   then have s2: \<open>shyg s\<^sub>2 X\<close> by simp
   show ?case
     using shyg_scomp[OF s1 s2] tsigs_sapp[OF s2] tsigs_bs_map[OF s2] ih1 ih2 by (simp add: e)
+next
+  case (infer_patom_PRec_False uf B fs n)
+  from infer_patom_PRec_False.prems obtain ps\<^sub>x \<tau>s where
+    d: \<open>distinct (map (n_txt \<circ> fst) fs)\<close> and
+    ps: \<open>infer_pats uf B (map snd fs) n = Some (s, ps\<^sub>x, \<tau>s, \<Gamma>, n')\<close> and
+    e: \<open>\<tau> = rec_of (zip (map (n_txt \<circ> fst) fs) \<tau>s) TRNil\<close> and B: \<open>sigs_in B X\<close>
+    by (auto split: prod.split_asm Option.bind_split_asm if_split_asm)
+  have ih: \<open>shyg s X \<and> (\<forall>\<tau> \<in> set \<tau>s. tsigs \<tau> \<subseteq> X) \<and> tsigs_bs \<Gamma> \<subseteq> X\<close>
+    by (rule infer_patom_PRec_False.IH[OF d ps B])
+  show ?case using ih by (auto simp: e dest!: tsigs_rec_of_zipD)
+next
+  case (infer_pat_PatApp_Cons_Nil uf B a n)
+  from infer_pat_PatApp_Cons_Nil.prems obtain a\<^sub>x where
+    pa: \<open>infer_patom uf B a n = Some (s, a\<^sub>x, \<tau>, \<Gamma>, n')\<close> and B: \<open>sigs_in B X\<close>
+    by (auto split: prod.split_asm Option.bind_split_asm)
+  show ?case by (rule infer_pat_PatApp_Cons_Nil.IH[OF pa B])
+next
+  case (infer_patom_PParen_Cons_Nil uf B p n)
+  from infer_patom_PParen_Cons_Nil.prems obtain p\<^sub>x where
+    pa: \<open>infer_pat uf B p n = Some (s, p\<^sub>x, \<tau>, \<Gamma>, n')\<close> and B: \<open>sigs_in B X\<close>
+    by (auto split: prod.split_asm Option.bind_split_asm)
+  show ?case by (rule infer_patom_PParen_Cons_Nil.IH[OF pa B])
 qed (auto split: Option.bind_split_asm if_split_asm)
-
-
 subsection \<open>Operations, paths, application, operator trees\<close>
 
 text \<open>The steps of the expression algorithm below the expression level: instantiating a
@@ -1553,8 +1607,8 @@ next
 next
   case (infer_EFn uf B A pd ps b n s e' \<tau> pd' n')
   from infer_EFn.prems have B: \<open>sigs_in B X\<close> and P: \<open>tsigs_pend pd \<subseteq> X\<close> by blast+
-  from infer_EFn.prems obtain sp \<tau>s \<Gamma> n\<^sub>1 s\<^sub>2 b'' \<tau>\<^sub>b where
-    d1: \<open>infer_pats uf B ps n = Some (sp, \<tau>s, \<Gamma>, n\<^sub>1)\<close> and
+  from infer_EFn.prems obtain sp \<tau>s \<Gamma> n\<^sub>1 s\<^sub>2 b'' \<tau>\<^sub>b ps\<^sub>x where
+    d1: \<open>infer_pats uf B ps n = Some (sp, ps\<^sub>x, \<tau>s, \<Gamma>, n\<^sub>1)\<close> and
     d2: \<open>infer uf (mono_env sid \<Gamma> @ sappe sp B) (RV n\<^sub>1) (sub_pend sp pd) b (Suc n\<^sub>1)
       = Some (s\<^sub>2, b'', \<tau>\<^sub>b, pd', n')\<close> and
     se: \<open>s = s\<^sub>2 \<odot> sp\<close> \<open>\<tau> = TFn (sapp s\<^sub>2 (fn_ty \<tau>s)) (sappr s\<^sub>2 (RV n\<^sub>1)) \<tau>\<^sub>b\<close>
@@ -1564,7 +1618,7 @@ next
   have B': \<open>sigs_in (mono_env sid \<Gamma> @ sappe sp B) X\<close>
     using sigs_in_mono_env[OF shyg_sid] sigs_in_sappe[OF _ B] p by simp
   have i: \<open>shyg s\<^sub>2 X \<and> tsigs \<tau>\<^sub>b \<subseteq> X \<and> tsigs_pend pd' \<subseteq> X\<close>
-    by (rule infer_EFn.IH[OF d1 refl refl refl d2 B'])
+    by (rule infer_EFn.IH[OF d1 refl refl refl refl d2 B'])
       (use tsigs_sub_pend[OF conjunct1[OF p] P] in simp)
   have f: \<open>tsigs (fn_ty \<tau>s) \<subseteq> X\<close> using p by (auto simp: tsigs_fn_ty)
   show ?case using shyg_scomp[OF _ conjunct1[OF i]] tsigs_sapp[OF conjunct1[OF i] f] i p se by simp
@@ -1599,7 +1653,7 @@ next
   next
     case (Some r) then show ?thesis using that by (cases r) auto
   qed
-  obtain sp \<tau>\<^sub>p \<Gamma> n\<^sub>2 where dp: \<open>infer_pat uf (sappe s\<^sub>1 B) p n\<^sub>1 = Some (sp, \<tau>\<^sub>p, \<Gamma>, n\<^sub>2)\<close>
+  obtain sp p\<^sub>x \<tau>\<^sub>p \<Gamma> n\<^sub>2 where dp: \<open>infer_pat uf (sappe s\<^sub>1 B) p n\<^sub>1 = Some (sp, p\<^sub>x, \<tau>\<^sub>p, \<Gamma>, n\<^sub>2)\<close>
   proof (cases \<open>infer_pat uf (sappe s\<^sub>1 B) p n\<^sub>1\<close>)
     case None then show ?thesis using infer_ELet.prems
       by (simp add: d1 del: sapp.simps sappe.simps sappr.simps sapps.simps)
@@ -1647,7 +1701,7 @@ next
   have P3: \<open>tsigs_pend (sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1) \<subseteq> X\<close>
     using tsigs_sub_pend[of \<open>s\<^sub>2 \<odot> sp\<close> X pd\<^sub>1] p s2 i1 by (simp add: shyg_scomp)
   have i3: \<open>shyg s\<^sub>3 X \<and> tsigs \<tau> \<subseteq> X \<and> tsigs_pend pd\<^sub>3 \<subseteq> X\<close>
-    using d1 refl refl refl refl dp refl refl refl u1 refl refl refl refl refl refl refl asrs
+    using d1 refl refl refl refl dp refl refl refl refl u1 refl refl refl refl refl refl refl asrs
       gen_env_s_def covb d3 B3 P3
     by (rule infer_ELet.IH)
   show ?case using s i3 se by (simp add: shyg_scomp)
@@ -2008,8 +2062,8 @@ next
         de: \<open>dep_env B n sg m = Some (K, E\<^sub>K, n\<^sub>1)\<close> and
         ur: \<open>uni_row e A (n\<^sub>1 + m) = Some (s\<^sub>1, n\<^sub>3)\<close> and
         rec: \<open>infer_args uf (sappe s\<^sub>1 B) (sappr s\<^sub>1 A)
-                ((imp_name n\<^sub>3, K, map (apsnd (sapp s\<^sub>1)) (zip K (map TV [n\<^sub>1 ..< n\<^sub>1 + m])),
-                  E\<^sub>K, cands B, None) # sub_pend s\<^sub>1 pd)
+                ((imp_name n\<^sub>3, PImp K (map (apsnd (sapp s\<^sub>1)) (zip K (map TV [n\<^sub>1 ..< n\<^sub>1 + m])))
+                  E\<^sub>K (cands B) None) # sub_pend s\<^sub>1 pd)
                 (d - 1) (sapp s\<^sub>1 (kopen (tsp K (zip K (map TV [n\<^sub>1 ..< n\<^sub>1 + m]))) t')) as (Suc n\<^sub>3)
               = Some (s\<^sub>2, as'', \<tau>, pd', n')\<close> and
         se: \<open>s = s\<^sub>2 \<odot> s\<^sub>1\<close>
@@ -2021,8 +2075,8 @@ next
       have t0: \<open>tsigs (sapp s\<^sub>1 (kopen (tsp K (zip K (map TV [n\<^sub>1 ..< n\<^sub>1 + m]))) t')) \<subseteq> X\<close>
         by (rule tsigs_sapp[OF s1 tsigs_kopen_at[OF ph t']])
       have pd1: \<open>tsigs_pend
-          ((imp_name n\<^sub>3, K, map (apsnd (sapp s\<^sub>1)) (zip K (map TV [n\<^sub>1 ..< n\<^sub>1 + m])),
-           E\<^sub>K, cands B, None) # sub_pend s\<^sub>1 pd) \<subseteq> X\<close>
+          ((imp_name n\<^sub>3, PImp K (map (apsnd (sapp s\<^sub>1)) (zip K (map TV [n\<^sub>1 ..< n\<^sub>1 + m])))
+            E\<^sub>K (cands B) None) # sub_pend s\<^sub>1 pd) \<subseteq> X\<close>
         using tsigs_sub_pend[OF s1 P] tsigs_sapp[OF s1, of \<open>TV _\<close>]
         by (auto dest!: set_zip_rightD) blast
       have w2: \<open>shyg s\<^sub>2 X \<and> tsigs \<tau> \<subseteq> X \<and> tsigs_pend pd' \<subseteq> X\<close>
@@ -2177,8 +2231,9 @@ next
     and P: \<open>tsigs_pend pd \<subseteq> X\<close>
     and T0: \<open>tsigs \<tau>\<^sub>0 \<subseteq> X\<close>
     and Tr: \<open>tsigs \<tau>\<^sub>r \<subseteq> X\<close> by blast+
-  from infer_arms_Cons.prems obtain sp \<tau>\<^sub>p \<Gamma> n\<^sub>1 s\<^sub>1 n\<^sub>2 s\<^sub>2 b'' \<tau>\<^sub>b pd\<^sub>2 n\<^sub>3 s\<^sub>3 n\<^sub>4 s\<^sub>4 arms'' where
-    dp: \<open>infer_pat uf B p n = Some (sp, \<tau>\<^sub>p, \<Gamma>, n\<^sub>1)\<close> and
+  from infer_arms_Cons.prems obtain sp \<tau>\<^sub>p \<Gamma> n\<^sub>1 s\<^sub>1 n\<^sub>2 s\<^sub>2 b'' \<tau>\<^sub>b pd\<^sub>2 n\<^sub>3
+    s\<^sub>3 n\<^sub>4 s\<^sub>4 arms'' p\<^sub>x where
+    dp: \<open>infer_pat uf B p n = Some (sp, p\<^sub>x, \<tau>\<^sub>p, \<Gamma>, n\<^sub>1)\<close> and
     u1: \<open>uni uf (sapp sp \<tau>\<^sub>0) \<tau>\<^sub>p n\<^sub>1 = Some (s\<^sub>1, n\<^sub>2)\<close> and
     db: \<open>infer uf (mono_env s\<^sub>1 \<Gamma> @ sappe (s\<^sub>1 \<odot> sp) B) (sappr (s\<^sub>1 \<odot> sp) A)
            (sub_pend (s\<^sub>1 \<odot> sp) pd) b n\<^sub>2 = Some (s\<^sub>2, b'', \<tau>\<^sub>b, pd\<^sub>2, n\<^sub>3)\<close> and
@@ -2194,13 +2249,13 @@ next
   have ib: \<open>sigs_in (mono_env s\<^sub>1 \<Gamma> @ sappe (s\<^sub>1 \<odot> sp) B) X\<close>
     using sigs_in_mono_env[OF s1] sigs_in_sappe[OF s1p B] p by simp
   have wb: \<open>shyg s\<^sub>2 X \<and> tsigs \<tau>\<^sub>b \<subseteq> X \<and> tsigs_pend pd\<^sub>2 \<subseteq> X\<close>
-    using dp refl refl refl u1 refl refl db ib
+    using dp refl refl refl refl u1 refl refl db ib
       by (rule infer_arms_Cons.IH) (use tsigs_sub_pend[OF s1p P] in simp)
   have s21: \<open>shyg (s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) X\<close> using s1p wb by (simp add: shyg_scomp)
   have s3: \<open>shyg s\<^sub>3 X\<close> by (rule uni_shyg[OF u2]) (use wb tsigs_sapp[OF s21 Tr] in simp_all)
   have s321: \<open>shyg (s\<^sub>3 \<odot> s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) X\<close> using s1p wb s3 by (simp add: shyg_scomp)
   have wa: \<open>shyg s\<^sub>4 X \<and> tsigs_pend pd' \<subseteq> X\<close>
-    using dp refl refl refl u1 refl refl db refl refl refl refl u2 refl refl da
+    using dp refl refl refl refl u1 refl refl db refl refl refl refl u2 refl refl da
       sigs_in_sappe[OF s321 B]
     by (rule infer_arms_Cons.IH)
       (use tsigs_sub_pend[OF s3] wb tsigs_sapp[OF s321 T0] tsigs_sapp[OF s321 Tr] in simp_all)
@@ -2225,8 +2280,9 @@ next
   define \<tau>\<^sub>1 where \<open>\<tau>\<^sub>1 = op_inst ps\<^sub>e args \<tau>\<^sub>1\<^sub>0\<close>
   define \<tau>\<^sub>2 where \<open>\<tau>\<^sub>2 = op_inst ps\<^sub>e args \<tau>\<^sub>2\<^sub>0\<close>
   have lkm: \<open>map_of B (n_txt opn) = Some (TEop l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0)\<close> using lk by simp
-  from infer_cls_Cons_HOp.prems obtain sp \<tau>s \<Gamma> n\<^sub>1 s\<^sub>1 n\<^sub>2 s\<^sub>2 b'' \<tau>\<^sub>b pd\<^sub>2 n\<^sub>3 s\<^sub>3 n\<^sub>4 s\<^sub>4 cls'' where
-    dps: \<open>infer_pats uf B ps n = Some (sp, \<tau>s, \<Gamma>, n\<^sub>1)\<close> and
+  from infer_cls_Cons_HOp.prems obtain sp \<tau>s \<Gamma> n\<^sub>1 s\<^sub>1 n\<^sub>2 s\<^sub>2 b'' \<tau>\<^sub>b pd\<^sub>2 n\<^sub>3
+    s\<^sub>3 n\<^sub>4 s\<^sub>4 cls'' ps\<^sub>x where
+    dps: \<open>infer_pats uf B ps n = Some (sp, ps\<^sub>x, \<tau>s, \<Gamma>, n\<^sub>1)\<close> and
     u1: \<open>uni uf (fn_ty \<tau>s) (sapp sp \<tau>\<^sub>1) n\<^sub>1 = Some (s\<^sub>1, n\<^sub>2)\<close> and
     db: \<open>infer uf ((case k of None \<Rightarrow> mono_env s\<^sub>1 \<Gamma>
             | Some kn \<Rightarrow> (n_txt kn, TEval (kmono (TFn (sapp (s\<^sub>1 \<odot> sp) \<tau>\<^sub>2) (eps (s\<^sub>1 \<odot> sp))
@@ -2264,7 +2320,7 @@ next
                             (sapp (s\<^sub>1 \<odot> sp) \<tau>\<^sub>0)))) # mono_env s\<^sub>1 \<Gamma>) @ sappe (s\<^sub>1 \<odot> sp) B) X\<close>
     using G sigs_in_sappe[OF s1p B] by simp
   have wb: \<open>shyg s\<^sub>2 X \<and> tsigs \<tau>\<^sub>b \<subseteq> X \<and> tsigs_pend pd\<^sub>2 \<subseteq> X\<close>
-    using refl lk refl ta lc \<tau>\<^sub>1_def \<tau>\<^sub>2_def dps refl refl refl u1 refl refl refl eps_def
+    using refl lk refl ta lc \<tau>\<^sub>1_def \<tau>\<^sub>2_def dps refl refl refl refl u1 refl refl refl eps_def
       refl refl covk db ib
     by (rule infer_cls_Cons_HOp.IH) (use tsigs_sub_pend[OF s1p P] in simp)
   have s21: \<open>shyg (s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) X\<close> using s1p wb by (simp add: shyg_scomp)
@@ -2273,7 +2329,7 @@ next
       tsigs_sapp[OF conjunct1[OF wb] tsigs_sapp[OF s1p T0]] in \<open>simp_all split: option.split\<close>)
   have s321: \<open>shyg (s\<^sub>3 \<odot> s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) X\<close> using s1p wb s3 by (simp add: shyg_scomp)
   have wc: \<open>shyg s\<^sub>4 X \<and> tsigs \<tau> \<subseteq> X \<and> tsigs_pend pd' \<subseteq> X\<close>
-    using refl lk refl ta lc \<tau>\<^sub>1_def \<tau>\<^sub>2_def dps refl refl refl u1 refl refl refl eps_def
+    using refl lk refl ta lc \<tau>\<^sub>1_def \<tau>\<^sub>2_def dps refl refl refl refl u1 refl refl refl eps_def
       refl refl covk db refl refl refl refl u2 refl refl dc sigs_in_sappe[OF s321 B]
     by (rule infer_cls_Cons_HOp.IH)
       (use tsigs_sub_pend[OF s3] wb tsigs_sapp[OF s321 T0] tsigs_sapp[OF s321 Targs] in simp_all)
@@ -2309,8 +2365,8 @@ next
     and Targs: \<open>tsigs targs \<subseteq> X\<close> by blast+
   define eps where \<open>eps sq = (if nm then sappr sq A else canon_row
     (rext (hlabels B cls) (sappr sq A)))\<close> for sq
-  from infer_cls_Cons_HRet.prems obtain sp \<tau>\<^sub>p \<Gamma> n\<^sub>1 s\<^sub>1 n\<^sub>2 s\<^sub>2 b'' \<tau>' pd\<^sub>2 n\<^sub>3 s\<^sub>3 cls'' where
-    dp: \<open>infer_pat uf B p n = Some (sp, \<tau>\<^sub>p, \<Gamma>, n\<^sub>1)\<close> and
+  from infer_cls_Cons_HRet.prems obtain sp \<tau>\<^sub>p \<Gamma> n\<^sub>1 s\<^sub>1 n\<^sub>2 s\<^sub>2 b'' \<tau>' pd\<^sub>2 n\<^sub>3 s\<^sub>3 cls'' p\<^sub>x where
+    dp: \<open>infer_pat uf B p n = Some (sp, p\<^sub>x, \<tau>\<^sub>p, \<Gamma>, n\<^sub>1)\<close> and
     u1: \<open>uni uf (sapp sp \<tau>\<^sub>0) \<tau>\<^sub>p n\<^sub>1 = Some (s\<^sub>1, n\<^sub>2)\<close> and
     db: \<open>infer uf (mono_env s\<^sub>1 \<Gamma> @ sappe (s\<^sub>1 \<odot> sp) B)
            (eps (s\<^sub>1 \<odot> sp)) (sub_pend (s\<^sub>1 \<odot> sp) pd) b n\<^sub>2
@@ -2328,11 +2384,11 @@ next
   have ib: \<open>sigs_in (mono_env s\<^sub>1 \<Gamma> @ sappe (s\<^sub>1 \<odot> sp) B) X\<close>
     using sigs_in_mono_env[OF s1] sigs_in_sappe[OF s1p B] pp by simp
   have wb: \<open>shyg s\<^sub>2 X \<and> tsigs \<tau>' \<subseteq> X \<and> tsigs_pend pd\<^sub>2 \<subseteq> X\<close>
-    using dp refl refl refl u1 refl refl refl eps_def covn db ib
+    using dp refl refl refl refl u1 refl refl refl eps_def covn db ib
     by (rule infer_cls_Cons_HRet.IH) (use tsigs_sub_pend[OF s1p P] in simp)
   have s21: \<open>shyg (s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) X\<close> using s1p wb by (simp add: shyg_scomp)
   have wc: \<open>shyg s\<^sub>3 X \<and> tsigs \<tau> \<subseteq> X \<and> tsigs_pend pd' \<subseteq> X\<close>
-    using dp refl refl refl u1 refl refl refl eps_def covn db refl refl refl refl refl dc
+    using dp refl refl refl refl u1 refl refl refl eps_def covn db refl refl refl refl refl dc
       sigs_in_sappe[OF s21 B]
     by (rule infer_cls_Cons_HRet.IH) (use wb tsigs_sapp[OF s21 Targs] in simp_all)
   show ?case using se s21 wc by (simp add: shyg_scomp)
@@ -2401,6 +2457,34 @@ next
 next
   case infer_atom_APath
   from infer_atom_APath.prems show ?case by (rule apath_sigs)
+next
+  case (infer_atom_ARec uf B A pd fs n s a' \<tau> pd' n')
+  from infer_atom_ARec.prems have B: \<open>sigs_in B X\<close> and P: \<open>tsigs_pend pd \<subseteq> X\<close> by blast+
+  from infer_atom_ARec.prems obtain es'' \<tau>s where
+    d: \<open>infer_exps uf B A pd (map snd fs) n = Some (s, es'', \<tau>s, pd', n')\<close> and
+    te: \<open>\<tau> = rec_of (zip (map (n_txt \<circ> fst) fs) \<tau>s) TRNil\<close>
+    by (auto split: Option.bind_split_asm prod.split_asm if_split_asm)
+  have i: \<open>shyg s X \<and> (\<forall>\<tau> \<in> set \<tau>s. tsigs \<tau> \<subseteq> X) \<and> tsigs_pend pd' \<subseteq> X\<close>
+    by (rule infer_atom_ARec.IH[OF _ d B P])
+      (use infer_atom_ARec.prems in \<open>auto split: if_split_asm\<close>)
+  show ?case using i te by (fastforce simp: tsigs_rec_of dest: set_zip_rightD)
+next
+  case (infer_atom_ADot uf B A pd a x n s a' \<tau> pd' n')
+  from infer_atom_ADot.prems have B: \<open>sigs_in B X\<close> and P: \<open>tsigs_pend pd \<subseteq> X\<close> by blast+
+  from infer_atom_ADot.prems obtain s\<^sub>1 a'' \<tau>\<^sub>a pd\<^sub>1 n\<^sub>1 s\<^sub>2 n\<^sub>2 where
+    d1: \<open>infer_atom uf B A pd a n = Some (s\<^sub>1, a'', \<tau>\<^sub>a, pd\<^sub>1, n\<^sub>1)\<close> and
+    un: \<open>uni uf \<tau>\<^sub>a (TRCons (n_txt x) (TV n\<^sub>1) (TV (Suc n\<^sub>1))) (n\<^sub>1 + 2) = Some (s\<^sub>2, n\<^sub>2)\<close> and
+    se: \<open>s = s\<^sub>2 \<odot> s\<^sub>1\<close> \<open>\<tau> = sapp s\<^sub>2 (TV n\<^sub>1)\<close> and
+    pe: \<open>pd' = (imp_name n\<^sub>2, POff (n_txt x) (sapp s\<^sub>2 (TRCons (n_txt x) (TV n\<^sub>1) (TV (Suc n\<^sub>1)))))
+        # sub_pend s\<^sub>2 pd\<^sub>1\<close>
+    by (auto simp: bind_eq_Some_conv Let_def)
+  have i: \<open>shyg s\<^sub>1 X \<and> tsigs \<tau>\<^sub>a \<subseteq> X \<and> tsigs_pend pd\<^sub>1 \<subseteq> X\<close>
+    by (rule infer_atom_ADot.IH[OF d1 B P])
+  have s2: \<open>shyg s\<^sub>2 X\<close> by (rule uni_shyg[OF un]) (use i in auto)
+  have r: \<open>tsigs (sapp s\<^sub>2 (TRCons (n_txt x) (TV n\<^sub>1) (TV (Suc n\<^sub>1)))) \<subseteq> X\<close>
+    by (rule tsigs_sapp[OF s2]) simp
+  show ?case using se pe shyg_scomp[OF conjunct1[OF i] s2] tsigs_sapp[of s\<^sub>2 X \<open>TV n\<^sub>1\<close>] s2 r
+    tsigs_sub_pend[OF s2] i by simp
 qed (auto split: Option.bind_split_asm prod.split_asm if_split_asm)
 
 

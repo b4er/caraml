@@ -210,6 +210,17 @@ fun rlabels :: \<open>kty \<Rightarrow> name list\<close> where
   \<open>rlabels (TRCons l t r) = l # rlabels r\<close>
 | \<open>rlabels _ = []\<close>
 
+text \<open>The offset of a field in the layout of a closed record, the canonical order:
+  the number of labels below its own, where the first field with that label lands
+  when the fields are sorted stably.\<close>
+
+definition offset_of :: \<open>name \<Rightarrow> kty \<Rightarrow> nat option\<close> where
+  \<open>offset_of l r = (if rtail r = TRNil \<and> fpull l r \<noteq> None
+                    then Some (length (filter (\<lambda>l'. l' < l) (rlabels r))) else None)\<close>
+
+lemma offset_of_closed: \<open>offset_of l r = Some k \<Longrightarrow> rtail r = TRNil \<and> fpull l r \<noteq> None\<close>
+  by (simp add: offset_of_def split: if_split_asm)
+
 lemma finsort_ne[simp]:
   \<open>finsort l t c \<noteq> TV a\<close> \<open>finsort l t c \<noteq> TB a\<close> \<open>finsort l t c \<noteq> TK a\<close>
   \<open>finsort l t c \<noteq> TA k i\<close> \<open>finsort l t c \<noteq> TC n ts\<close> \<open>finsort l t c \<noteq> TApp u v\<close>

@@ -1470,6 +1470,34 @@ next
   case (row_stat_Some B fr ve n r)
   then show ?case
     by (auto simp: labels_stat_eq split: ty.split option.split list.split cong: Option.bind_cong)
+next
+  case (ty_stat_TRec B fr ve n fs rt)
+  have IH1: \<open>distinct (map (n_txt \<circ> fst) fs) \<Longrightarrow>
+      tys_stat B fr ve n (map snd fs) = tys_stat B' fr ve n (map snd fs)\<close>
+    by (rule ty_stat_TRec.IH(1)[OF _ ty_stat_TRec.prems])
+  show ?case
+  proof (cases \<open>distinct (map (n_txt \<circ> fst) fs)\<close>)
+    case True
+    show ?thesis
+      unfolding ty_stat.simps if_P[OF True]
+    proof (rule bind_eq_cong[OF IH1[OF True]], goal_cases ts)
+      case (ts v)
+      obtain ts' ve\<^sub>1 n\<^sub>1 where v: \<open>v = (ts', ve\<^sub>1, n\<^sub>1)\<close> by (cases v) auto
+      show ?case
+      proof (cases rt)
+        case None
+        then show ?thesis unfolding v by simp
+      next
+        case (Some t)
+        have \<open>ty_stat B fr ve\<^sub>1 n\<^sub>1 t = ty_stat B' fr ve\<^sub>1 n\<^sub>1 t\<close>
+          using True ts[unfolded v] refl refl Some ty_stat_TRec.prems by (rule ty_stat_TRec.IH(2))
+        then show ?thesis unfolding v Some by (simp cong: Option.bind_cong)
+      qed
+    qed
+  next
+    case False
+    then show ?thesis by simp
+  qed
 qed (auto simp: head_stat_eq split: list.split prod.split cong: Option.bind_cong)
 
 lemma cons_stat_eq:
@@ -1711,14 +1739,6 @@ next
   case (val_atom_APath B p)
   then show ?case by (cases rule: lookup_eqE[OF val_atom_APath.prems, of \<open>path_nms p\<close>]) auto
 qed (auto simp: list_all_iff)
-
-lemma val_exp_subst_imp:
-  \<open>val_exp B (subst_imp tab e) = val_exp B e\<close>
-  \<open>val_atom B (subst_imp_atom tab a) = val_atom B a\<close>
-proof (induction B e and B a rule: val_exp_induct)
-  case (val_exp_ESpine_Cons_APath_Cons B p as)
-  then show ?case by (auto simp: list_all_iff split: option.splits tentry.splits)
-qed (auto simp: list_all_iff split: list.splits option.splits)
 
 lemma hlabels_eq: \<open>lookup_eq B B' \<Longrightarrow> hlabels B cls = hlabels B' cls\<close>
 proof (induction B cls arbitrary: B' rule: hlabels_induct)
@@ -2000,6 +2020,20 @@ lemma fresh_ty_TAct:
 
 lemma fresh_ty_eff_ty: \<open>\<forall>\<tau> \<in> set \<tau>s. fresh_ty ve n n' B \<tau> \<Longrightarrow> fresh_ty ve n n' B (eff_ty l \<tau>s)\<close>
   by (auto simp: fresh_ty_def bfree_def eff_ty_def)
+
+lemma ktv_rec_of [simp]: \<open>ktv (rec_of fs t) = (\<Union>(l, u) \<in> set fs. ktv u) \<union> ktv t\<close>
+  by (induction fs) auto
+
+lemma btv_rec_of [simp]: \<open>btv (rec_of fs t) = (\<Union>(l, u) \<in> set fs. btv u) \<union> btv t\<close>
+  by (induction fs) auto
+
+lemma brv_rec_of [simp]: \<open>brv (rec_of fs t) = (\<Union>(l, u) \<in> set fs. brv u) \<union> brv t\<close>
+  by (induction fs) auto
+
+lemma fresh_ty_rec_of:
+  \<open>\<forall>\<tau> \<in> set \<tau>s. fresh_ty ve n n' B \<tau> \<Longrightarrow> fresh_ty ve n n' B t \<Longrightarrow>
+   fresh_ty ve n n' B (rec_of (zip ls \<tau>s) t)\<close>
+  unfolding fresh_ty_def bfree_def by (auto dest: set_zip_rightD)
 
 lemma fresh_ty_tuple:
   \<open>\<forall>\<tau> \<in> set \<tau>s. fresh_ty ve n n' B \<tau> \<Longrightarrow> fresh_ty ve n n' B (tuple_from i \<tau>s)\<close>
@@ -2446,6 +2480,46 @@ next
     assume \<open>r = canon_row (foldr RCons ls' (RV n))\<close> \<open>ve' = (tvs, (v, RV n) # rvs)\<close> \<open>n' = Suc n\<close>
     then show ?case using \<open>tve_ok ve\<close> unfolding ve by (auto simp: tve_step_def)
   qed
+next
+  case (ty_stat_TRec B fr ve n fs rt)
+  from ty_stat_TRec.prems(1) have d: \<open>distinct (map (n_txt \<circ> fst) fs)\<close>
+    by (auto split: if_split_asm)
+  from ty_stat_TRec.prems(1) d obtain ts ve\<^sub>1 n\<^sub>1 where
+    tt: \<open>tys_stat B fr ve n (map snd fs) = Some (ts, ve\<^sub>1, n\<^sub>1)\<close> and
+    r: \<open>(case rt of None \<Rightarrow> Some (rec_of (zip (map (n_txt \<circ> fst) fs) ts) TRNil, ve\<^sub>1, n\<^sub>1)
+       | Some t \<Rightarrow> ty_stat B fr ve\<^sub>1 n\<^sub>1 t \<bind> (\<lambda>(u, ve\<^sub>2, n\<^sub>2).
+            (case u of TV _ \<Rightarrow> Some (rec_of (zip (map (n_txt \<circ> fst) fs) ts) u, ve\<^sub>2, n\<^sub>2)
+             | _ \<Rightarrow> None))) = Some (\<tau>, ve', n')\<close>
+    by (auto split: Option.bind_split_asm prod.split_asm)
+  have ih1: \<open>tve_step ve n ve\<^sub>1 n\<^sub>1 \<and> (\<forall>\<tau> \<in> set ts. fresh_ty ve n n\<^sub>1 B \<tau>)\<close>
+    using d tt \<open>cenv B\<close> \<open>tve_ok ve\<close> by (rule ty_stat_TRec.IH(1))
+  show ?case
+  proof (cases rt)
+    case None
+    with r have \<tau>: \<open>\<tau> = rec_of (zip (map (n_txt \<circ> fst) fs) ts) TRNil\<close>
+      and \<open>ve' = ve\<^sub>1\<close> \<open>n' = n\<^sub>1\<close> by auto
+    have \<open>fresh_ty ve n n\<^sub>1 B TRNil\<close> unfolding fresh_ty_def bfree_def by simp
+    then show ?thesis
+      using ih1 \<tau> \<open>ve' = ve\<^sub>1\<close> \<open>n' = n\<^sub>1\<close> by (auto intro: fresh_ty_rec_of)
+  next
+    case (Some t)
+    with r obtain ve\<^sub>2 n\<^sub>2 a where
+      tu: \<open>ty_stat B fr ve\<^sub>1 n\<^sub>1 t = Some (TV a, ve\<^sub>2, n\<^sub>2)\<close> and
+      \<tau>: \<open>\<tau> = rec_of (zip (map (n_txt \<circ> fst) fs) ts) (TV a)\<close> and \<open>ve' = ve\<^sub>2\<close> \<open>n' = n\<^sub>2\<close>
+      by (auto split: Option.bind_split_asm prod.split_asm kty.split_asm)
+    have ih2: \<open>tve_step ve\<^sub>1 n\<^sub>1 ve\<^sub>2 n\<^sub>2 \<and> fresh_ty ve\<^sub>1 n\<^sub>1 n\<^sub>2 B (TV a)\<close>
+      using d tt refl refl Some tu \<open>cenv B\<close> tve_step_ok[OF ih1[THEN conjunct1]]
+      by (rule ty_stat_TRec.IH(2))
+    have f: \<open>fresh_ty ve n n' B (TV a)\<close>
+      using fresh_ty_step[OF ih2[THEN conjunct2] ih1[THEN conjunct1]
+          tve_step_le[OF ih1[THEN conjunct1]] le_refl tve_step_le[OF ih2[THEN conjunct1]]]
+      \<open>n' = n\<^sub>2\<close> by simp
+    have \<open>\<forall>\<tau> \<in> set ts. fresh_ty ve n n' B \<tau>\<close>
+      using fresh_ty_mono[OF _ le_refl] ih1 tve_step_le[OF ih2[THEN conjunct1]] \<open>n' = n\<^sub>2\<close> by blast
+    then show ?thesis
+      using f \<tau> tve_step_trans[OF ih1[THEN conjunct1] ih2[THEN conjunct1]] \<open>ve' = ve\<^sub>2\<close>
+        \<open>n' = n\<^sub>2\<close> by (auto intro: fresh_ty_rec_of)
+  qed
 qed (auto simp: tve_step_def)
 
 
@@ -2616,6 +2690,10 @@ lemma fresh_ok_TRNil[simp]: \<open>fresh_ok TRNil n n' FK\<close>
 lemma fresh_ok_unit: \<open>fresh_ok unit_ty n n' FK\<close>
   by simp
 
+lemma fresh_ok_rec_of:
+  \<open>\<forall>\<tau> \<in> set \<tau>s. fresh_ok \<tau> n n' FK \<Longrightarrow> fresh_ok (rec_of (zip ls \<tau>s) TRNil) n n' FK\<close>
+  unfolding fresh_ok_def bfree_def by (auto dest: set_zip_rightD)
+
 lemma fresh_ok_tuple: \<open>\<forall>\<tau> \<in> set \<tau>s. fresh_ok \<tau> n n' FK \<Longrightarrow> fresh_ok (tuple_from i \<tau>s) n n' FK\<close>
   by (auto simp: fresh_ok_def bfree_def)
 
@@ -2766,42 +2844,42 @@ proof -
 qed
 
 lemma infer_pat_wf:
-  \<open>infer_pat uf B p n = Some (s, \<tau>, \<Gamma>, n') \<Longrightarrow>
+  \<open>infer_pat uf B p n = Some (s, p\<^sub>x, \<tau>, \<Gamma>, n') \<Longrightarrow>
     cenv B \<Longrightarrow> bfree_env B \<Longrightarrow> ktv_env B \<subseteq> FK \<Longrightarrow>
     n \<le> n' \<and> sconf s {n ..< n'} {n ..< n'} \<and> khyg s FK \<and> bfree_sub s \<and>
     fresh_ok \<tau> n n' FK \<and> binds_ok \<Gamma> n n' FK\<close>
-  \<open>infer_patom uf B a n = Some (s, \<tau>, \<Gamma>, n') \<Longrightarrow>
+  \<open>infer_patom uf B a n = Some (s, a\<^sub>x, \<tau>, \<Gamma>, n') \<Longrightarrow>
     cenv B \<Longrightarrow> bfree_env B \<Longrightarrow> ktv_env B \<subseteq> FK \<Longrightarrow>
     n \<le> n' \<and> sconf s {n ..< n'} {n ..< n'} \<and> khyg s FK \<and> bfree_sub s \<and>
     fresh_ok \<tau> n n' FK \<and> binds_ok \<Gamma> n n' FK\<close>
-  \<open>infer_patoms uf B as n = Some (s, \<tau>s, \<Gamma>, n') \<Longrightarrow>
+  \<open>infer_patoms uf B as n = Some (s, as\<^sub>x, \<tau>s, \<Gamma>, n') \<Longrightarrow>
     cenv B \<Longrightarrow> bfree_env B \<Longrightarrow> ktv_env B \<subseteq> FK \<Longrightarrow>
     n \<le> n' \<and> sconf s {n ..< n'} {n ..< n'} \<and> khyg s FK \<and> bfree_sub s \<and>
     (\<forall>\<tau> \<in> set \<tau>s. fresh_ok \<tau> n n' FK) \<and> binds_ok \<Gamma> n n' FK\<close>
-  \<open>infer_pats uf B ps n = Some (s, \<tau>s, \<Gamma>, n') \<Longrightarrow>
+  \<open>infer_pats uf B ps n = Some (s, ps\<^sub>x, \<tau>s, \<Gamma>, n') \<Longrightarrow>
     cenv B \<Longrightarrow> bfree_env B \<Longrightarrow> ktv_env B \<subseteq> FK \<Longrightarrow>
     n \<le> n' \<and> sconf s {n ..< n'} {n ..< n'} \<and> khyg s FK \<and> bfree_sub s \<and>
     (\<forall>\<tau> \<in> set \<tau>s. fresh_ok \<tau> n n' FK) \<and> binds_ok \<Gamma> n n' FK\<close>
 proof (induction uf B p n and uf B a n and uf B as n and uf B ps n
-       arbitrary: s \<tau> \<Gamma> n' and s \<tau> \<Gamma> n' and s \<tau>s \<Gamma> n' and s \<tau>s \<Gamma> n'
+       arbitrary: s p\<^sub>x \<tau> \<Gamma> n' and s a\<^sub>x \<tau> \<Gamma> n' and s as\<^sub>x \<tau>s \<Gamma> n' and s ps\<^sub>x \<tau>s \<Gamma> n'
        rule: infer_pat_induct)
   case (infer_pat_PatApp_Cons_Nil uf B a n)
-  then show ?case by simp
+  then show ?case by (auto split: Option.bind_split_asm)
 next
   case (infer_pat_PatOp uf B as opr p n)
-  from infer_pat_PatOp.prems obtain q where q: \<open>pat_resolve B (PatOp as opr p) = Some q\<close>
-    and d: \<open>infer_pat uf B q n = Some (s, \<tau>, \<Gamma>, n')\<close>
+  from infer_pat_PatOp.prems obtain q p\<^sub>x where q: \<open>pat_resolve B (PatOp as opr p) = Some q\<close>
+    and d: \<open>infer_pat uf B q n = Some (s, p\<^sub>x, \<tau>, \<Gamma>, n')\<close>
     by (auto simp del: pat_resolve.simps split: option.split_asm)
   show ?case by (rule infer_pat_PatOp.IH[OF q d]) (fact infer_pat_PatOp.prems)+
 next
   case (infer_pat_PatApp_Cons_PQid_Cons uf B p v va n)
   from infer_pat_PatApp_Cons_PQid_Cons.prems
-  obtain \<sigma> m \<tau>\<^sub>c n\<^sub>1 \<tau>s \<tau>\<^sub>0 sp \<tau>s' \<Gamma>\<^sub>1 n\<^sub>2 s\<^sub>1 where
+  obtain \<sigma> m \<tau>\<^sub>c n\<^sub>1 \<tau>s \<tau>\<^sub>0 sp \<tau>s' \<Gamma>\<^sub>1 n\<^sub>2 s\<^sub>1 as\<^sub>x where
     wf: \<open>cenv B\<close> \<open>bfree_env B\<close> \<open>ktv_env B \<subseteq> FK\<close> and
     lk: \<open>tlookup B (path_nms p) = Some (TEcon \<sigma> m)\<close> and
     mlen: \<open>m = length (v # va) \<and> v # va \<noteq> []\<close> and
     inst: \<open>inst_scheme n \<sigma> = (\<tau>\<^sub>c, n\<^sub>1)\<close> and cty: \<open>con_ty m \<tau>\<^sub>c = Some (\<tau>s, \<tau>\<^sub>0)\<close> and
-    pa: \<open>infer_patoms uf B (v # va) n\<^sub>1 = Some (sp, \<tau>s', \<Gamma>\<^sub>1, n\<^sub>2)\<close> and
+    pa: \<open>infer_patoms uf B (v # va) n\<^sub>1 = Some (sp, as\<^sub>x, \<tau>s', \<Gamma>\<^sub>1, n\<^sub>2)\<close> and
     un: \<open>unis uf (zip \<tau>s' (map (sapp sp) \<tau>s)) n\<^sub>2 = Some (s\<^sub>1, n')\<close> and
     e: \<open>s = s\<^sub>1 \<odot> sp\<close> \<open>\<tau> = sapp s\<^sub>1 (sapp sp \<tau>\<^sub>0)\<close> \<open>\<Gamma> = map (apsnd (sapp s\<^sub>1)) \<Gamma>\<^sub>1\<close>
     by (auto split: option.split_asm tentry.split_asm if_split_asm prod.split_asm
@@ -2813,9 +2891,9 @@ next
   then show ?case by (auto split: Option.bind_split_asm prod.split_asm if_split_asm)
 next
   case (infer_pat_PatAnn uf B p ty n)
-  from infer_pat_PatAnn.prems obtain s\<^sub>1 \<tau>\<^sub>1 \<Gamma>\<^sub>1 n\<^sub>1 \<tau>\<^sub>a ve n\<^sub>2 s\<^sub>2 where
+  from infer_pat_PatAnn.prems obtain s\<^sub>1 \<tau>\<^sub>1 \<Gamma>\<^sub>1 n\<^sub>1 \<tau>\<^sub>a ve n\<^sub>2 s\<^sub>2 p\<^sub>x where
     wf: \<open>cenv B\<close> \<open>bfree_env B\<close> \<open>ktv_env B \<subseteq> FK\<close> and
-    ip: \<open>infer_pat uf B p n = Some (s\<^sub>1, \<tau>\<^sub>1, \<Gamma>\<^sub>1, n\<^sub>1)\<close> and
+    ip: \<open>infer_pat uf B p n = Some (s\<^sub>1, p\<^sub>x, \<tau>\<^sub>1, \<Gamma>\<^sub>1, n\<^sub>1)\<close> and
     ts: \<open>ty_stat (sappe s\<^sub>1 B) True ([], []) n\<^sub>1 ty = Some (\<tau>\<^sub>a, ve, n\<^sub>2)\<close> and
     un: \<open>uni uf \<tau>\<^sub>1 \<tau>\<^sub>a n\<^sub>2 = Some (s\<^sub>2, n')\<close> and
     e: \<open>s = s\<^sub>2 \<odot> s\<^sub>1\<close> \<open>\<tau> = sapp s\<^sub>2 \<tau>\<^sub>1\<close> \<open>\<Gamma> = map (apsnd (sapp s\<^sub>2)) \<Gamma>\<^sub>1\<close>
@@ -2886,7 +2964,7 @@ next
   then show ?case by (auto simp: fresh_ok_TC0)
 next
   case (infer_patom_PParen_Cons_Nil uf B p n)
-  then show ?case by simp
+  then show ?case by (auto split: Option.bind_split_asm)
 next
   case (infer_patom_PParen_Nil uf B n)
   then have e: \<open>s = sid\<close> \<open>\<tau> = unit_ty\<close> \<open>\<Gamma> = []\<close> \<open>n' = n\<close>
@@ -2894,18 +2972,18 @@ next
   show ?case unfolding e by simp
 next
   case (infer_patom_PParen_Cons_Cons uf B v vb vc n)
-  from infer_patom_PParen_Cons_Cons.prems obtain s' \<tau>s \<Gamma>' where
+  from infer_patom_PParen_Cons_Cons.prems obtain s' \<tau>s \<Gamma>' ps\<^sub>x where
     wf: \<open>cenv B\<close> \<open>bfree_env B\<close> \<open>ktv_env B \<subseteq> FK\<close> and
-    ps: \<open>infer_pats uf B (v # vb # vc) n = Some (s', \<tau>s, \<Gamma>', n')\<close> and
+    ps: \<open>infer_pats uf B (v # vb # vc) n = Some (s', ps\<^sub>x, \<tau>s, \<Gamma>', n')\<close> and
     e: \<open>s = s'\<close> \<open>\<tau> = tuple \<tau>s\<close> \<open>\<Gamma> = \<Gamma>'\<close>
     by (auto split: prod.split_asm Option.bind_split_asm)
   note ih = infer_patom_PParen_Cons_Cons.IH[OF ps wf]
   show ?case unfolding e using ih by (auto intro: fresh_ok_tuple)
 next
   case (infer_patom_PList uf B ps n)
-  from infer_patom_PList.prems obtain s\<^sub>1 \<tau>s \<Gamma>\<^sub>1 n\<^sub>1 s\<^sub>2 where
+  from infer_patom_PList.prems obtain s\<^sub>1 \<tau>s \<Gamma>\<^sub>1 n\<^sub>1 s\<^sub>2 ps\<^sub>x where
     wf: \<open>cenv B\<close> \<open>bfree_env B\<close> \<open>ktv_env B \<subseteq> FK\<close> and
-    ps: \<open>infer_pats uf B ps n = Some (s\<^sub>1, \<tau>s, \<Gamma>\<^sub>1, n\<^sub>1)\<close> and
+    ps: \<open>infer_pats uf B ps n = Some (s\<^sub>1, ps\<^sub>x, \<tau>s, \<Gamma>\<^sub>1, n\<^sub>1)\<close> and
     un: \<open>unis uf (map (\<lambda>\<tau>. (\<tau>, TV n\<^sub>1)) \<tau>s) (Suc n\<^sub>1) = Some (s\<^sub>2, n')\<close> and
     e: \<open>s = s\<^sub>2 \<odot> s\<^sub>1\<close> \<open>\<tau> = TC list_ty [sapp s\<^sub>2 (TV n\<^sub>1)]\<close>
       \<open>\<Gamma> = map (apsnd (sapp s\<^sub>2)) \<Gamma>\<^sub>1\<close>
@@ -2937,17 +3015,17 @@ next
   then show ?case by simp
 next
   case (infer_patoms_Cons uf B a as n)
-  from infer_patoms_Cons.prems obtain s\<^sub>1 \<tau>\<^sub>1 \<Gamma>\<^sub>1 n\<^sub>1 s\<^sub>2 \<tau>s\<^sub>2 \<Gamma>\<^sub>2 where
+  from infer_patoms_Cons.prems obtain s\<^sub>1 \<tau>\<^sub>1 \<Gamma>\<^sub>1 n\<^sub>1 s\<^sub>2 \<tau>s\<^sub>2 \<Gamma>\<^sub>2 a\<^sub>x as\<^sub>x where
     wf: \<open>cenv B\<close> \<open>bfree_env B\<close> \<open>ktv_env B \<subseteq> FK\<close> and
-    pa: \<open>infer_patom uf B a n = Some (s\<^sub>1, \<tau>\<^sub>1, \<Gamma>\<^sub>1, n\<^sub>1)\<close> and
-    ps: \<open>infer_patoms uf (sappe s\<^sub>1 B) as n\<^sub>1 = Some (s\<^sub>2, \<tau>s\<^sub>2, \<Gamma>\<^sub>2, n')\<close> and
+    pa: \<open>infer_patom uf B a n = Some (s\<^sub>1, a\<^sub>x, \<tau>\<^sub>1, \<Gamma>\<^sub>1, n\<^sub>1)\<close> and
+    ps: \<open>infer_patoms uf (sappe s\<^sub>1 B) as n\<^sub>1 = Some (s\<^sub>2, as\<^sub>x, \<tau>s\<^sub>2, \<Gamma>\<^sub>2, n')\<close> and
     e: \<open>s = s\<^sub>2 \<odot> s\<^sub>1\<close> \<open>\<tau>s = sapp s\<^sub>2 \<tau>\<^sub>1 # \<tau>s\<^sub>2\<close> \<open>\<Gamma> = map (apsnd (sapp s\<^sub>2)) \<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2\<close>
     by (auto split: prod.split_asm Option.bind_split_asm)
   from pa wf have ih1: \<open>n \<le> n\<^sub>1 \<and> sconf s\<^sub>1 {n ..< n\<^sub>1} {n ..< n\<^sub>1} \<and> khyg s\<^sub>1 FK \<and>
     bfree_sub s\<^sub>1 \<and> fresh_ok \<tau>\<^sub>1 n n\<^sub>1 FK \<and> binds_ok \<Gamma>\<^sub>1 n n\<^sub>1 FK\<close>
     by (rule infer_patoms_Cons.IH)
   have le1: \<open>n \<le> n\<^sub>1\<close> and k1: \<open>khyg s\<^sub>1 FK\<close> and b1: \<open>bfree_sub s\<^sub>1\<close> using ih1 by simp_all
-  from pa refl refl refl ps cenv_sappe[OF wf(1)] bfree_env_sappe[OF b1 wf(2)]
+  from pa refl refl refl refl ps cenv_sappe[OF wf(1)] bfree_env_sappe[OF b1 wf(2)]
     ktv_env_sappe[OF k1 wf(3)]
   have ih2: \<open>n\<^sub>1 \<le> n' \<and> sconf s\<^sub>2 {n\<^sub>1 ..< n'} {n\<^sub>1 ..< n'} \<and> khyg s\<^sub>2 FK \<and> bfree_sub s\<^sub>2 \<and>
     (\<forall>\<tau> \<in> set \<tau>s\<^sub>2. fresh_ok \<tau> n\<^sub>1 n' FK) \<and> binds_ok \<Gamma>\<^sub>2 n\<^sub>1 n' FK\<close>
@@ -2969,17 +3047,17 @@ next
   then show ?case by simp
 next
   case (infer_pats_Cons uf B p ps n)
-  from infer_pats_Cons.prems obtain s\<^sub>1 \<tau>\<^sub>1 \<Gamma>\<^sub>1 n\<^sub>1 s\<^sub>2 \<tau>s\<^sub>2 \<Gamma>\<^sub>2 where
+  from infer_pats_Cons.prems obtain s\<^sub>1 \<tau>\<^sub>1 \<Gamma>\<^sub>1 n\<^sub>1 s\<^sub>2 \<tau>s\<^sub>2 \<Gamma>\<^sub>2 p\<^sub>x ps\<^sub>x where
     wf: \<open>cenv B\<close> \<open>bfree_env B\<close> \<open>ktv_env B \<subseteq> FK\<close> and
-    pa: \<open>infer_pat uf B p n = Some (s\<^sub>1, \<tau>\<^sub>1, \<Gamma>\<^sub>1, n\<^sub>1)\<close> and
-    ps: \<open>infer_pats uf (sappe s\<^sub>1 B) ps n\<^sub>1 = Some (s\<^sub>2, \<tau>s\<^sub>2, \<Gamma>\<^sub>2, n')\<close> and
+    pa: \<open>infer_pat uf B p n = Some (s\<^sub>1, p\<^sub>x, \<tau>\<^sub>1, \<Gamma>\<^sub>1, n\<^sub>1)\<close> and
+    ps: \<open>infer_pats uf (sappe s\<^sub>1 B) ps n\<^sub>1 = Some (s\<^sub>2, ps\<^sub>x, \<tau>s\<^sub>2, \<Gamma>\<^sub>2, n')\<close> and
     e: \<open>s = s\<^sub>2 \<odot> s\<^sub>1\<close> \<open>\<tau>s = sapp s\<^sub>2 \<tau>\<^sub>1 # \<tau>s\<^sub>2\<close> \<open>\<Gamma> = map (apsnd (sapp s\<^sub>2)) \<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2\<close>
     by (auto split: prod.split_asm Option.bind_split_asm)
   from pa wf have ih1: \<open>n \<le> n\<^sub>1 \<and> sconf s\<^sub>1 {n ..< n\<^sub>1} {n ..< n\<^sub>1} \<and> khyg s\<^sub>1 FK \<and>
     bfree_sub s\<^sub>1 \<and> fresh_ok \<tau>\<^sub>1 n n\<^sub>1 FK \<and> binds_ok \<Gamma>\<^sub>1 n n\<^sub>1 FK\<close>
     by (rule infer_pats_Cons.IH)
   have le1: \<open>n \<le> n\<^sub>1\<close> and k1: \<open>khyg s\<^sub>1 FK\<close> and b1: \<open>bfree_sub s\<^sub>1\<close> using ih1 by simp_all
-  from pa refl refl refl ps cenv_sappe[OF wf(1)] bfree_env_sappe[OF b1 wf(2)]
+  from pa refl refl refl refl ps cenv_sappe[OF wf(1)] bfree_env_sappe[OF b1 wf(2)]
     ktv_env_sappe[OF k1 wf(3)]
   have ih2: \<open>n\<^sub>1 \<le> n' \<and> sconf s\<^sub>2 {n\<^sub>1 ..< n'} {n\<^sub>1 ..< n'} \<and> khyg s\<^sub>2 FK \<and> bfree_sub s\<^sub>2 \<and>
     (\<forall>\<tau> \<in> set \<tau>s\<^sub>2. fresh_ok \<tau> n\<^sub>1 n' FK) \<and> binds_ok \<Gamma>\<^sub>2 n\<^sub>1 n' FK\<close>
@@ -2996,6 +3074,16 @@ next
       bfree_sub_scomp[of s\<^sub>1 s\<^sub>2] fresh_ok_sapp'[OF _ s2 le2, of \<tau>\<^sub>1]
       binds_ok_sapp'[OF _ s2 le2, of \<Gamma>\<^sub>1] \<tau>s2 \<Gamma>2
     by simp
+next
+  case (infer_patom_PRec_False uf B fs n)
+  from infer_patom_PRec_False.prems obtain ps\<^sub>x \<tau>s where
+    wf: \<open>cenv B\<close> \<open>bfree_env B\<close> \<open>ktv_env B \<subseteq> FK\<close> and
+    d: \<open>distinct (map (n_txt \<circ> fst) fs)\<close> and
+    ps: \<open>infer_pats uf B (map snd fs) n = Some (s, ps\<^sub>x, \<tau>s, \<Gamma>, n')\<close> and
+    e: \<open>\<tau> = rec_of (zip (map (n_txt \<circ> fst) fs) \<tau>s) TRNil\<close>
+    by (auto split: if_split_asm prod.split_asm Option.bind_split_asm)
+  note ih = infer_patom_PRec_False.IH[OF d ps wf]
+  show ?case unfolding e using ih by (auto intro: fresh_ok_rec_of)
 qed simp_all
 
 end

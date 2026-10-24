@@ -448,6 +448,35 @@ fun rtail :: \<open>kty \<Rightarrow> kty\<close> where
 lemma rtail_TV_ftv: \<open>rtail u = TV b \<Longrightarrow> b \<in> ftv u\<close>
   by (induction u) auto
 
+text \<open>A record type from its fields in the order written, over a tail.\<close>
+
+definition rec_of :: \<open>(name \<times> kty) list \<Rightarrow> kty \<Rightarrow> kty\<close> where
+  \<open>rec_of fs t = foldr (\<lambda>(l, u). TRCons l u) fs t\<close>
+
+lemma rec_of_simps [simp]:
+  \<open>rec_of [] t = t\<close>
+  \<open>rec_of ((l, u) # fs) t = TRCons l u (rec_of fs t)\<close>
+  by (simp_all add: rec_of_def)
+
+lemma rtail_rec_of [simp]: \<open>rtail (rec_of fs t) = rtail t\<close>
+  by (induction fs) auto
+
+lemma ftv_rec_of [simp]: \<open>ftv (rec_of fs t) = (\<Union>(l, u) \<in> set fs. ftv u) \<union> ftv t\<close>
+  by (induction fs) auto
+
+lemma frv_rec_of [simp]: \<open>frv (rec_of fs t) = (\<Union>(l, u) \<in> set fs. frv u) \<union> frv t\<close>
+  by (induction fs) auto
+
+lemma tsubst_rec_of [simp]:
+  \<open>tsubst \<theta> \<rho> (rec_of fs t) = rec_of (map (apsnd (tsubst \<theta> \<rho>)) fs) (tsubst \<theta> \<rho> t)\<close>
+  by (induction fs) auto
+
+text \<open>Termination of a function recurring into the right components of a list of
+  pairs:\<close>
+
+lemma size_list_snd_le: \<open>size_list (f \<circ> snd) xs \<le> size_list (size_prod g f) xs\<close>
+  by (induction xs) auto
+
 fun ty_eq :: \<open>kty \<Rightarrow> kty \<Rightarrow> bool\<close>  (infix \<open>\<simeq>\<close> 50)
 and tys_eq :: \<open>kty list \<Rightarrow> kty list \<Rightarrow> bool\<close> (infix \<open>[\<simeq>]\<close> 50) where
   \<open>TV a \<simeq> u \<longleftrightarrow> u = TV a\<close>

@@ -426,7 +426,17 @@ where
                               \<epsilon> \<tau>,
                           ve\<^sub>4, Suc n\<^sub>4))))))
       | _ \<Rightarrow> None)\<close>
-| \<open>ty_stat B fr ve n (TRec _ _) = None\<close>
+| \<open>ty_stat B fr ve n (TRec fs rt) =
+     (if distinct (map (n_txt \<circ> fst) fs)
+      then tys_stat B fr ve n (map snd fs) \<bind> (\<lambda>(ts, ve\<^sub>1, n\<^sub>1).
+             (case rt of
+                None \<Rightarrow> Some (rec_of (zip (map (n_txt \<circ> fst) fs) ts) TRNil, ve\<^sub>1, n\<^sub>1)
+              | Some t \<Rightarrow>
+                  ty_stat B fr ve\<^sub>1 n\<^sub>1 t \<bind> (\<lambda>(u, ve\<^sub>2, n\<^sub>2).
+                    (case u of
+                       TV _ \<Rightarrow> Some (rec_of (zip (map (n_txt \<circ> fst) fs) ts) u, ve\<^sub>2, n\<^sub>2)
+                     | _ \<Rightarrow> None))))
+      else None)\<close>
 
 | \<open>spine_stat B fr ve n [] = None\<close>
 | \<open>spine_stat B fr ve n (a # as) =
@@ -489,7 +499,8 @@ termination
       | Inl (Inr (Inr (B, fr, ve, n, a))) \<Rightarrow> size a
       | Inr (Inl (B, fr, ve, n, ts)) \<Rightarrow> size_list size ts
       | Inr (Inr (Inl (B, fr, ve, n, as))) \<Rightarrow> size_list size as
-      | Inr (Inr (Inr (B, fr, ve, n, ro))) \<Rightarrow> size_option size ro)\<close>) auto
+      | Inr (Inr (Inr (B, fr, ve, n, ro))) \<Rightarrow> size_option size ro)\<close>)
+     (auto simp: less_Suc_eq_le intro: order_trans[OF size_list_snd_le] le_add1)
 
 lemmas ty_stat_induct =
   ty_stat_atoms_stat_atom_stat_tys_stat_spine_stat_row_stat.induct[named_cases ty_stat]
@@ -968,9 +979,10 @@ lemmas pat_resolve_induct =
 
 subsection \<open>Patterns\<close>
 
-text \<open>Pattern typing \<open>wtp B p \<tau> \<Gamma>\<close>: \<open>p\<close> matches scrutinees of type \<open>\<tau>\<close> and
-  binds \<open>\<Gamma>\<close>, in the order the elaborator's \<open>elab_pat\<close> produces binders. A
-  single-segment name that is not a constructor binds; a constructor
+text \<open>Pattern typing \<open>wtp B p p' \<tau> \<Gamma>\<close>: \<open>p\<close> matches scrutinees of type \<open>\<tau>\<close>,
+  binds \<open>\<Gamma>\<close>, in the order the elaborator's \<open>elab_pat\<close> produces binders, and
+  elaborates to \<open>p'\<close>: operator chains resolved, record patterns in the canonical
+  order. A single-segment name that is not a constructor binds; a constructor
   pattern is saturated; an operator pattern is typed as its resolution. An
   unsuffixed literal is an \<open>int\<close>, a suffixed one has its suffix's type.\<close>
 
@@ -992,39 +1004,60 @@ fun fn_ty :: \<open>kty list \<Rightarrow> kty\<close> where
   \<open>fn_ty [\<tau>] = \<tau>\<close>
 | \<open>fn_ty \<tau>s = tuple \<tau>s\<close>
 
-inductive wtp :: \<open>tenv \<Rightarrow> mpat \<Rightarrow> kty \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
-  wtpa :: \<open>tenv \<Rightarrow> mpatom \<Rightarrow> kty \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
-  wtpas :: \<open>tenv \<Rightarrow> mpatom list \<Rightarrow> kty list \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
-  wtps :: \<open>tenv \<Rightarrow> mpat list \<Rightarrow> kty list \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close>
-where
-  P_atom: \<open>wtpa B a \<tau> \<Gamma> \<Longrightarrow> wtp B (PatApp [a]) \<tau> \<Gamma>\<close>
-| P_con:  \<open>tlookup B (path_nms p) = Some (TEcon \<sigma> n) \<Longrightarrow> n = length as \<Longrightarrow> as \<noteq> [] \<Longrightarrow>
-           \<sigma> \<succeq> \<tau>\<^sub>c \<Longrightarrow> con_ty n \<tau>\<^sub>c = Some (\<tau>s, \<tau>) \<Longrightarrow> wtpas B as \<tau>s' \<Gamma> \<Longrightarrow> \<tau>s' [\<simeq>] \<tau>s \<Longrightarrow>
-           wtp B (PatApp (PQid p # as)) \<tau> \<Gamma>\<close>
-| P_as:   \<open>wtp B p \<tau> \<Gamma> \<Longrightarrow> nm_ok (n_txt x) \<Longrightarrow> wtp B (PatAs p x) \<tau> ((n_txt x, \<tau>) # \<Gamma>)\<close>
-| P_ann:  \<open>wtp B p \<tau> \<Gamma> \<Longrightarrow> ty_stat B True ([], []) n ty = Some (\<tau>\<^sub>a, ve, n') \<Longrightarrow>
-           close_sch (set [n ..< n']) (set [n ..< n']) \<tau>\<^sub>a \<succeq> \<tau>' \<Longrightarrow> \<tau>' \<simeq> \<tau> \<Longrightarrow>
-           wtp B (PatAnn p ty) \<tau> \<Gamma>\<close>
-| P_op:   \<open>pat_resolve B (PatOp as opr p) = Some q \<Longrightarrow> wtp B q \<tau> \<Gamma> \<Longrightarrow>
-           wtp B (PatOp as opr p) \<tau> \<Gamma>\<close>
-| PA_wild: \<open>wtpa B (PWild x) \<tau> []\<close>
-| PA_var: \<open>\<not> is_con B (n_txt x) \<Longrightarrow> nm_ok (n_txt x) \<Longrightarrow>
-           wtpa B (PQid (MkPath [x])) \<tau> [(n_txt x, \<tau>)]\<close>
-| PA_con: \<open>tlookup B (path_nms p) = Some (TEcon \<sigma> 0) \<Longrightarrow> \<sigma> \<succeq> \<tau>\<^sub>c \<Longrightarrow> \<tau>\<^sub>c \<simeq> \<tau> \<Longrightarrow>
-           wtpa B (PQid p) \<tau> []\<close>
-| PA_num: \<open>wtpa B (PNum l v None) (TC int_ty []) []\<close>
-| PA_numsfx: \<open>sfx_ok k v \<Longrightarrow> wtpa B (PNum l v (Some k)) (TC (sfx_ty k) []) []\<close>
-| PA_str: \<open>wtpa B (PStr l cs) (TC string_ty []) []\<close>
-| PA_chr: \<open>wtpa B (PChar l c) (TC char_ty []) []\<close>
-| PA_par: \<open>wtp B p \<tau> \<Gamma> \<Longrightarrow> wtpa B (PParen [p]) \<tau> \<Gamma>\<close>
-| PA_tup: \<open>length ps \<noteq> 1 \<Longrightarrow> wtps B ps \<tau>s \<Gamma> \<Longrightarrow> wtpa B (PParen ps) (tuple \<tau>s) \<Gamma>\<close>
-| PA_list: \<open>wtps B ps \<tau>s \<Gamma> \<Longrightarrow> \<forall>\<tau>' \<in> set \<tau>s. \<tau>' \<simeq> \<tau> \<Longrightarrow>
-           wtpa B (PList ps) (TC list_ty [\<tau>]) \<Gamma>\<close>
-| PAs_nil: \<open>wtpas B [] [] []\<close>
-| PAs_cons: \<open>wtpa B a \<tau> \<Gamma>\<^sub>1 \<Longrightarrow> wtpas B as \<tau>s \<Gamma>\<^sub>2 \<Longrightarrow> wtpas B (a # as) (\<tau> # \<tau>s) (\<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2)\<close>
-| Ps_nil: \<open>wtps B [] [] []\<close>
-| Ps_cons: \<open>wtp B p \<tau> \<Gamma>\<^sub>1 \<Longrightarrow> wtps B ps \<tau>s \<Gamma>\<^sub>2 \<Longrightarrow> wtps B (p # ps) (\<tau> # \<tau>s) (\<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2)\<close>
+text \<open>A closed record pattern elaborates to the one listing its fields in the
+  canonical order, so that the backend reads positions off the pattern. Selection
+  elaborates to the reserved primitive \<open>%sel\<close> applied to the record and to the
+  field's offset in that order, a number once the record type is closed: the
+  evidence translation of a lacks predicate, with the checker as the static
+  lookup. The checker supplies no evidence for an open record yet: a projection
+  out of a record whose type stays open is rejected.\<close>
 
+definition rec_pat :: \<open>(nm \<times> mpat) list \<Rightarrow> mpatom\<close> where
+  \<open>rec_pat fs = PRec (sort_key (n_txt \<circ> fst) fs) False\<close>
+
+definition sel_atom :: \<open>matom \<Rightarrow> matom \<Rightarrow> matom\<close> where
+  \<open>sel_atom a ev = AParen [ESpine [APath (MkPath [mk_nm (str ''%sel'')]), a, ev]]\<close>
+
+inductive wtp :: \<open>tenv \<Rightarrow> mpat \<Rightarrow> mpat \<Rightarrow> kty \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
+  wtpa :: \<open>tenv \<Rightarrow> mpatom \<Rightarrow> mpatom \<Rightarrow> kty \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
+  wtpas :: \<open>tenv \<Rightarrow> mpatom list \<Rightarrow> mpatom list \<Rightarrow> kty list \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
+  wtps :: \<open>tenv \<Rightarrow> mpat list \<Rightarrow> mpat list \<Rightarrow> kty list \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close>
+where
+  P_atom: \<open>wtpa B a a' \<tau> \<Gamma> \<Longrightarrow> wtp B (PatApp [a]) (PatApp [a']) \<tau> \<Gamma>\<close>
+| P_con:  \<open>tlookup B (path_nms p) = Some (TEcon \<sigma> n) \<Longrightarrow> n = length as \<Longrightarrow> as \<noteq> [] \<Longrightarrow>
+           \<sigma> \<succeq> \<tau>\<^sub>c \<Longrightarrow> con_ty n \<tau>\<^sub>c = Some (\<tau>s, \<tau>) \<Longrightarrow> wtpas B as as' \<tau>s' \<Gamma> \<Longrightarrow> \<tau>s' [\<simeq>] \<tau>s \<Longrightarrow>
+           wtp B (PatApp (PQid p # as)) (PatApp (PQid p # as')) \<tau> \<Gamma>\<close>
+| P_as:   \<open>wtp B p p' \<tau> \<Gamma> \<Longrightarrow> nm_ok (n_txt x) \<Longrightarrow>
+           wtp B (PatAs p x) (PatAs p' x) \<tau> ((n_txt x, \<tau>) # \<Gamma>)\<close>
+| P_ann:  \<open>wtp B p p' \<tau> \<Gamma> \<Longrightarrow> ty_stat B True ([], []) n ty = Some (\<tau>\<^sub>a, ve, n') \<Longrightarrow>
+           close_sch (set [n ..< n']) (set [n ..< n']) \<tau>\<^sub>a \<succeq> \<tau>' \<Longrightarrow> \<tau>' \<simeq> \<tau> \<Longrightarrow>
+           wtp B (PatAnn p ty) (PatAnn p' ty) \<tau> \<Gamma>\<close>
+| P_op:   \<open>pat_resolve B (PatOp as opr p) = Some q \<Longrightarrow> wtp B q q' \<tau> \<Gamma> \<Longrightarrow>
+           wtp B (PatOp as opr p) q' \<tau> \<Gamma>\<close>
+| PA_wild: \<open>wtpa B (PWild x) (PWild x) \<tau> []\<close>
+| PA_var: \<open>\<not> is_con B (n_txt x) \<Longrightarrow> nm_ok (n_txt x) \<Longrightarrow>
+           wtpa B (PQid (MkPath [x])) (PQid (MkPath [x])) \<tau> [(n_txt x, \<tau>)]\<close>
+| PA_con: \<open>tlookup B (path_nms p) = Some (TEcon \<sigma> 0) \<Longrightarrow> \<sigma> \<succeq> \<tau>\<^sub>c \<Longrightarrow> \<tau>\<^sub>c \<simeq> \<tau> \<Longrightarrow>
+           wtpa B (PQid p) (PQid p) \<tau> []\<close>
+| PA_num: \<open>wtpa B (PNum l v None) (PNum l v None) (TC int_ty []) []\<close>
+| PA_numsfx: \<open>sfx_ok k v \<Longrightarrow>
+           wtpa B (PNum l v (Some k)) (PNum l v (Some k)) (TC (sfx_ty k) []) []\<close>
+| PA_str: \<open>wtpa B (PStr l cs) (PStr l cs) (TC string_ty []) []\<close>
+| PA_chr: \<open>wtpa B (PChar l c) (PChar l c) (TC char_ty []) []\<close>
+| PA_par: \<open>wtp B p p' \<tau> \<Gamma> \<Longrightarrow> wtpa B (PParen [p]) (PParen [p']) \<tau> \<Gamma>\<close>
+| PA_tup: \<open>length ps \<noteq> 1 \<Longrightarrow> wtps B ps ps' \<tau>s \<Gamma> \<Longrightarrow>
+           wtpa B (PParen ps) (PParen ps') (tuple \<tau>s) \<Gamma>\<close>
+| PA_list: \<open>wtps B ps ps' \<tau>s \<Gamma> \<Longrightarrow> \<forall>\<tau>' \<in> set \<tau>s. \<tau>' \<simeq> \<tau> \<Longrightarrow>
+           wtpa B (PList ps) (PList ps') (TC list_ty [\<tau>]) \<Gamma>\<close>
+| PA_rec: \<open>distinct (map (n_txt \<circ> fst) fs) \<Longrightarrow> wtps B (map snd fs) ps' \<tau>s \<Gamma> \<Longrightarrow>
+           wtpa B (PRec fs False) (rec_pat (zip (map fst fs) ps'))
+                  (rec_of (zip (map (n_txt \<circ> fst) fs) \<tau>s) TRNil) \<Gamma>\<close>
+| PAs_nil: \<open>wtpas B [] [] [] []\<close>
+| PAs_cons: \<open>wtpa B a a' \<tau> \<Gamma>\<^sub>1 \<Longrightarrow> wtpas B as as' \<tau>s \<Gamma>\<^sub>2 \<Longrightarrow>
+           wtpas B (a # as) (a' # as') (\<tau> # \<tau>s) (\<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2)\<close>
+| Ps_nil: \<open>wtps B [] [] [] []\<close>
+| Ps_cons: \<open>wtp B p p' \<tau> \<Gamma>\<^sub>1 \<Longrightarrow> wtps B ps ps' \<tau>s \<Gamma>\<^sub>2 \<Longrightarrow>
+           wtps B (p # ps) (p' # ps') (\<tau> # \<tau>s) (\<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2)\<close>
 subsection \<open>Exhaustiveness and syntactic values\<close>
 
 text \<open>Shallow exhaustiveness: an irrefutable clause, or every constructor
@@ -1045,6 +1078,7 @@ where
 | \<open>irrefutable_atom B (PQid (MkPath [x])) = (\<not> is_con B (n_txt x))\<close>
 | \<open>irrefutable_atom B (PQid _) = False\<close>
 | \<open>irrefutable_atom B (PParen ps) = list_all (irrefutable B) ps\<close>
+| \<open>irrefutable_atom B (PRec fs _) = list_all (irrefutable B \<circ> snd) fs\<close>
 | \<open>irrefutable_atom B _ = False\<close>
 
 definition con_stamp :: \<open>scheme \<Rightarrow> nat \<Rightarrow> nat option\<close> where
@@ -1115,7 +1149,8 @@ subsection \<open>Expressions\<close>
 
 text \<open>The judgement \<open>B,\<epsilon> \<turnstile> e \<leadsto> e' : \<tau>\<close>: under basis \<open>B\<close> and ambient row \<open>\<epsilon>\<close>
   the surface term \<open>e\<close> elaborates to \<open>e'\<close>, which differs from \<open>e\<close> only by
-  inserted and annotated module arguments, with type \<open>\<tau>\<close>. The rules follow
+  inserted and annotated module arguments, elaborated patterns and projections, with
+  type \<open>\<tau>\<close>. The rules follow
   \<^cite>\<open>\<open>Fig. 3\<close> in leijen2017\<close>: the ambient row is shared by the premises of a rule,
   a function captures its body's ambient as its latent row, an application
   requires the latent row to equal the ambient (equality suffices with open
@@ -1209,20 +1244,20 @@ where
 | W_ann:   \<open>B,\<epsilon> \<turnstile> e \<leadsto> e' : \<tau> \<Longrightarrow> ty_stat B True ([], []) n ty = Some (\<tau>\<^sub>a, ve, n') \<Longrightarrow>
             close_sch (set [n ..< n']) (set [n ..< n']) (ann_ty B \<tau> \<tau>\<^sub>a) \<succeq> \<tau>' \<Longrightarrow> \<tau>' \<simeq> \<tau> \<Longrightarrow>
             B,\<epsilon> \<turnstile> EAnn e ty \<leadsto> EAnn e' ty : \<tau>\<close>
-| W_fn:    \<open>wtps B ps \<tau>s \<Gamma> \<Longrightarrow> covers B (fn_ty \<tau>s) [fn_pat ps] \<Longrightarrow>
+| W_fn:    \<open>wtps B ps ps' \<tau>s \<Gamma> \<Longrightarrow> covers B (fn_ty \<tau>s) [fn_pat ps] \<Longrightarrow>
             (binders \<Gamma> @ B),\<epsilon>' \<turnstile> b \<leadsto> b' : \<tau>\<^sub>b \<Longrightarrow>
-            B,\<epsilon> \<turnstile> EFn ps b \<leadsto> EFn ps b' : TFn (fn_ty \<tau>s) \<epsilon>' \<tau>\<^sub>b\<close>
+            B,\<epsilon> \<turnstile> EFn ps b \<leadsto> EFn ps' b' : TFn (fn_ty \<tau>s) \<epsilon>' \<tau>\<^sub>b\<close>
 | W_fnmod: \<open>dep_env B n (mbind_sig b) m = Some (K, E, n') \<Longrightarrow>
             set K \<inter> ktv_env B = {} \<Longrightarrow> E\<^sub>K = param_env E \<Longrightarrow>
             ((mbind_nm b, if is_imp b then TEinst E\<^sub>K else TEstr E\<^sub>K) # B),\<epsilon>' \<turnstile> e \<leadsto> e' : \<tau> \<Longrightarrow>
             named_sig (mbind_sig b) \<Longrightarrow> nm_ok (mbind_nm b) \<Longrightarrow>
             B,\<epsilon> \<turnstile> EFnMod b e \<leadsto> EFnMod b e' : TDep (is_imp b) (mbind_sig b) m \<epsilon>' (kclose K \<tau>)\<close>
-| W_let:   \<open>B,\<epsilon> \<turnstile> e \<leadsto> e' : \<tau>\<^sub>e \<Longrightarrow> wtp B p \<tau>\<^sub>p \<Gamma> \<Longrightarrow> \<tau>\<^sub>p \<simeq> \<tau>\<^sub>e \<Longrightarrow> covers B \<tau>\<^sub>e [p] \<Longrightarrow>
+| W_let:   \<open>B,\<epsilon> \<turnstile> e \<leadsto> e' : \<tau>\<^sub>e \<Longrightarrow> wtp B p p' \<tau>\<^sub>p \<Gamma> \<Longrightarrow> \<tau>\<^sub>p \<simeq> \<tau>\<^sub>e \<Longrightarrow> covers B \<tau>\<^sub>e [p] \<Longrightarrow>
             as \<inter> ftv_env B = {} \<Longrightarrow> rs \<inter> frv_env B = {} \<Longrightarrow> rs \<inter> frv_row \<epsilon> = {} \<Longrightarrow>
             (as = {} \<and> rs = {}) \<or> val_exp B e' \<Longrightarrow>
             (map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs \<tau>))) \<Gamma> @ B),\<epsilon> \<turnstile> b \<leadsto> b' : \<tau> \<Longrightarrow>
             btv \<tau>\<^sub>p = {} \<Longrightarrow> brv \<tau>\<^sub>p = {} \<Longrightarrow>
-            B,\<epsilon> \<turnstile> ELet p e b \<leadsto> ELet p e' b' : \<tau>\<close>
+            B,\<epsilon> \<turnstile> ELet p e b \<leadsto> ELet p' e' b' : \<tau>\<close>
 | W_letfun: \<open>cls \<noteq> [] \<Longrightarrow> r = foldr EFnMod mbs (dfun_rhs cls) \<Longrightarrow> is_fn r \<Longrightarrow>
             ((n_txt f, TEval (kmono \<tau>)) # B),\<epsilon> \<turnstile> r \<leadsto> r' : \<tau>' \<Longrightarrow> \<tau>' \<simeq> \<tau> \<Longrightarrow>
             as \<inter> ftv_env B = {} \<Longrightarrow> rs \<inter> frv_env B = {} \<Longrightarrow> rs \<inter> frv_row \<epsilon> = {} \<Longrightarrow>
@@ -1295,6 +1330,13 @@ where
 | A_list:  \<open>wt_exps B \<epsilon> es es' \<tau>s \<Longrightarrow> \<forall>\<tau>' \<in> set \<tau>s. \<tau>' \<simeq> \<tau> \<Longrightarrow>
             wt_atom B \<epsilon> (AList es) (AList es') (TC list_ty [\<tau>])\<close>
 
+| A_rec:   \<open>distinct (map (n_txt \<circ> fst) fs) \<Longrightarrow> wt_exps B \<epsilon> (map snd fs) es' \<tau>s \<Longrightarrow>
+            wt_atom B \<epsilon> (ARec fs) (ARec (zip (map fst fs) es'))
+                    (rec_of (zip (map (n_txt \<circ> fst) fs) \<tau>s) TRNil)\<close>
+| A_dot:   \<open>wt_atom B \<epsilon> a a' r \<Longrightarrow> fpull (n_txt x) r = Some (\<tau>, r') \<Longrightarrow>
+            offset_of (n_txt x) r = Some k \<Longrightarrow>
+            wt_atom B \<epsilon> (ADot a x) (sel_atom a' (ANum no_loc (int k) None)) \<tau>\<close>
+
 | G_nil:   \<open>wt_args B \<epsilon> \<tau> [] [] \<tau>\<close>
 | G_app:   \<open>\<tau>\<^sub>0 \<simeq> TFn \<tau>\<^sub>1 \<epsilon>\<^sub>l \<tau>\<^sub>2 \<Longrightarrow> \<epsilon>\<^sub>l \<approx> \<epsilon> \<Longrightarrow> wt_atom B \<epsilon> a a' \<tau>\<^sub>1' \<Longrightarrow> \<tau>\<^sub>1' \<simeq> \<tau>\<^sub>1 \<Longrightarrow>
             wt_args B \<epsilon> \<tau>\<^sub>2 as as' \<tau> \<Longrightarrow>
@@ -1327,15 +1369,15 @@ where
 | C_last:  \<open>\<not> is_eop e \<Longrightarrow> B,\<epsilon> \<turnstile> e \<leadsto> e' : \<tau> \<Longrightarrow> wt_chain B \<epsilon> e e' [] [\<tau>]\<close>
 
 | M_nil:   \<open>wt_arms B \<epsilon> \<tau>\<^sub>0 [] [] \<tau>\<close>
-| M_cons:  \<open>wtp B p \<tau>\<^sub>p \<Gamma> \<Longrightarrow> \<tau>\<^sub>p \<simeq> \<tau>\<^sub>0 \<Longrightarrow> (binders \<Gamma> @ B),\<epsilon> \<turnstile> b \<leadsto> b' : \<tau>' \<Longrightarrow> \<tau>' \<simeq> \<tau> \<Longrightarrow>
+| M_cons:  \<open>wtp B p p' \<tau>\<^sub>p \<Gamma> \<Longrightarrow> \<tau>\<^sub>p \<simeq> \<tau>\<^sub>0 \<Longrightarrow> (binders \<Gamma> @ B),\<epsilon> \<turnstile> b \<leadsto> b' : \<tau>' \<Longrightarrow> \<tau>' \<simeq> \<tau> \<Longrightarrow>
             wt_arms B \<epsilon> \<tau>\<^sub>0 arms arms' \<tau> \<Longrightarrow>
-            wt_arms B \<epsilon> \<tau>\<^sub>0 ((p, b) # arms) ((p, b') # arms') \<tau>\<close>
+            wt_arms B \<epsilon> \<tau>\<^sub>0 ((p, b) # arms) ((p', b') # arms') \<tau>\<close>
 
 | Cl_nil:  \<open>wt_cls B \<epsilon> nm \<tau> targs [] [] \<tau>\<close>
 | Cl_op:   \<open>tlookup B [n_txt opn] = Some (TEop l eps \<tau>\<^sub>1 \<tau>\<^sub>2) \<Longrightarrow>
             targs = tuple args \<Longrightarrow> length args = length eps \<Longrightarrow>
             \<tau>\<^sub>1' = op_inst eps args \<tau>\<^sub>1 \<Longrightarrow> \<tau>\<^sub>2' = op_inst eps args \<tau>\<^sub>2 \<Longrightarrow>
-            wtps B ps \<tau>s \<Gamma> \<Longrightarrow> fn_ty \<tau>s \<simeq> \<tau>\<^sub>1' \<Longrightarrow> covers B (fn_ty \<tau>s) [fn_pat ps] \<Longrightarrow>
+            wtps B ps ps' \<tau>s \<Gamma> \<Longrightarrow> fn_ty \<tau>s \<simeq> \<tau>\<^sub>1' \<Longrightarrow> covers B (fn_ty \<tau>s) [fn_pat ps] \<Longrightarrow>
             \<epsilon>' \<approx> (if nm then \<epsilon> else rext (hlabels B cls) \<epsilon>) \<Longrightarrow>
             \<Gamma>' = (case k of None \<Rightarrow> binders \<Gamma>
                    | Some kn \<Rightarrow> (n_txt kn, TEval (kmono (TFn \<tau>\<^sub>2' \<epsilon>' \<tau>\<^sub>0))) # binders \<Gamma>) \<Longrightarrow>
@@ -1343,12 +1385,12 @@ where
             \<tau>\<^sub>b \<simeq> (case k of None \<Rightarrow> \<tau>\<^sub>2' | Some _ \<Rightarrow> \<tau>\<^sub>0) \<Longrightarrow>
             wt_cls B \<epsilon> nm \<tau>\<^sub>0 targs cls cls' \<tau> \<Longrightarrow>
             (case k of None \<Rightarrow> True | Some kn \<Rightarrow> n_txt kn \<notin> set (map fst \<Gamma>) \<and> nm_ok (n_txt kn)) \<Longrightarrow>
-            wt_cls B \<epsilon> nm \<tau>\<^sub>0 targs (HOp opn ps k b # cls) (HOp opn ps k b' # cls') \<tau>\<close>
-| Cl_ret:  \<open>wtp B p \<tau>\<^sub>p \<Gamma> \<Longrightarrow> \<tau>\<^sub>p \<simeq> \<tau>\<^sub>0 \<Longrightarrow> covers B \<tau>\<^sub>0 [p] \<Longrightarrow>
+            wt_cls B \<epsilon> nm \<tau>\<^sub>0 targs (HOp opn ps k b # cls) (HOp opn ps' k b' # cls') \<tau>\<close>
+| Cl_ret:  \<open>wtp B p p' \<tau>\<^sub>p \<Gamma> \<Longrightarrow> \<tau>\<^sub>p \<simeq> \<tau>\<^sub>0 \<Longrightarrow> covers B \<tau>\<^sub>0 [p] \<Longrightarrow>
             \<epsilon>' \<approx> (if nm then \<epsilon> else rext (hlabels B cls) \<epsilon>) \<Longrightarrow>
             (binders \<Gamma> @ B),\<epsilon>' \<turnstile> b \<leadsto> b' : \<tau>' \<Longrightarrow>
             wt_cls B \<epsilon> nm \<tau>' targs cls cls' \<tau> \<Longrightarrow> nm \<longrightarrow> hlabels B cls = [] \<Longrightarrow>
-            wt_cls B \<epsilon> nm \<tau>\<^sub>0 targs (HRet p b # cls) (HRet p b' # cls') \<tau>\<close>
+            wt_cls B \<epsilon> nm \<tau>\<^sub>0 targs (HRet p b # cls) (HRet p' b' # cls') \<tau>\<close>
 | Cl_fin:  \<open>B,\<epsilon> \<turnstile> b \<leadsto> b' : \<tau>\<^sub>f \<Longrightarrow> \<tau>\<^sub>f \<simeq> unit_ty \<Longrightarrow> wt_cls B \<epsilon> nm \<tau>\<^sub>0 targs cls cls' \<tau> \<Longrightarrow>
             wt_cls B \<epsilon> nm \<tau>\<^sub>0 targs (HFin b # cls) (HFin b' # cls') \<tau>\<close>
 

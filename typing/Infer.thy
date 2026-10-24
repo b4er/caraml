@@ -17,42 +17,76 @@ text \<open>Algorithm W over the surface \<^cite>\<open>\<open>Sect. 4\<close> i
 
 subsection \<open>Pending implicit resolutions\<close>
 
-text \<open>A pending request records the placeholder's name, the binder's
-  abstract types with the unification variables standing for them, the
-  elaborated parameter signature, the candidates in scope at the request
-  and, once resolved, the instance chosen. The scope is the request's,
-  not the binding's, so an implicit parameter of an enclosing binder is a
-  candidate \<^cite>\<open>\<open>Sect. 2.2.2\<close> in white2014\<close>. A request that mentions a binder's
-  abstract types is resolved when the binder closes; the rest wait for the
-  enclosing binding.\<close>
+text \<open>A pending request is an implicit module argument or a projection, named
+  by its placeholder. An implicit request records the binder's abstract types
+  with the unification variables standing for them, the elaborated parameter
+  signature, the candidates in scope at the request and, once resolved, the
+  instance chosen. The scope is the request's, not the binding's, so an
+  implicit parameter of an enclosing binder is a candidate
+  \<^cite>\<open>\<open>Sect. 2.2.2\<close> in white2014\<close>. A request that mentions a binder's abstract
+  types is resolved when the binder closes; the rest wait for the enclosing
+  binding. A projection records its label and the record's type; its offset is
+  read off that type once the enclosing binding is inferred.\<close>
 
-type_synonym pend =
-  \<open>(name \<times> tvar list \<times> (tvar \<times> kty) list \<times> tenv \<times> (name \<times> tenv) list \<times> name option) list\<close>
+datatype preq =
+  PImp \<open>tvar list\<close> \<open>(tvar \<times> kty) list\<close> tenv \<open>(name \<times> tenv) list\<close> \<open>name option\<close>
+| POff name kty
+
+type_synonym pend = \<open>(name \<times> preq) list\<close>
+
+fun sub_preq :: \<open>ksub \<Rightarrow> preq \<Rightarrow> preq\<close> where
+  \<open>sub_preq s (PImp K \<phi> E cs r) = PImp K (map (apsnd (sapp s)) \<phi>) E cs r\<close>
+| \<open>sub_preq s (POff l r) = POff l (sapp s r)\<close>
 
 definition sub_pend :: \<open>ksub \<Rightarrow> pend \<Rightarrow> pend\<close> where
-  \<open>sub_pend s = map (\<lambda>(x, K, \<phi>, E, cs, r). (x, K, map (apsnd (sapp s)) \<phi>, E, cs, r))\<close>
+  \<open>sub_pend s = map (apsnd (sub_preq s))\<close>
+
+text \<open>The variables a request keeps monomorphic: an implicit's realisation, a
+  projection's record type.\<close>
+
+fun ftv_preq :: \<open>preq \<Rightarrow> tvar set\<close> where
+  \<open>ftv_preq (PImp K \<phi> E cs r) = (\<Union>(k, t) \<in> set \<phi>. ftv t)\<close>
+| \<open>ftv_preq (POff l r) = ftv r\<close>
+
+fun frv_preq :: \<open>preq \<Rightarrow> rvar set\<close> where
+  \<open>frv_preq (PImp K \<phi> E cs r) = (\<Union>(k, t) \<in> set \<phi>. frv t)\<close>
+| \<open>frv_preq (POff l r) = frv r\<close>
 
 definition ftv_pend :: \<open>pend \<Rightarrow> tvar set\<close> where
-  \<open>ftv_pend pd = (\<Union>(x, K, \<phi>, E, cs, r) \<in> set pd. \<Union>(k, t) \<in> set \<phi>. ftv t)\<close>
+  \<open>ftv_pend pd = (\<Union>(x, q) \<in> set pd. ftv_preq q)\<close>
 
 definition frv_pend :: \<open>pend \<Rightarrow> rvar set\<close> where
-  \<open>frv_pend pd = (\<Union>(x, K, \<phi>, E, cs, r) \<in> set pd. \<Union>(k, t) \<in> set \<phi>. frv t)\<close>
+  \<open>frv_pend pd = (\<Union>(x, q) \<in> set pd. frv_preq q)\<close>
 
-text \<open>The abstract types the open requests mention.\<close>
+lemma ftv_pend_simps [simp]:
+  \<open>ftv_pend [] = {}\<close> \<open>ftv_pend ((x, q) # pd) = ftv_preq q \<union> ftv_pend pd\<close>
+  by (auto simp: ftv_pend_def)
+
+lemma frv_pend_simps [simp]:
+  \<open>frv_pend [] = {}\<close> \<open>frv_pend ((x, q) # pd) = frv_preq q \<union> frv_pend pd\<close>
+  by (auto simp: frv_pend_def)
+
+text \<open>The abstract types the open implicit requests mention.\<close>
+
+fun ktv_preq :: \<open>preq \<Rightarrow> tvar set\<close> where
+  \<open>ktv_preq (PImp K \<phi> E cs r) = (if r = None then (\<Union>(k, t) \<in> set \<phi>. ktv t) else {})\<close>
+| \<open>ktv_preq (POff l r) = {}\<close>
 
 definition ktv_pend :: \<open>pend \<Rightarrow> tvar set\<close> where
-  \<open>ktv_pend pd = (\<Union>(x, K, \<phi>, E, cs, r) \<in> set pd. if r = None then (\<Union>(k, t) \<in> set \<phi>. ktv t) else {})\<close>
+  \<open>ktv_pend pd = (\<Union>(x, q) \<in> set pd. ktv_preq q)\<close>
 
-text \<open>At a binder's exit, the open requests mentioning its abstract types
-  are resolved from their own scope.\<close>
+text \<open>At a binder's exit, the open implicit requests mentioning its abstract
+  types are resolved from their own scope.\<close>
 
 fun resolve_inner :: \<open>tvar list \<Rightarrow> pend \<Rightarrow> pend option\<close> where
   \<open>resolve_inner K [] = Some []\<close>
-| \<open>resolve_inner K ((x, K', \<phi>, E, cs, r) # pd) =
+| \<open>resolve_inner K ((x, PImp K' \<phi> E cs r) # pd) =
      resolve_inner K pd \<bind> (\<lambda>pd'.
        (if r = None \<and> set K \<inter> (\<Union>(k, t) \<in> set \<phi>. ktv t) \<noteq> {}
-        then imp_res cs K' E \<phi> \<bind> (\<lambda>P. Some ((x, K', \<phi>, E, cs, Some P) # pd'))
-        else Some ((x, K', \<phi>, E, cs, r) # pd')))\<close>
+        then imp_res cs K' E \<phi> \<bind> (\<lambda>P. Some ((x, PImp K' \<phi> E cs (Some P)) # pd'))
+        else Some ((x, PImp K' \<phi> E cs r) # pd')))\<close>
+| \<open>resolve_inner K ((x, POff l r) # pd) =
+     resolve_inner K pd \<bind> (\<lambda>pd'. Some ((x, POff l r) # pd'))\<close>
 
 lemmas resolve_inner_induct = resolve_inner.induct[named_cases resolve_inner]
 
@@ -78,9 +112,9 @@ definition gen_p :: \<open>tenv \<Rightarrow> krow \<Rightarrow> pend \<Rightarr
 text \<open>Replacing placeholder module arguments by the resolved instance
   paths.\<close>
 
-fun subst_imp :: \<open>(name \<times> name) list \<Rightarrow> expr \<Rightarrow> expr\<close>
-and subst_imp_atom :: \<open>(name \<times> name) list \<Rightarrow> matom \<Rightarrow> matom\<close>
-and subst_imp_cls :: \<open>(name \<times> name) list \<Rightarrow> hclause \<Rightarrow> hclause\<close>
+fun subst_imp :: \<open>(name \<times> matom) list \<Rightarrow> expr \<Rightarrow> expr\<close>
+and subst_imp_atom :: \<open>(name \<times> matom) list \<Rightarrow> matom \<Rightarrow> matom\<close>
+and subst_imp_cls :: \<open>(name \<times> matom) list \<Rightarrow> hclause \<Rightarrow> hclause\<close>
 where
   \<open>subst_imp tab (ESpine as) = ESpine (map (subst_imp_atom tab) as)\<close>
 | \<open>subst_imp tab (EOp as opr e) = EOp (map (subst_imp_atom tab) as) opr (subst_imp tab e)\<close>
@@ -109,8 +143,12 @@ where
 | \<open>subst_imp_atom tab (ADot a x) = ADot (subst_imp_atom tab a) x\<close>
 | \<open>subst_imp_atom tab (AMod p sg) =
      (case path_nms p of
-        [x] \<Rightarrow> (case map_of tab x of Some P \<Rightarrow> AMod (MkPath [mk_nm P]) sg | None \<Rightarrow> AMod p sg)
+        [x] \<Rightarrow> (case map_of tab x of Some (APath P) \<Rightarrow> AMod P sg | _ \<Rightarrow> AMod p sg)
       | _ \<Rightarrow> AMod p sg)\<close>
+| \<open>subst_imp_atom tab (APath p) =
+     (case path_nms p of
+        [x] \<Rightarrow> (case map_of tab x of Some a \<Rightarrow> a | None \<Rightarrow> APath p)
+      | _ \<Rightarrow> APath p)\<close>
 | \<open>subst_imp_atom tab a = a\<close>
 | \<open>subst_imp_cls tab (HOp opn ps k b) = HOp opn ps k (subst_imp tab b)\<close>
 | \<open>subst_imp_cls tab (HRet p b) = HRet p (subst_imp tab b)\<close>
@@ -118,7 +156,7 @@ where
 
 subsection \<open>Patterns\<close>
 
-text \<open>\<open>infer_pat uf B p n\<close>: the pattern's type, its binders with their
+text \<open>\<open>infer_pat uf B p n\<close>: the elaborated pattern, its type, its binders with their
   types, and the substitution constructor arguments forced. An operator pattern is
   inferred as its resolution, which holds no chain, so the algorithm recurses on
   the number of chains in a pattern first (\<^text>\<open>patops\<close>) and its size second.\<close>
@@ -159,16 +197,22 @@ lemma pat_resolve_patops:
       arbitrary: q and b and qs oprs and qs and bs and gs rule: pat_resolve_induct)
      (auto simp: bind_eq_Some_conv tree_pat_patops)
 
+lemma patops_fields_pats: \<open>patops_fields fs = patops_pats (map snd fs)\<close>
+  by (induction fs) auto
+
 function (sequential) infer_pat ::
-  \<open>nat \<Rightarrow> tenv \<Rightarrow> mpat \<Rightarrow> nat \<Rightarrow> (ksub \<times> kty \<times> (name \<times> kty) list \<times> nat) option\<close>
+  \<open>nat \<Rightarrow> tenv \<Rightarrow> mpat \<Rightarrow> nat \<Rightarrow> (ksub \<times> mpat \<times> kty \<times> (name \<times> kty) list \<times> nat) option\<close>
 and infer_patom ::
-  \<open>nat \<Rightarrow> tenv \<Rightarrow> mpatom \<Rightarrow> nat \<Rightarrow> (ksub \<times> kty \<times> (name \<times> kty) list \<times> nat) option\<close>
+  \<open>nat \<Rightarrow> tenv \<Rightarrow> mpatom \<Rightarrow> nat \<Rightarrow> (ksub \<times> mpatom \<times> kty \<times> (name \<times> kty) list \<times> nat) option\<close>
 and infer_patoms ::
-  \<open>nat \<Rightarrow> tenv \<Rightarrow> mpatom list \<Rightarrow> nat \<Rightarrow> (ksub \<times> kty list \<times> (name \<times> kty) list \<times> nat) option\<close>
+  \<open>nat \<Rightarrow> tenv \<Rightarrow> mpatom list \<Rightarrow> nat \<Rightarrow>
+   (ksub \<times> mpatom list \<times> kty list \<times> (name \<times> kty) list \<times> nat) option\<close>
 and infer_pats ::
-  \<open>nat \<Rightarrow> tenv \<Rightarrow> mpat list \<Rightarrow> nat \<Rightarrow> (ksub \<times> kty list \<times> (name \<times> kty) list \<times> nat) option\<close>
+  \<open>nat \<Rightarrow> tenv \<Rightarrow> mpat list \<Rightarrow> nat \<Rightarrow>
+   (ksub \<times> mpat list \<times> kty list \<times> (name \<times> kty) list \<times> nat) option\<close>
 where
-  \<open>infer_pat uf B (PatApp [a]) n = infer_patom uf B a n\<close>
+  \<open>infer_pat uf B (PatApp [a]) n =
+     infer_patom uf B a n \<bind> (\<lambda>(s, a', \<tau>, \<Gamma>, n'). Some (s, PatApp [a'], \<tau>, \<Gamma>, n'))\<close>
 | \<open>infer_pat uf B (PatApp (PQid p # as)) n =
      (case tlookup B (path_nms p) of
         Some (TEcon \<sigma> m) \<Rightarrow>
@@ -176,57 +220,70 @@ where
            then (case inst_scheme n \<sigma> of (\<tau>\<^sub>c, n\<^sub>1) \<Rightarrow>
                   (case con_ty m \<tau>\<^sub>c of
                      Some (\<tau>s, \<tau>) \<Rightarrow>
-                       infer_patoms uf B as n\<^sub>1 \<bind> (\<lambda>(sp, \<tau>s', \<Gamma>, n\<^sub>2).
+                       infer_patoms uf B as n\<^sub>1 \<bind> (\<lambda>(sp, as', \<tau>s', \<Gamma>, n\<^sub>2).
                          unis uf (zip \<tau>s' (map (sapp sp) \<tau>s)) n\<^sub>2 \<bind> (\<lambda>(s\<^sub>1, n\<^sub>3).
-                           Some (s\<^sub>1 \<odot> sp, sapp s\<^sub>1 (sapp sp \<tau>), map (apsnd (sapp s\<^sub>1)) \<Gamma>, n\<^sub>3)))
+                           Some (s\<^sub>1 \<odot> sp, PatApp (PQid p # as'), sapp s\<^sub>1 (sapp sp \<tau>),
+                                 map (apsnd (sapp s\<^sub>1)) \<Gamma>, n\<^sub>3)))
                    | None \<Rightarrow> None))
            else None)
       | _ \<Rightarrow> None)\<close>
 | \<open>infer_pat uf B (PatApp _) n = None\<close>
 | \<open>infer_pat uf B (PatAs p x) n =
      (if nm_ok (n_txt x)
-      then infer_pat uf B p n \<bind> (\<lambda>(s, \<tau>, \<Gamma>, n'). Some (s, \<tau>, (n_txt x, \<tau>) # \<Gamma>, n'))
+      then infer_pat uf B p n \<bind> (\<lambda>(s, p', \<tau>, \<Gamma>, n').
+             Some (s, PatAs p' x, \<tau>, (n_txt x, \<tau>) # \<Gamma>, n'))
       else None)\<close>
 | \<open>infer_pat uf B (PatOp as opr p) n =
      (case pat_resolve B (PatOp as opr p) of Some q \<Rightarrow> infer_pat uf B q n | None \<Rightarrow> None)\<close>
 | \<open>infer_pat uf B (PatAnn p ty) n =
-     infer_pat uf B p n \<bind> (\<lambda>(s, \<tau>, \<Gamma>, n\<^sub>1).
+     infer_pat uf B p n \<bind> (\<lambda>(s, p', \<tau>, \<Gamma>, n\<^sub>1).
        ty_stat (sappe s B) True ([], []) n\<^sub>1 ty \<bind> (\<lambda>(\<tau>\<^sub>a, _, n\<^sub>2).
          uni uf \<tau> \<tau>\<^sub>a n\<^sub>2 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>3).
-           Some (s\<^sub>2 \<odot> s, sapp s\<^sub>2 \<tau>, map (apsnd (sapp s\<^sub>2)) \<Gamma>, n\<^sub>3))))\<close>
-| \<open>infer_patom uf B (PWild _) n = Some (sid, TV n, [], Suc n)\<close>
+           Some (s\<^sub>2 \<odot> s, PatAnn p' ty, sapp s\<^sub>2 \<tau>, map (apsnd (sapp s\<^sub>2)) \<Gamma>, n\<^sub>3))))\<close>
+| \<open>infer_patom uf B (PWild x) n = Some (sid, PWild x, TV n, [], Suc n)\<close>
 | \<open>infer_patom uf B (PQid (MkPath [x])) n =
      (case tlookup B [n_txt x] of
         Some (TEcon \<sigma> m) \<Rightarrow>
-          (if m = 0 then (case inst_scheme n \<sigma> of (\<tau>, n\<^sub>1) \<Rightarrow> Some (sid, \<tau>, [], n\<^sub>1)) else None)
-      | _ \<Rightarrow> (if nm_ok (n_txt x) then Some (sid, TV n, [(n_txt x, TV n)], Suc n) else None))\<close>
+          (if m = 0
+           then (case inst_scheme n \<sigma> of (\<tau>, n\<^sub>1) \<Rightarrow> Some (sid, PQid (MkPath [x]), \<tau>, [], n\<^sub>1))
+           else None)
+      | _ \<Rightarrow> (if nm_ok (n_txt x)
+              then Some (sid, PQid (MkPath [x]), TV n, [(n_txt x, TV n)], Suc n) else None))\<close>
 | \<open>infer_patom uf B (PQid p) n =
      (case tlookup B (path_nms p) of
-        Some (TEcon \<sigma> 0) \<Rightarrow> (case inst_scheme n \<sigma> of (\<tau>, n\<^sub>1) \<Rightarrow> Some (sid, \<tau>, [], n\<^sub>1))
+        Some (TEcon \<sigma> 0) \<Rightarrow> (case inst_scheme n \<sigma> of (\<tau>, n\<^sub>1) \<Rightarrow> Some (sid, PQid p, \<tau>, [], n\<^sub>1))
       | _ \<Rightarrow> None)\<close>
-| \<open>infer_patom uf B (PNum l v None) n = Some (sid, TC int_ty [], [], n)\<close>
+| \<open>infer_patom uf B (PNum l v None) n = Some (sid, PNum l v None, TC int_ty [], [], n)\<close>
 | \<open>infer_patom uf B (PNum l v (Some k)) n =
-     (if sfx_ok k v then Some (sid, TC (sfx_ty k) [], [], n) else None)\<close>
-| \<open>infer_patom uf B (PStr l cs) n = Some (sid, TC string_ty [], [], n)\<close>
-| \<open>infer_patom uf B (PChar l c) n = Some (sid, TC char_ty [], [], n)\<close>
-| \<open>infer_patom uf B (PParen [p]) n = infer_pat uf B p n\<close>
+     (if sfx_ok k v then Some (sid, PNum l v (Some k), TC (sfx_ty k) [], [], n) else None)\<close>
+| \<open>infer_patom uf B (PStr l cs) n = Some (sid, PStr l cs, TC string_ty [], [], n)\<close>
+| \<open>infer_patom uf B (PChar l c) n = Some (sid, PChar l c, TC char_ty [], [], n)\<close>
+| \<open>infer_patom uf B (PParen [p]) n =
+     infer_pat uf B p n \<bind> (\<lambda>(s, p', \<tau>, \<Gamma>, n'). Some (s, PParen [p'], \<tau>, \<Gamma>, n'))\<close>
 | \<open>infer_patom uf B (PParen ps) n =
-     infer_pats uf B ps n \<bind> (\<lambda>(s, \<tau>s, \<Gamma>, n'). Some (s, tuple \<tau>s, \<Gamma>, n'))\<close>
+     infer_pats uf B ps n \<bind> (\<lambda>(s, ps', \<tau>s, \<Gamma>, n'). Some (s, PParen ps', tuple \<tau>s, \<Gamma>, n'))\<close>
 | \<open>infer_patom uf B (PList ps) n =
-     infer_pats uf B ps n \<bind> (\<lambda>(s, \<tau>s, \<Gamma>, n\<^sub>1).
+     infer_pats uf B ps n \<bind> (\<lambda>(s, ps', \<tau>s, \<Gamma>, n\<^sub>1).
        unis uf (map (\<lambda>\<tau>. (\<tau>, TV n\<^sub>1)) \<tau>s) (Suc n\<^sub>1) \<bind> (\<lambda>(s\<^sub>2, n\<^sub>2).
-         Some (s\<^sub>2 \<odot> s, TC list_ty [sapp s\<^sub>2 (TV n\<^sub>1)], map (apsnd (sapp s\<^sub>2)) \<Gamma>, n\<^sub>2)))\<close>
-| \<open>infer_patom uf B (PRec _ _) n = None\<close>
-| \<open>infer_patoms uf B [] n = Some (sid, [], [], n)\<close>
+         Some (s\<^sub>2 \<odot> s, PList ps', TC list_ty [sapp s\<^sub>2 (TV n\<^sub>1)],
+               map (apsnd (sapp s\<^sub>2)) \<Gamma>, n\<^sub>2)))\<close>
+| \<open>infer_patom uf B (PRec fs False) n =
+     (if distinct (map (n_txt \<circ> fst) fs)
+      then infer_pats uf B (map snd fs) n \<bind> (\<lambda>(s, ps', \<tau>s, \<Gamma>, n').
+             Some (s, rec_pat (zip (map fst fs) ps'),
+                   rec_of (zip (map (n_txt \<circ> fst) fs) \<tau>s) TRNil, \<Gamma>, n'))
+      else None)\<close>
+| \<open>infer_patom uf B (PRec _ True) n = None\<close>
+| \<open>infer_patoms uf B [] n = Some (sid, [], [], [], n)\<close>
 | \<open>infer_patoms uf B (a # as) n =
-     infer_patom uf B a n \<bind> (\<lambda>(s\<^sub>1, \<tau>, \<Gamma>\<^sub>1, n\<^sub>1).
-       infer_patoms uf (sappe s\<^sub>1 B) as n\<^sub>1 \<bind> (\<lambda>(s\<^sub>2, \<tau>s, \<Gamma>\<^sub>2, n\<^sub>2).
-         Some (s\<^sub>2 \<odot> s\<^sub>1, sapp s\<^sub>2 \<tau> # \<tau>s, map (apsnd (sapp s\<^sub>2)) \<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2, n\<^sub>2)))\<close>
-| \<open>infer_pats uf B [] n = Some (sid, [], [], n)\<close>
+     infer_patom uf B a n \<bind> (\<lambda>(s\<^sub>1, a', \<tau>, \<Gamma>\<^sub>1, n\<^sub>1).
+       infer_patoms uf (sappe s\<^sub>1 B) as n\<^sub>1 \<bind> (\<lambda>(s\<^sub>2, as', \<tau>s, \<Gamma>\<^sub>2, n\<^sub>2).
+         Some (s\<^sub>2 \<odot> s\<^sub>1, a' # as', sapp s\<^sub>2 \<tau> # \<tau>s, map (apsnd (sapp s\<^sub>2)) \<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2, n\<^sub>2)))\<close>
+| \<open>infer_pats uf B [] n = Some (sid, [], [], [], n)\<close>
 | \<open>infer_pats uf B (p # ps) n =
-     infer_pat uf B p n \<bind> (\<lambda>(s\<^sub>1, \<tau>, \<Gamma>\<^sub>1, n\<^sub>1).
-       infer_pats uf (sappe s\<^sub>1 B) ps n\<^sub>1 \<bind> (\<lambda>(s\<^sub>2, \<tau>s, \<Gamma>\<^sub>2, n\<^sub>2).
-         Some (s\<^sub>2 \<odot> s\<^sub>1, sapp s\<^sub>2 \<tau> # \<tau>s, map (apsnd (sapp s\<^sub>2)) \<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2, n\<^sub>2)))\<close>
+     infer_pat uf B p n \<bind> (\<lambda>(s\<^sub>1, p', \<tau>, \<Gamma>\<^sub>1, n\<^sub>1).
+       infer_pats uf (sappe s\<^sub>1 B) ps n\<^sub>1 \<bind> (\<lambda>(s\<^sub>2, ps', \<tau>s, \<Gamma>\<^sub>2, n\<^sub>2).
+         Some (s\<^sub>2 \<odot> s\<^sub>1, p' # ps', sapp s\<^sub>2 \<tau> # \<tau>s, map (apsnd (sapp s\<^sub>2)) \<Gamma>\<^sub>1 @ \<Gamma>\<^sub>2, n\<^sub>2)))\<close>
 
   by pat_completeness auto
 
@@ -241,7 +298,8 @@ termination
       | Inl (Inr (uf, B, a, n)) \<Rightarrow> size a
       | Inr (Inl (uf, B, as, n)) \<Rightarrow> size_list size as
       | Inr (Inr (uf, B, ps, n)) \<Rightarrow> size_list size ps]\<close>)
-     (auto simp: pat_resolve_patops simp del: pat_resolve.simps)
+     (auto simp: pat_resolve_patops patops_fields_pats less_Suc_eq_le
+           intro: order_trans[OF size_list_snd_le] simp del: pat_resolve.simps)
 
 lemmas infer_pat_induct =
   infer_pat_infer_patom_infer_patoms_infer_pats.induct[named_cases infer_pat]
@@ -384,7 +442,14 @@ proof -
        (simp_all add: nlf_foldr_EFn Let_def arms o_def[of nlf] case_prod_beta split: list.split)
   then show ?thesis by (induction mbs) auto
 qed
+lemma nlf_fields: \<open>(\<Sum>(_, e) \<leftarrow> fs. nlf e) = sum_list (map (nlf \<circ> snd) fs)\<close>
+  by (induction fs) auto
 
+lemma size_fields:
+  \<open>2 * size_list (size \<circ> snd) fs < Suc (Suc (2 * size_list (size_prod (\<lambda>_. 0) size) fs))\<close>
+  using size_list_snd_le[of size fs \<open>\<lambda>_. 0\<close>] by simp
+
+text \<open>The alternatives of a guarded term.\<close>
 text \<open>The alternatives of a guarded term.\<close>
 
 fun guards_of :: \<open>expr \<Rightarrow> (expr list \<times> expr) list\<close> where
@@ -424,12 +489,12 @@ where
          uni uf \<tau> (ann_ty (sappe s\<^sub>1 B) \<tau> \<tau>\<^sub>a) n\<^sub>2 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>3).
            Some (s\<^sub>2 \<odot> s\<^sub>1, EAnn e' ty, sapp s\<^sub>2 \<tau>, sub_pend s\<^sub>2 pd\<^sub>1, n\<^sub>3))))\<close>
 | \<open>infer uf B A pd (EFn ps b) n =
-     infer_pats uf B ps n \<bind> (\<lambda>(sp, \<tau>s, \<Gamma>, n\<^sub>1).
+     infer_pats uf B ps n \<bind> (\<lambda>(sp, ps', \<tau>s, \<Gamma>, n\<^sub>1).
        infer uf (mono_env sid \<Gamma> @ sappe sp B) (RV n\<^sub>1) (sub_pend sp pd) b (Suc n\<^sub>1) \<bind>
          (\<lambda>(s\<^sub>2, b', \<tau>\<^sub>b, pd\<^sub>2, n\<^sub>2).
            (let s = s\<^sub>2 \<odot> sp; \<tau>\<^sub>a = sapp s\<^sub>2 (fn_ty \<tau>s)
             in (if covers (sappe s B) \<tau>\<^sub>a [fn_pat ps]
-                then Some (s, EFn ps b', TFn \<tau>\<^sub>a (sappr s\<^sub>2 (RV n\<^sub>1)) \<tau>\<^sub>b, pd\<^sub>2, n\<^sub>2)
+                then Some (s, EFn ps' b', TFn \<tau>\<^sub>a (sappr s\<^sub>2 (RV n\<^sub>1)) \<tau>\<^sub>b, pd\<^sub>2, n\<^sub>2)
                 else None))))\<close>
 | \<open>infer uf B A pd (EFnMod b e) n =
      sig_stat B n (mbind_sig b) \<bind> (\<lambda>((T, E), _).
@@ -448,7 +513,7 @@ where
               else None)))))\<close>
 | \<open>infer uf B A pd (ELet p e b) n =
      infer uf B A pd e n \<bind> (\<lambda>(s\<^sub>1, e', \<tau>\<^sub>e, pd\<^sub>1, n\<^sub>1).
-       infer_pat uf (sappe s\<^sub>1 B) p n\<^sub>1 \<bind> (\<lambda>(sp, \<tau>\<^sub>p, \<Gamma>, n\<^sub>2).
+       infer_pat uf (sappe s\<^sub>1 B) p n\<^sub>1 \<bind> (\<lambda>(sp, p', \<tau>\<^sub>p, \<Gamma>, n\<^sub>2).
          uni uf (sapp sp \<tau>\<^sub>e) \<tau>\<^sub>p n\<^sub>2 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>3).
            (let s = s\<^sub>2 \<odot> sp \<odot> s\<^sub>1; B' = sappe s B; A' = sappr s A; pd' = sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1;
                 \<tau>\<^sub>e' = sapp s\<^sub>2 \<tau>\<^sub>p;
@@ -456,7 +521,7 @@ where
                 \<Gamma>' = map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (sapp s\<^sub>2 \<tau>)))) \<Gamma>
             in (if covers B' \<tau>\<^sub>e' [p] \<and> btv_list \<tau>\<^sub>e' = [] \<and> brv_list \<tau>\<^sub>e' = []
                 then infer uf (\<Gamma>' @ B') A' pd' b n\<^sub>3 \<bind> (\<lambda>(s\<^sub>3, b', \<tau>, pd\<^sub>3, n\<^sub>4).
-                       Some (s\<^sub>3 \<odot> s, ELet p e' b', \<tau>, pd\<^sub>3, n\<^sub>4))
+                       Some (s\<^sub>3 \<odot> s, ELet p' e' b', \<tau>, pd\<^sub>3, n\<^sub>4))
                 else None)))))\<close>
 | \<open>infer uf B A pd (ESeq e\<^sub>1 e\<^sub>2) n =
      infer uf B A pd e\<^sub>1 n \<bind> (\<lambda>(s\<^sub>1, e\<^sub>1', \<tau>\<^sub>1, pd\<^sub>1, n\<^sub>1).
@@ -577,8 +642,20 @@ where
      infer_exps uf B A pd es n \<bind> (\<lambda>(s\<^sub>1, es', \<tau>s, pd\<^sub>1, n\<^sub>1).
        unis uf (map (\<lambda>\<tau>. (\<tau>, TV n\<^sub>1)) \<tau>s) (Suc n\<^sub>1) \<bind> (\<lambda>(s\<^sub>2, n\<^sub>2).
          Some (s\<^sub>2 \<odot> s\<^sub>1, AList es', TC list_ty [sapp s\<^sub>2 (TV n\<^sub>1)], sub_pend s\<^sub>2 pd\<^sub>1, n\<^sub>2)))\<close>
-| \<open>infer_atom uf B A pd (ARec _) n = None\<close>
-| \<open>infer_atom uf B A pd (ADot _ _) n = None\<close>
+| \<open>infer_atom uf B A pd (ARec fs) n =
+     (if distinct (map (n_txt \<circ> fst) fs)
+      then infer_exps uf B A pd (map snd fs) n \<bind> (\<lambda>(s, es', \<tau>s, pd', n').
+             Some (s, ARec (zip (map fst fs) es'), rec_of (zip (map (n_txt \<circ> fst) fs) \<tau>s) TRNil,
+                   pd', n'))
+      else None)\<close>
+| \<open>infer_atom uf B A pd (ADot a x) n =
+     infer_atom uf B A pd a n \<bind> (\<lambda>(s\<^sub>1, a', \<tau>\<^sub>a, pd\<^sub>1, n\<^sub>1).
+       uni uf \<tau>\<^sub>a (TRCons (n_txt x) (TV n\<^sub>1) (TV (Suc n\<^sub>1))) (n\<^sub>1 + 2) \<bind> (\<lambda>(s\<^sub>2, n\<^sub>2).
+         (let ph = imp_name n\<^sub>2
+          in Some (s\<^sub>2 \<odot> s\<^sub>1, sel_atom a' (APath (MkPath [mk_nm ph])), sapp s\<^sub>2 (TV n\<^sub>1),
+                   (ph, POff (n_txt x) (sapp s\<^sub>2 (TRCons (n_txt x) (TV n\<^sub>1) (TV (Suc n\<^sub>1))))) #
+                     sub_pend s\<^sub>2 pd\<^sub>1,
+                   Suc n\<^sub>2))))\<close>
 | \<open>infer_atom uf B A pd (AMod p sg) n = None\<close>
 | \<open>infer_atom uf B A pd (ABind _ _) n = None\<close>
 
@@ -591,7 +668,8 @@ where
             (let \<alpha>s = [n\<^sub>1 ..< n\<^sub>1 + m]; \<phi> = zip K (map TV \<alpha>s); n\<^sub>2 = n\<^sub>1 + m
              in uni_row \<epsilon>\<^sub>l A n\<^sub>2 \<bind> (\<lambda>(s\<^sub>1, n\<^sub>3).
                   (let x = imp_name n\<^sub>3;
-                       pd' = (x, K, map (apsnd (sapp s\<^sub>1)) \<phi>, E\<^sub>K, cands B, None) # sub_pend s\<^sub>1 pd
+                       pd' = (x, PImp K (map (apsnd (sapp s\<^sub>1)) \<phi>) E\<^sub>K (cands B) None)
+                             # sub_pend s\<^sub>1 pd
                    in infer_args uf (sappe s\<^sub>1 B) (sappr s\<^sub>1 A) pd' (d - 1)
                         (sapp s\<^sub>1 (kopen (tsp K \<phi>) \<tau>')) as (Suc n\<^sub>3)
                         \<bind> (\<lambda>(s\<^sub>2, as', \<tau>, pd\<^sub>2, n\<^sub>4).
@@ -649,7 +727,7 @@ where
 
 | \<open>infer_arms uf B A pd \<tau>\<^sub>0 \<tau>\<^sub>r [] n = Some (sid, [], pd, n)\<close>
 | \<open>infer_arms uf B A pd \<tau>\<^sub>0 \<tau>\<^sub>r ((p, b) # arms) n =
-     infer_pat uf B p n \<bind> (\<lambda>(sp, \<tau>\<^sub>p, \<Gamma>, n\<^sub>1).
+     infer_pat uf B p n \<bind> (\<lambda>(sp, p', \<tau>\<^sub>p, \<Gamma>, n\<^sub>1).
        uni uf (sapp sp \<tau>\<^sub>0) \<tau>\<^sub>p n\<^sub>1 \<bind> (\<lambda>(s\<^sub>1, n\<^sub>2).
          (let s = s\<^sub>1 \<odot> sp in
           infer uf (mono_env s\<^sub>1 \<Gamma> @ sappe s B) (sappr s A) (sub_pend s pd) b n\<^sub>2 \<bind>
@@ -659,7 +737,7 @@ where
                  infer_arms uf (sappe s' B) (sappr s' A) (sub_pend s\<^sub>3 pd\<^sub>2)
                    (sapp s' \<tau>\<^sub>0) (sapp s' \<tau>\<^sub>r) arms n\<^sub>4 \<bind>
                    (\<lambda>(s\<^sub>4, arms', pd\<^sub>4, n\<^sub>5).
-                     Some (s\<^sub>4 \<odot> s', (p, b') # arms', pd\<^sub>4, n\<^sub>5))))))))\<close>
+                     Some (s\<^sub>4 \<odot> s', (p', b') # arms', pd\<^sub>4, n\<^sub>5))))))))\<close>
 
 | \<open>infer_cls uf B A pd nm \<tau>\<^sub>0 targs [] n = Some (sid, [], \<tau>\<^sub>0, pd, n)\<close>
 | \<open>infer_cls uf B A pd nm \<tau>\<^sub>0 targs (HOp opn ps k b # cls) n =
@@ -667,7 +745,7 @@ where
         (Some (TEop l eps \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0), Some args) \<Rightarrow>
           (if length args = length eps then
           (let \<tau>\<^sub>1 = op_inst eps args \<tau>\<^sub>1\<^sub>0; \<tau>\<^sub>2 = op_inst eps args \<tau>\<^sub>2\<^sub>0 in
-          infer_pats uf B ps n \<bind> (\<lambda>(sp, \<tau>s, \<Gamma>, n\<^sub>1).
+          infer_pats uf B ps n \<bind> (\<lambda>(sp, ps', \<tau>s, \<Gamma>, n\<^sub>1).
             uni uf (fn_ty \<tau>s) (sapp sp \<tau>\<^sub>1) n\<^sub>1 \<bind> (\<lambda>(s\<^sub>1, n\<^sub>2).
               (let s = s\<^sub>1 \<odot> sp; B' = sappe s B;
                    \<epsilon>' = (if nm then sappr s A else canon_row (rext (hlabels B cls) (sappr s A)));
@@ -687,12 +765,12 @@ where
                                infer_cls uf (sappe s' B) (sappr s' A) (sub_pend s\<^sub>3 pd\<^sub>2)
                                  nm (sapp s' \<tau>\<^sub>0) (sapp s' targs) cls n\<^sub>4 \<bind>
                                  (\<lambda>(s\<^sub>4, cls', \<tau>, pd\<^sub>4, n\<^sub>5).
-                                   Some (s\<^sub>4 \<odot> s', HOp opn ps k b' # cls', \<tau>, pd\<^sub>4, n\<^sub>5)))))
+                                   Some (s\<^sub>4 \<odot> s', HOp opn ps' k b' # cls', \<tau>, pd\<^sub>4, n\<^sub>5)))))
                    else None)))))
           else None)
       | _ \<Rightarrow> None)\<close>
 | \<open>infer_cls uf B A pd nm \<tau>\<^sub>0 targs (HRet p b # cls) n =
-     infer_pat uf B p n \<bind> (\<lambda>(sp, \<tau>\<^sub>p, \<Gamma>, n\<^sub>1).
+     infer_pat uf B p n \<bind> (\<lambda>(sp, p', \<tau>\<^sub>p, \<Gamma>, n\<^sub>1).
        uni uf (sapp sp \<tau>\<^sub>0) \<tau>\<^sub>p n\<^sub>1 \<bind> (\<lambda>(s\<^sub>1, n\<^sub>2).
          (let s = s\<^sub>1 \<odot> sp; B' = sappe s B;
               \<epsilon>' = (if nm then sappr s A else canon_row (rext (hlabels B cls) (sappr s A)))
@@ -702,7 +780,7 @@ where
                      (let s' = s\<^sub>2 \<odot> s in
                       infer_cls uf (sappe s' B) (sappr s' A) pd\<^sub>2 nm \<tau>' (sapp s' targs) cls n\<^sub>3 \<bind>
                         (\<lambda>(s\<^sub>3, cls', \<tau>, pd\<^sub>3, n\<^sub>4).
-                        Some (s\<^sub>3 \<odot> s', HRet p b' # cls', \<tau>, pd\<^sub>3, n\<^sub>4))))
+                        Some (s\<^sub>3 \<odot> s', HRet p' b' # cls', \<tau>, pd\<^sub>3, n\<^sub>4))))
               else None))))\<close>
 | \<open>infer_cls uf B A pd nm \<tau>\<^sub>0 targs (HFin b # cls) n =
      infer uf B A pd b n \<bind> (\<lambda>(s\<^sub>1, b', \<tau>\<^sub>f, pd\<^sub>1, n\<^sub>1).
@@ -786,7 +864,7 @@ termination
       | Inr (Inr (Inr (uf, B, A, pd, nm, \<tau>\<^sub>0, targs, cls, n))) \<Rightarrow> 2 * size_list size cls,
       \<lambda>x. case x of
         Inl (Inr (Inr (uf, B, A, pd, d, \<tau>\<^sub>0, as, n))) \<Rightarrow> d
-      | _ \<Rightarrow> 0]\<close>) (auto, (drule (1) bspec; simp)+)
+      | _ \<Rightarrow> 0]\<close>) (auto simp: nlf_fields size_fields, (drule (1) bspec; simp)+)
 
 lemmas infer_induct =
   infer_infer_head_infer_atom_infer_args_infer_exps_infer_chain_infer_arms_infer_cls.induct[
@@ -835,7 +913,7 @@ lemma infer_args_TDep_True:
       (let \<alpha>s = [n\<^sub>1 ..< n\<^sub>1 + m]; \<phi> = zip K (map TV \<alpha>s); n\<^sub>2 = n\<^sub>1 + m
        in uni_row \<epsilon>\<^sub>l A n\<^sub>2 \<bind> (\<lambda>(s\<^sub>1, n\<^sub>3).
             (let x = imp_name n\<^sub>3;
-                 pd' = (x, K, map (apsnd (sapp s\<^sub>1)) \<phi>, E\<^sub>K, cands B, None) # sub_pend s\<^sub>1 pd
+                 pd' = (x, PImp K (map (apsnd (sapp s\<^sub>1)) \<phi>) E\<^sub>K (cands B) None) # sub_pend s\<^sub>1 pd
              in infer_args uf (sappe s\<^sub>1 B) (sappr s\<^sub>1 A) pd' (d - 1)
                   (sapp s\<^sub>1 (kopen (tsp K \<phi>) \<tau>')) as (Suc n\<^sub>3)
                   \<bind> (\<lambda>(s\<^sub>2, as', \<tau>, pd\<^sub>2, n\<^sub>4).
@@ -847,16 +925,22 @@ subsection \<open>Resolving pending implicit arguments\<close>
 text \<open>After the enclosing binding: each pending request is resolved from
   its scope at the types unification found for the parameter's abstract
   types \<^cite>\<open>\<open>Sect. 2.2.2, 5.1\<close> in white2014\<close>; a request whose types are still
-  variables finds no instance.\<close>
+  variables finds no instance. A projection is resolved to the offset of its label
+  in its record's type, undetermined while that type's tail is open.\<close>
 
-fun resolve_pend :: \<open>pend \<Rightarrow> ((name \<times> name) list) option\<close> where
+fun resolve_pend :: \<open>pend \<Rightarrow> ((name \<times> matom) list) option\<close> where
   \<open>resolve_pend [] = Some []\<close>
-| \<open>resolve_pend ((x, K, \<phi>, E, cs, r) # pd) =
+| \<open>resolve_pend ((x, PImp K \<phi> E cs r) # pd) =
      (if reserved x \<and> x \<notin> set (map fst pd)
       then imp_res cs K E \<phi> \<bind> (\<lambda>P.
              (if r = None \<or> r = Some P
-              then resolve_pend pd \<bind> (\<lambda>tab. Some ((x, P) # tab))
+              then resolve_pend pd \<bind> (\<lambda>tab. Some ((x, APath (MkPath [mk_nm P])) # tab))
               else None))
+      else None)\<close>
+| \<open>resolve_pend ((x, POff l r) # pd) =
+     (if reserved x \<and> x \<notin> set (map fst pd)
+      then offset_of l r \<bind> (\<lambda>k.
+             resolve_pend pd \<bind> (\<lambda>tab. Some ((x, ANum no_loc (int k) None) # tab)))
       else None)\<close>
 
 subsection \<open>Declarations and modules\<close>
