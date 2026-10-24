@@ -1,5 +1,5 @@
 theory Basis
-  imports Types
+  imports Matching
 begin
 
 section \<open>The static basis\<close>
@@ -188,6 +188,8 @@ fun bsubstl :: \<open>(tvar \<Rightarrow> kty) \<Rightarrow> (rvar \<Rightarrow>
 | \<open>bsubstl \<theta> \<rho> (TDep i sg K e t) = TDep i sg K (brsubst \<rho> e) (bsubstl (tlift \<circ> \<theta>) \<rho> t)\<close>
 | \<open>bsubstl \<theta> \<rho> (TEv l s t) = TEv (bsubstl \<theta> \<rho> l) (bsubstl \<theta> \<rho> s) (bsubstl \<theta> \<rho> t)\<close>
 | \<open>bsubstl \<theta> \<rho> (TAct l K e t) = TAct (bsubstl \<theta> \<rho> l) K (brsubst \<rho> e) (bsubstl \<theta> \<rho> t)\<close>
+| \<open>bsubstl \<theta> \<rho> TRNil = TRNil\<close>
+| \<open>bsubstl \<theta> \<rho> (TRCons l t r) = TRCons l (bsubstl \<theta> \<rho> t) (bsubstl \<theta> \<rho> r)\<close>
 
 lemma bsubstl_cong:
   \<open>(\<And>a. a \<in> btv t \<Longrightarrow> \<theta> a = \<theta>' a) \<Longrightarrow> bsubstl \<theta> \<rho> t = bsubstl \<theta>' \<rho> t\<close>
@@ -213,6 +215,9 @@ next
 next
   case (TAct l K e t)
   show ?case using TAct.IH[of \<theta> \<theta>'] TAct.prems by simp
+next
+  case (TRCons l t r)
+  show ?case using TRCons.IH[of \<theta> \<theta>'] TRCons.prems by simp
 qed simp_all
 
 lemma bsubstl_closed: \<open>(\<And>a. a \<in> btv t \<Longrightarrow> taclosed (\<theta> a)) \<Longrightarrow> bsubstl \<theta> \<rho> t = bsubst \<theta> \<rho> t\<close>
@@ -305,6 +310,8 @@ fun treal :: \<open>realisation \<Rightarrow> kty \<Rightarrow> kty\<close> wher
 | \<open>treal \<phi> (TDep i sg T e t) = TDep i sg T e (treal \<phi> t)\<close>
 | \<open>treal \<phi> (TEv l s t) = TEv (treal \<phi> l) (treal \<phi> s) (treal \<phi> t)\<close>
 | \<open>treal \<phi> (TAct l K e t) = TAct (treal \<phi> l) K e (treal \<phi> t)\<close>
+| \<open>treal \<phi> TRNil = TRNil\<close>
+| \<open>treal \<phi> (TRCons l t r) = TRCons l (treal \<phi> t) (treal \<phi> r)\<close>
 
 fun real_scheme :: \<open>realisation \<Rightarrow> scheme \<Rightarrow> scheme\<close> where
   \<open>real_scheme \<phi> (Sch t) = Sch (treal \<phi> t)\<close>
@@ -393,6 +400,8 @@ fun stamps :: \<open>kty \<Rightarrow> nat set\<close> where
 | \<open>stamps (TDep i sg K e t) = stamps t\<close>
 | \<open>stamps (TEv l s t) = stamps l \<union> stamps s \<union> stamps t\<close>
 | \<open>stamps (TAct l K e t) = stamps l \<union> stamps t\<close>
+| \<open>stamps TRNil = {}\<close>
+| \<open>stamps (TRCons l t r) = stamps t \<union> stamps r\<close>
 
 fun stamps_sch :: \<open>scheme \<Rightarrow> nat set\<close> where
   \<open>stamps_sch (Sch t) = stamps t\<close>
@@ -427,6 +436,7 @@ fun tn :: \<open>kty \<Rightarrow> tyname set\<close> where
 | \<open>tn (TDep i sg K e t) = tn t\<close>
 | \<open>tn (TEv l s t) = tn l \<union> tn s \<union> tn t\<close>
 | \<open>tn (TAct l K e t) = tn l \<union> tn t\<close>
+| \<open>tn (TRCons l t r) = tn t \<union> tn r\<close>
 | \<open>tn _ = {}\<close>
 
 fun tn_sch :: \<open>scheme \<Rightarrow> tyname set\<close> where

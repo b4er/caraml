@@ -8,9 +8,9 @@ text \<open>The type language of the surface type system: Hindley--Milner with
   Koka-style row-typed effects \<^cite>\<open>\<open>Sect. 3.1\<close> in leijen2017\<close> and a
   module-dependent arrow for module binders at the term level
   \<^cite>\<open>\<open>Sect. 3.2\<close> in vivien2024\<close> \<^cite>\<open>\<open>Sect. 2\<close> in white2014\<close>. The main
-  results are the characterisation of row equivalence by label multiset and
-  tail (\<open>row_eq_iff\<close>) and the executable matcher for the instance
-  relation of schemes (\<open>imatch_sinst\<close>).
+  result is the characterisation of row equivalence by label multiset and
+  tail (\<open>row_eq_iff\<close>); the executable matcher for the instance relation of
+  schemes follows in \<open>Matching\<close>.
 
   The type language design decisions:
 
@@ -66,6 +66,36 @@ datatype krow =
   | RB rvar                        \<comment> \<open>scheme-bound row tail\<close>
   | RCons name krow                \<comment> \<open>effect label\<close>
 
+text \<open>Record types are rows over the type language itself: \<^text>\<open>TRNil\<close> is the
+  closed empty record and \<^text>\<open>TRCons l \<tau> r\<close> extends the record type \<open>r\<close> by a
+  field \<open>l : \<tau>\<close>. A record type is a spine of fields ending in \<^text>\<open>TRNil\<close>
+  (closed) or in a variable (open), an ordinary \<^text>\<open>TV\<close>, \<^text>\<open>TB\<close> or
+  \<^text>\<open>TK\<close>. The design decisions:
+
+    \<^item> No record row datatype and no third variable sort: a record's tail is a
+      type variable. Generalisation, instantiation, matching, the occurs check
+      and the confinement invariants over substitutions then cover record tails
+      without a new component in \<open>ksub\<close>, and the kind discipline (a tail is a
+      record) holds by invariant, as it already does for the variable head of
+      \<^text>\<open>TApp\<close> (\<open>wf_kty\<close>): the algorithm only ever equates a record tail
+      with a record. A third sort would thread a third substitution component
+      through every lemma over \<open>(\<theta>, \<rho>)\<close> pairs; reusing \<open>rvar\<close> would not save
+      that, since a field row and an effect row are different types.
+    \<^item> Fields are scoped labels, as effect labels are: two records are
+      equivalent when every field of one can be pulled to the front of the
+      other with an equivalent type and equivalent rests (\<open>fpull\<close>). Duplicate
+      labels do not commute, so no lacks constraint is needed. The surface
+      checker keeps labels distinct in literals, patterns and annotations;
+      the kernel theory is sound with or without duplicates. The canonical
+      form sorts fields stably by label (\<open>canon_ty\<close>, lexicographic on code
+      points).
+    \<^item> A tuple is the closed record with the decimal labels \<open>1\<close>, \<open>2\<close>, \<dots> and
+      the unit type is the empty record, so a multi-argument function takes a
+      record and the parameters of an effect in a handler name form one too.
+    \<^item> Unification pairs fields by label through \<open>fpull\<close>; a label missing on
+      one side is absorbed by that side's tail variable, with a fresh field
+      type and a fresh tail.\<close>
+
 datatype kty =
     TV tvar                        \<comment> \<open>type variable\<close>
   | TB tvar                        \<comment> \<open>scheme-bound type variable\<close>
@@ -85,8 +115,11 @@ datatype kty =
   | TAct kty \<open>tvar list\<close> krow kty
                                  \<comment> \<open>name-taking action for an effect: binds the scope
                                      \<open>TK k\<close>, \<open>k \<in> K\<close>, of the name it receives\<close>
+  | TRNil                        \<comment> \<open>closed empty record \<open>{}\<close>, the unit type\<close>
+  | TRCons name kty kty          \<comment> \<open>record field \<open>l : \<tau>\<close> extending a record type, whose
+                                     spine ends in \<open>TRNil\<close> or in a variable tail\<close>
 
-text \<open>The built-in type names: literal types and tuples at stamp \<open>0\<close>, the
+text \<open>The built-in type names: literal types at stamp \<open>0\<close>, the
   prelude's \<open>bool\<close> and \<open>list\<close> at \<open>1\<close> and \<open>2\<close>; user declarations count from
   \<^text>\<open>first_stamp\<close>. An unsuffixed integer literal is an unbounded \<open>int\<close>; a
   suffixed one names its fixed-width type, \<^text>\<open>sfx_ty\<close>, and must lie in its
@@ -96,7 +129,6 @@ definition \<open>int_ty = (0, str ''int'', [])\<close>
 definition \<open>f64_ty = (0, str ''f64'', [])\<close>
 definition \<open>string_ty = (0, str ''string'', [])\<close>
 definition \<open>char_ty = (0, str ''char'', [])\<close>
-definition \<open>tuple_ty n = (0, tuple_con n, [(tuple_con n, n)])\<close>
 definition \<open>bool_ty = (1, str ''bool'', [(str ''True'', 0), (str ''False'', 0)])\<close>
 definition \<open>list_ty = (2, str ''list'', [(str ''Nil'', 0), (str ''Cons'', 2)])\<close>
 
@@ -150,8 +182,47 @@ lemma nlbl_inj[simp]: \<open>nlbl l = nlbl l' \<longleftrightarrow> l = l'\<clos
 lemma eff_ty_inj[simp]: \<open>eff_ty l ts = eff_ty l' ts' \<longleftrightarrow> l = l' \<and> ts = ts'\<close>
   by (simp add: eff_ty_def)
 
-abbreviation unit_ty :: kty where \<open>unit_ty \<equiv> TC (tuple_ty 0) []\<close>
-abbreviation tuple :: \<open>kty list \<Rightarrow> kty\<close> where \<open>tuple ts \<equiv> TC (tuple_ty (length ts)) ts\<close>
+text \<open>A tuple is the closed record whose labels are the decimal positions
+  \<open>1\<close>, \<open>2\<close>, \<dots>; the unit type is the empty record. \<open>untuple\<close> reads the
+  components back positionally and inverts \<open>tuple\<close>.\<close>
+
+function nat_digits :: \<open>nat \<Rightarrow> nat list\<close> where
+  \<open>nat_digits n = (if n < 10 then [n] else nat_digits (n div 10) @ [n mod 10])\<close>
+  by pat_completeness auto
+termination by (relation \<open>measure id\<close>) auto
+
+declare nat_digits.simps[simp del]
+
+definition tuple_lbl :: \<open>nat \<Rightarrow> name\<close> where
+  \<open>tuple_lbl i = map ((+) 0x30) (nat_digits i)\<close>
+
+fun tuple_from :: \<open>nat \<Rightarrow> kty list \<Rightarrow> kty\<close> where
+  \<open>tuple_from i [] = TRNil\<close>
+| \<open>tuple_from i (t # ts) = TRCons (tuple_lbl i) t (tuple_from (Suc i) ts)\<close>
+
+abbreviation unit_ty :: kty where \<open>unit_ty \<equiv> tuple_from 1 []\<close>
+abbreviation tuple :: \<open>kty list \<Rightarrow> kty\<close> where \<open>tuple ts \<equiv> tuple_from 1 ts\<close>
+
+fun untuple_from :: \<open>nat \<Rightarrow> kty \<Rightarrow> kty list option\<close> where
+  \<open>untuple_from i TRNil = Some []\<close>
+| \<open>untuple_from i (TRCons l t r) =
+     (if l = tuple_lbl i then map_option ((#) t) (untuple_from (Suc i) r) else None)\<close>
+| \<open>untuple_from i _ = None\<close>
+
+abbreviation untuple :: \<open>kty \<Rightarrow> kty list option\<close> where \<open>untuple \<equiv> untuple_from 1\<close>
+
+lemma untuple_from_tuple_from[simp]: \<open>untuple_from i (tuple_from i ts) = Some ts\<close>
+  by (induction ts arbitrary: i) simp_all
+
+lemma tuple_from_inj[simp]: \<open>tuple_from i ts = tuple_from i us \<longleftrightarrow> ts = us\<close>
+  by (metis option.inject untuple_from_tuple_from)
+
+lemma untuple_from_Some[simp]: \<open>untuple_from i u = Some ts \<longleftrightarrow> u = tuple_from i ts\<close>
+proof
+  assume \<open>untuple_from i u = Some ts\<close>
+  then show \<open>u = tuple_from i ts\<close>
+    by (induction i u arbitrary: ts rule: untuple_from.induct) (auto split: if_split_asm)
+qed simp
 
 text \<open>\<open>tapp\<close> is the smart apply keeping types canonical: applying to a
   constructor spine extends its argument list, otherwise it builds a
@@ -168,6 +239,14 @@ fun var_headed :: \<open>kty \<Rightarrow> bool\<close> where
 | \<open>var_headed (TApp f _) = var_headed f\<close>
 | \<open>var_headed _ = False\<close>
 
+fun rec_tailed :: \<open>kty \<Rightarrow> bool\<close> where
+  \<open>rec_tailed TRNil = True\<close>
+| \<open>rec_tailed (TRCons _ _ r) = rec_tailed r\<close>
+| \<open>rec_tailed (TV _) = True\<close>
+| \<open>rec_tailed (TB _) = True\<close>
+| \<open>rec_tailed (TK _) = True\<close>
+| \<open>rec_tailed _ = False\<close>
+
 fun wf_kty :: \<open>kty \<Rightarrow> bool\<close> where
   \<open>wf_kty (TV _) = True\<close>
 | \<open>wf_kty (TB _) = True\<close>
@@ -179,6 +258,8 @@ fun wf_kty :: \<open>kty \<Rightarrow> bool\<close> where
 | \<open>wf_kty (TDep _ _ _ _ b) = wf_kty b\<close>
 | \<open>wf_kty (TEv l s t) \<longleftrightarrow> wf_kty l \<and> wf_kty s \<and> wf_kty t\<close>
 | \<open>wf_kty (TAct l _ _ b) \<longleftrightarrow> wf_kty l \<and> wf_kty b\<close>
+| \<open>wf_kty TRNil = True\<close>
+| \<open>wf_kty (TRCons _ t r) \<longleftrightarrow> wf_kty t \<and> rec_tailed r \<and> wf_kty r\<close>
 
 lemma tapp_var_headed: \<open>var_headed f \<Longrightarrow> tapp f x = TApp f x\<close>
   by (cases f) auto
@@ -297,6 +378,8 @@ fun tsubst :: \<open>(tvar \<Rightarrow> kty) \<Rightarrow> (rvar \<Rightarrow> 
 | \<open>tsubst \<theta> \<rho> (TDep i sg T e t) = TDep i sg T (rsubst \<rho> e) (tsubst \<theta> \<rho> t)\<close>
 | \<open>tsubst \<theta> \<rho> (TEv l s t) = TEv (tsubst \<theta> \<rho> l) (tsubst \<theta> \<rho> s) (tsubst \<theta> \<rho> t)\<close>
 | \<open>tsubst \<theta> \<rho> (TAct l K e t) = TAct (tsubst \<theta> \<rho> l) K (rsubst \<rho> e) (tsubst \<theta> \<rho> t)\<close>
+| \<open>tsubst \<theta> \<rho> TRNil = TRNil\<close>
+| \<open>tsubst \<theta> \<rho> (TRCons l t r) = TRCons l (tsubst \<theta> \<rho> t) (tsubst \<theta> \<rho> r)\<close>
 
 lemma rsubst_id: \<open>(\<forall>v. \<rho> v = RV v) \<Longrightarrow> rsubst \<rho> r = r\<close>
   by (induction r) auto
@@ -315,6 +398,8 @@ fun ftv :: \<open>kty \<Rightarrow> tvar set\<close> where
 | \<open>ftv (TDep i sg K e t) = ftv t\<close>
 | \<open>ftv (TEv l s t) = ftv l \<union> ftv s \<union> ftv t\<close>
 | \<open>ftv (TAct l K e t) = ftv l \<union> ftv t\<close>
+| \<open>ftv TRNil = {}\<close>
+| \<open>ftv (TRCons l t r) = ftv t \<union> ftv r\<close>
 
 fun frv_row :: \<open>krow \<Rightarrow> rvar set\<close> where
   \<open>frv_row RNil = {}\<close>
@@ -333,6 +418,8 @@ fun frv :: \<open>kty \<Rightarrow> rvar set\<close> where
 | \<open>frv (TDep i sg T e t) = frv_row e \<union> frv t\<close>
 | \<open>frv (TEv l s t) = frv l \<union> frv s \<union> frv t\<close>
 | \<open>frv (TAct l K e t) = frv l \<union> frv_row e \<union> frv t\<close>
+| \<open>frv TRNil = {}\<close>
+| \<open>frv (TRCons l t r) = frv t \<union> frv r\<close>
 
 subsection \<open>Type equivalence: types up to row reordering\<close>
 
@@ -343,6 +430,23 @@ text \<open>Row unification can only make rows \<^emph>\<open>equivalent\<close>
   signature and the same bound variables, then the rows and the results;
   binders written separately are distinct types, a limitation recorded
   with the open problems.\<close>
+
+text \<open>\<open>fpull l u\<close> pulls the first field labelled \<open>l\<close> of the record type \<open>u\<close>
+  to the front: its type and the rest of the record, in order. \<open>rtail\<close> is the
+  end of a record spine, \<^const>\<open>TRNil\<close> or the tail variable.\<close>
+
+fun fpull :: \<open>name \<Rightarrow> kty \<Rightarrow> (kty \<times> kty) option\<close> where
+  \<open>fpull l (TRCons l' t r) =
+     (if l = l' then Some (t, r)
+      else map_option (\<lambda>(t', r'). (t', TRCons l' t r')) (fpull l r))\<close>
+| \<open>fpull l _ = None\<close>
+
+fun rtail :: \<open>kty \<Rightarrow> kty\<close> where
+  \<open>rtail (TRCons _ _ r) = rtail r\<close>
+| \<open>rtail u = u\<close>
+
+lemma rtail_TV_ftv: \<open>rtail u = TV b \<Longrightarrow> b \<in> ftv u\<close>
+  by (induction u) auto
 
 fun ty_eq :: \<open>kty \<Rightarrow> kty \<Rightarrow> bool\<close>  (infix \<open>\<simeq>\<close> 50)
 and tys_eq :: \<open>kty list \<Rightarrow> kty list \<Rightarrow> bool\<close> (infix \<open>[\<simeq>]\<close> 50) where
@@ -359,6 +463,9 @@ and tys_eq :: \<open>kty list \<Rightarrow> kty list \<Rightarrow> bool\<close> 
 | ty_eq_TEv_case: \<open>TEv l s t \<simeq> u \<longleftrightarrow> (case u of TEv l' s' u' \<Rightarrow> l \<simeq> l' \<and> s \<simeq> s' \<and> t \<simeq> u' | _ \<Rightarrow> False)\<close>
 | ty_eq_TAct_case: \<open>TAct l K e t \<simeq> u \<longleftrightarrow>
      (case u of TAct l' K' g u' \<Rightarrow> l \<simeq> l' \<and> K = K' \<and> e \<approx> g \<and> t \<simeq> u' | _ \<Rightarrow> False)\<close>
+| ty_eq_TRNil_case: \<open>TRNil \<simeq> u \<longleftrightarrow> u = TRNil\<close>
+| ty_eq_TRCons_case: \<open>TRCons l t r \<simeq> u \<longleftrightarrow>
+     (case fpull l u of Some (t', r') \<Rightarrow> t \<simeq> t' \<and> r \<simeq> r' | None \<Rightarrow> False)\<close>
 | \<open>[] [\<simeq>] us \<longleftrightarrow> us = []\<close>
 | \<open>t # ts [\<simeq>] us \<longleftrightarrow> (\<exists>u us'. us = u # us' \<and> t \<simeq> u \<and> ts [\<simeq>] us')\<close>
 
@@ -385,12 +492,17 @@ lemma ty_eq_TAct[simp]:
   \<open>TAct l K e t \<simeq> u \<longleftrightarrow> (\<exists>l' g u'. u = TAct l' K g u' \<and> l \<simeq> l' \<and> e \<approx> g \<and> t \<simeq> u')\<close>
   by (cases u) auto
 
+lemma ty_eq_TRCons[simp]:
+  \<open>TRCons l t r \<simeq> u \<longleftrightarrow> (\<exists>t' r'. fpull l u = Some (t', r') \<and> t \<simeq> t' \<and> r \<simeq> r')\<close>
+  by (cases \<open>fpull l u\<close>) auto
+
 text \<open>The equations above are the simp set; the defining equations, by cases
   on the first argument only (which keeps the function package quick), serve
   the code generator.\<close>
 
 declare ty_eq_TC_case[simp del] ty_eq_TApp_case[simp del] ty_eq_TFn_case[simp del]
   ty_eq_TDep_case[simp del] ty_eq_TEv_case[simp del] ty_eq_TAct_case[simp del]
+  ty_eq_TRCons_case[simp del]
 
 lemma tys_eq_conv: \<open>([\<simeq>]) = list_all2 (\<simeq>)\<close>
 proof (intro ext)
@@ -414,36 +526,6 @@ qed (auto intro: req_refl)
 lemma tys_eq_refl[simp, intro!]: \<open>ts [\<simeq>] ts\<close>
   by (induction ts) auto
 
-lemma ty_eq_sym: \<open>t \<simeq> u \<Longrightarrow> u \<simeq> t\<close>
-proof (induction t arbitrary: u)
-  case (TC c ts)
-  then obtain us where us: \<open>u = TC c us\<close> \<open>ts [\<simeq>] us\<close> by auto
-  from TC.IH us(2) have \<open>us [\<simeq>] ts\<close>
-    by (induction ts arbitrary: us) auto
-  then show ?case using us(1) by simp
-qed (auto intro: row_eq_sym)
-
-lemma ty_eq_trans[trans]: \<open>t \<simeq> u \<Longrightarrow> u \<simeq> w \<Longrightarrow> t \<simeq> w\<close>
-proof (induction t arbitrary: u w)
-  case (TC c ts)
-  then obtain us where us: \<open>u = TC c us\<close> \<open>ts [\<simeq>] us\<close> by auto
-  with \<open>u \<simeq> w\<close> obtain ws where ws: \<open>w = TC c ws\<close> \<open>us [\<simeq>] ws\<close> by auto
-  have \<open>ts [\<simeq>] ws\<close>
-    using us(2) ws(2) TC.IH unfolding tys_eq_conv list_all2_conv_all_nth
-    by (auto intro: nth_mem)
-  then show ?case using ws(1) by simp
-qed (fastforce intro: req_trans)+
-
-lemma tys_eq_trans[trans]: \<open>t [\<simeq>] u \<Longrightarrow> u [\<simeq>] v \<Longrightarrow> t [\<simeq>] v\<close>
-proof (induction t arbitrary: u v)
-  case (Cons a t)
-  obtain b us where u: \<open>u = b # us\<close> \<open>a \<simeq> b\<close> \<open>t [\<simeq>] us\<close>
-    using \<open>a # t [\<simeq>] u\<close> by auto
-  obtain c vs where v: \<open>v = c # vs\<close> \<open>b \<simeq> c\<close> \<open>us [\<simeq>] vs\<close>
-    using \<open>u [\<simeq>] v\<close> unfolding u by auto
-  show ?case unfolding u v using ty_eq_trans[OF u(2) v(2)] Cons.IH[OF u(3) v(3)] by simp
-qed auto
-
 text \<open>\<open>\<simeq>\<close> preserves free variables (rows preserve their tail) and commutes
   with substitution.\<close>
 
@@ -453,6 +535,30 @@ lemma frv_row_tail: \<open>frv_row r = (case row_tail r of RV v \<Rightarrow> {v
 lemma row_eq_frv: \<open>r \<approx> r' \<Longrightarrow> frv_row r = frv_row r'\<close>
   by (simp add: frv_row_tail row_eq_tail)
 
+text \<open>Pulling a field commutes with every function that maps a record field by
+  field, and a set-valued function that unions over fields is invariant under it.\<close>
+
+lemma fpull_map:
+  assumes f: \<open>\<And>l t r. f (TRCons l t r) = TRCons l (f t) (f r)\<close>
+  shows \<open>fpull l u = Some (t', r') \<Longrightarrow> fpull l (f u) = Some (f t', f r')\<close>
+  by (induction u arbitrary: t' r') (auto simp: f split: if_splits option.splits)
+
+lemma fpull_set:
+  assumes g: \<open>\<And>l t r. g (TRCons l t r) = g t \<union> g r\<close>
+  shows \<open>fpull l u = Some (t', r') \<Longrightarrow> g u = g t' \<union> g r'\<close>
+  by (induction u arbitrary: t' r') (auto simp: g split: if_splits option.splits)
+
+lemma fpull_ftv: \<open>fpull l u = Some (t', r') \<Longrightarrow> ftv u = ftv t' \<union> ftv r'\<close>
+  by (rule fpull_set) simp_all
+
+lemma fpull_frv: \<open>fpull l u = Some (t', r') \<Longrightarrow> frv u = frv t' \<union> frv r'\<close>
+  by (rule fpull_set) simp_all
+
+lemma fpull_tsubst:
+  \<open>fpull l u = Some (t', r') \<Longrightarrow>
+     fpull l (tsubst \<theta> \<rho> u) = Some (tsubst \<theta> \<rho> t', tsubst \<theta> \<rho> r')\<close>
+  by (rule fpull_map) simp_all
+
 lemma ty_eq_ftv: \<open>t \<simeq> u \<Longrightarrow> ftv t = ftv u\<close>
 proof (induction t arbitrary: u)
   case (TC c ts)
@@ -460,7 +566,7 @@ proof (induction t arbitrary: u)
   from TC.IH us(2) have \<open>map ftv ts = map ftv us\<close>
     by (induction ts arbitrary: us) auto
   then show ?case using us(1) by simp
-qed auto
+qed (auto dest: fpull_ftv)
 
 lemma ty_eq_frv: \<open>t \<simeq> u \<Longrightarrow> frv t = frv u\<close>
 proof (induction t arbitrary: u)
@@ -469,7 +575,7 @@ proof (induction t arbitrary: u)
   from TC.IH us(2) have \<open>map frv ts = map frv us\<close>
     by (induction ts arbitrary: us) auto
   then show ?case using us(1) by simp
-qed (auto simp: row_eq_frv)
+qed (auto simp: row_eq_frv dest: fpull_frv)
 
 lemma row_eq_rsubst: \<open>r \<approx> r' \<Longrightarrow> rsubst \<rho> r \<approx> rsubst \<rho> r'\<close>
   by (induction rule: row_eq.induct) (auto intro: row_eq.intros)
@@ -481,6 +587,10 @@ proof (induction t arbitrary: u)
   from TC.IH us(2) have \<open>map (tsubst \<theta> \<rho>) ts [\<simeq>] map (tsubst \<theta> \<rho>) us\<close>
     by (induction ts arbitrary: us) auto
   then show ?case using us(1) by simp
+next
+  case (TRCons l t r)
+  then obtain t' r' where p: \<open>fpull l u = Some (t', r')\<close> and \<open>t \<simeq> t'\<close> \<open>r \<simeq> r'\<close> by auto
+  then show ?case by (auto simp: fpull_tsubst[OF p] intro!: TRCons.IH)
 qed (auto intro: row_eq_rsubst)
 
 lemma tys_eq_tsubst:
@@ -519,6 +629,8 @@ fun bsubst :: \<open>(tvar \<Rightarrow> kty) \<Rightarrow> (rvar \<Rightarrow> 
 | \<open>bsubst \<theta> \<rho> (TDep i sg K e t) = TDep i sg K (brsubst \<rho> e) (bsubst \<theta> \<rho> t)\<close>
 | \<open>bsubst \<theta> \<rho> (TEv l s t) = TEv (bsubst \<theta> \<rho> l) (bsubst \<theta> \<rho> s) (bsubst \<theta> \<rho> t)\<close>
 | \<open>bsubst \<theta> \<rho> (TAct l K e t) = TAct (bsubst \<theta> \<rho> l) K (brsubst \<rho> e) (bsubst \<theta> \<rho> t)\<close>
+| \<open>bsubst \<theta> \<rho> TRNil = TRNil\<close>
+| \<open>bsubst \<theta> \<rho> (TRCons l t r) = TRCons l (bsubst \<theta> \<rho> t) (bsubst \<theta> \<rho> r)\<close>
 
 text \<open>The bound variables of a type, and the abstract types it mentions.\<close>
 
@@ -533,6 +645,8 @@ fun btv :: \<open>kty \<Rightarrow> tvar set\<close> where
 | \<open>btv (TDep i sg K e t) = btv t\<close>
 | \<open>btv (TEv l s t) = btv l \<union> btv s \<union> btv t\<close>
 | \<open>btv (TAct l K e t) = btv l \<union> btv t\<close>
+| \<open>btv TRNil = {}\<close>
+| \<open>btv (TRCons l t r) = btv t \<union> btv r\<close>
 
 fun brv_row :: \<open>krow \<Rightarrow> rvar set\<close> where
   \<open>brv_row RNil = {}\<close>
@@ -551,6 +665,8 @@ fun brv :: \<open>kty \<Rightarrow> rvar set\<close> where
 | \<open>brv (TDep i sg K e t) = brv_row e \<union> brv t\<close>
 | \<open>brv (TEv l s t) = brv l \<union> brv s \<union> brv t\<close>
 | \<open>brv (TAct l K e t) = brv l \<union> brv_row e \<union> brv t\<close>
+| \<open>brv TRNil = {}\<close>
+| \<open>brv (TRCons l t r) = brv t \<union> brv r\<close>
 
 text \<open>The binder list of an action type is inert for the abstract-type
   variables: it records which variables are the action's own (their
@@ -571,6 +687,11 @@ fun ktv :: \<open>kty \<Rightarrow> tvar set\<close> where
 | \<open>ktv (TDep i sg K e t) = ktv t\<close>
 | \<open>ktv (TEv l s t) = ktv l \<union> ktv s \<union> ktv t\<close>
 | \<open>ktv (TAct l K e t) = ktv l \<union> ktv t\<close>
+| \<open>ktv TRNil = {}\<close>
+| \<open>ktv (TRCons l t r) = ktv t \<union> ktv r\<close>
+
+lemma fpull_ktv: \<open>fpull l u = Some (t', r') \<Longrightarrow> ktv u = ktv t' \<union> ktv r'\<close>
+  by (rule fpull_set) simp_all
 
 text \<open>A type is name-free when no handler name and no action occurs in it: the
   types a foreign value may have, since a name cannot cross the foreign boundary.\<close>
@@ -582,6 +703,7 @@ fun name_free :: \<open>kty \<Rightarrow> bool\<close> where
 | \<open>name_free (TDep i sg K e t) = name_free t\<close>
 | \<open>name_free (TEv l s t) = False\<close>
 | \<open>name_free (TAct l K e t) = False\<close>
+| \<open>name_free (TRCons l t r) \<longleftrightarrow> name_free t \<and> name_free r\<close>
 | \<open>name_free t = True\<close>
 
 lemma brsubst_id: \<open>brv_row r = {} \<Longrightarrow> brsubst \<rho> r = r\<close>
@@ -603,6 +725,8 @@ fun ksubst :: \<open>(tvar \<Rightarrow> kty) \<Rightarrow> kty \<Rightarrow> kt
 | \<open>ksubst \<phi> (TDep i sg K e t) = TDep i sg K e (ksubst \<phi> t)\<close>
 | \<open>ksubst \<phi> (TEv l s t) = TEv (ksubst \<phi> l) (ksubst \<phi> s) (ksubst \<phi> t)\<close>
 | \<open>ksubst \<phi> (TAct l K e t) = TAct (ksubst \<phi> l) K e (ksubst \<phi> t)\<close>
+| \<open>ksubst \<phi> TRNil = TRNil\<close>
+| \<open>ksubst \<phi> (TRCons l t r) = TRCons l (ksubst \<phi> t) (ksubst \<phi> r)\<close>
 
 lemma ksubst_id: \<open>(\<And>k. k \<in> ktv t \<Longrightarrow> \<phi> k = TK k) \<Longrightarrow> ksubst \<phi> t = t\<close>
 proof (induction t arbitrary: \<phi>)
@@ -693,6 +817,8 @@ fun kclose_at :: \<open>nat \<Rightarrow> tvar list \<Rightarrow> kty \<Rightarr
 | \<open>kclose_at d K (TDep i sg m e t) = TDep i sg m e (kclose_at (Suc d) K t)\<close>
 | \<open>kclose_at d K (TEv l s t) = TEv (kclose_at d K l) (kclose_at d K s) (kclose_at d K t)\<close>
 | \<open>kclose_at d K (TAct l K' e t) = TAct (kclose_at d K l) K' e (kclose_at d K t)\<close>
+| \<open>kclose_at d K TRNil = TRNil\<close>
+| \<open>kclose_at d K (TRCons l t r) = TRCons l (kclose_at d K t) (kclose_at d K r)\<close>
 
 abbreviation kclose :: \<open>tvar list \<Rightarrow> kty \<Rightarrow> kty\<close> where
   \<open>kclose \<equiv> kclose_at 0\<close>
@@ -708,6 +834,8 @@ fun kopen_at :: \<open>nat \<Rightarrow> (nat \<Rightarrow> kty) \<Rightarrow> k
 | \<open>kopen_at d \<phi> (TDep i sg m e t) = TDep i sg m e (kopen_at (Suc d) \<phi> t)\<close>
 | \<open>kopen_at d \<phi> (TEv l s t) = TEv (kopen_at d \<phi> l) (kopen_at d \<phi> s) (kopen_at d \<phi> t)\<close>
 | \<open>kopen_at d \<phi> (TAct l K e t) = TAct (kopen_at d \<phi> l) K e (kopen_at d \<phi> t)\<close>
+| \<open>kopen_at d \<phi> TRNil = TRNil\<close>
+| \<open>kopen_at d \<phi> (TRCons l t r) = TRCons l (kopen_at d \<phi> t) (kopen_at d \<phi> r)\<close>
 
 abbreviation kopen :: \<open>(nat \<Rightarrow> kty) \<Rightarrow> kty \<Rightarrow> kty\<close> where
   \<open>kopen \<equiv> kopen_at 0\<close>
@@ -726,6 +854,8 @@ fun taok :: \<open>nat \<Rightarrow> kty \<Rightarrow> bool\<close> where
 | \<open>taok d (TDep i sg m e t) = taok (Suc d) t\<close>
 | \<open>taok d (TEv l s t) \<longleftrightarrow> taok d l \<and> taok d s \<and> taok d t\<close>
 | \<open>taok d (TAct l K e t) \<longleftrightarrow> taok d l \<and> taok d t\<close>
+| \<open>taok d TRNil = True\<close>
+| \<open>taok d (TRCons l t r) \<longleftrightarrow> taok d t \<and> taok d r\<close>
 
 abbreviation taclosed :: \<open>kty \<Rightarrow> bool\<close> where
   \<open>taclosed \<equiv> taok 0\<close>
@@ -817,6 +947,16 @@ text \<open>Closing commutes with a substitution whose range avoids the closed
   stamps (the escape check), opening with any substitution whose range has no
   free bound abstract type (every type of a derivation).\<close>
 
+lemma fpull_kclose:
+  \<open>fpull l u = Some (t', r') \<Longrightarrow>
+     fpull l (kclose_at d K u) = Some (kclose_at d K t', kclose_at d K r')\<close>
+  by (rule fpull_map) simp_all
+
+lemma fpull_kopen:
+  \<open>fpull l u = Some (t', r') \<Longrightarrow>
+     fpull l (kopen_at d \<phi> u) = Some (kopen_at d \<phi> t', kopen_at d \<phi> r')\<close>
+  by (rule fpull_map) simp_all
+
 lemma ty_eq_kclose: \<open>t \<simeq> u \<Longrightarrow> kclose_at d K t \<simeq> kclose_at d K u\<close>
 proof (induction t arbitrary: u d)
   case (TC c ts)
@@ -824,6 +964,10 @@ proof (induction t arbitrary: u d)
   from TC.IH us(2) have \<open>map (kclose_at d K) ts [\<simeq>] map (kclose_at d K) us\<close>
     by (induction ts arbitrary: us) auto
   then show ?case using us(1) by simp
+next
+  case (TRCons l t r)
+  then obtain t' r' where p: \<open>fpull l u = Some (t', r')\<close> and \<open>t \<simeq> t'\<close> \<open>r \<simeq> r'\<close> by auto
+  then show ?case by (auto simp: fpull_kclose[OF p] intro!: TRCons.IH)
 qed (auto split: option.split)
 
 lemma ty_eq_kopen: \<open>t \<simeq> u \<Longrightarrow> kopen_at d \<phi> t \<simeq> kopen_at d \<phi> u\<close>
@@ -833,6 +977,10 @@ proof (induction t arbitrary: u d)
   from TC.IH us(2) have \<open>map (kopen_at d \<phi>) ts [\<simeq>] map (kopen_at d \<phi>) us\<close>
     by (induction ts arbitrary: us) auto
   then show ?case using us(1) by simp
+next
+  case (TRCons l t r)
+  then obtain t' r' where p: \<open>fpull l u = Some (t', r')\<close> and \<open>t \<simeq> t'\<close> \<open>r \<simeq> r'\<close> by auto
+  then show ?case by (auto simp: fpull_kopen[OF p] intro!: TRCons.IH)
 qed auto
 
 lemma kopen_cong:
@@ -955,404 +1103,41 @@ fun sch_body :: \<open>scheme \<Rightarrow> kty\<close> where
   \<open>sch_body (Sch t) = t\<close>
 | \<open>sch_body (Mono t) = t\<close>
 
-subsection \<open>Matching schemes: a verified, executable matcher\<close>
+subsection \<open>Tuples as records\<close>
 
-text \<open>Implicit resolution and signature matching compare schemes against
-  types up to instantiation of the bound variables, that is \<open>\<sigma> \<succeq> \<tau>\<close>,
-  an existential over substitutions that cannot compute. \<open>tmatch\<close> is
-  first-order matching with an accumulator of partial bindings, the bound
-  variables flexible and everything else rigid; \<^text>\<open>imatch_sinst\<close>
-  proves it sound and complete for \<open>\<succeq>\<close>, so resolution is decidable and
-  the inference algorithm runs it directly \<^cite>\<open>\<open>Sect. 2.2.2\<close> in white2014\<close>.\<close>
+text \<open>The structural functions pass through a tuple field by field, and two
+  tuples are equal types exactly when their components are.\<close>
 
-notation Option.bind (infixr \<open>\<bind>\<close> 54)
+lemma ftv_tuple_from[simp]: \<open>ftv (tuple_from i ts) = \<Union>(set (map ftv ts))\<close>
+  by (induction ts arbitrary: i) simp_all
 
-type_synonym tsub = \<open>tvar \<rightharpoonup> kty\<close>
-type_synonym rsub = \<open>rvar \<rightharpoonup> krow\<close>
+lemma frv_tuple_from[simp]: \<open>frv (tuple_from i ts) = \<Union>(set (map frv ts))\<close>
+  by (induction ts arbitrary: i) simp_all
 
-definition mk_tsub :: \<open>tsub \<Rightarrow> tvar \<Rightarrow> kty\<close> where
-  \<open>mk_tsub \<theta> a = (case \<theta> a of Some \<tau> \<Rightarrow> \<tau> | None \<Rightarrow> TV a)\<close>
+lemma btv_tuple_from[simp]: \<open>btv (tuple_from i ts) = \<Union>(set (map btv ts))\<close>
+  by (induction ts arbitrary: i) simp_all
 
-definition mk_rsub :: \<open>rsub \<Rightarrow> rvar \<Rightarrow> krow\<close> where
-  \<open>mk_rsub \<rho> v = (case \<rho> v of Some r \<Rightarrow> r | None \<Rightarrow> RV v)\<close>
+lemma brv_tuple_from[simp]: \<open>brv (tuple_from i ts) = \<Union>(set (map brv ts))\<close>
+  by (induction ts arbitrary: i) simp_all
 
-definition mk_btsub :: \<open>tsub \<Rightarrow> tvar \<Rightarrow> kty\<close> where
-  \<open>mk_btsub \<theta> a = (case \<theta> a of Some \<tau> \<Rightarrow> \<tau> | None \<Rightarrow> TB a)\<close>
+lemma ktv_tuple_from[simp]: \<open>ktv (tuple_from i ts) = \<Union>(set (map ktv ts))\<close>
+  by (induction ts arbitrary: i) simp_all
 
-definition mk_brsub :: \<open>rsub \<Rightarrow> rvar \<Rightarrow> krow\<close> where
-  \<open>mk_brsub \<rho> v = (case \<rho> v of Some r \<Rightarrow> r | None \<Rightarrow> RB v)\<close>
+lemma tsubst_tuple_from[simp]:
+  \<open>tsubst \<theta> \<rho> (tuple_from i ts) = tuple_from i (map (tsubst \<theta> \<rho>) ts)\<close>
+  by (induction ts arbitrary: i) simp_all
 
-fun rmatch :: \<open>krow \<Rightarrow> krow \<Rightarrow> rsub \<Rightarrow> rsub option\<close> where
-  \<open>rmatch RNil RNil \<rho> = Some \<rho>\<close>
-| \<open>rmatch (RV v) w \<rho> = (if w = RV v then Some \<rho> else None)\<close>
-| \<open>rmatch (RB v) w \<rho> =
-     (case \<rho> v of
-        None \<Rightarrow> Some (\<rho>(v \<mapsto> w))
-      | Some w' \<Rightarrow> (if w' = w then Some \<rho> else None))\<close>
-| \<open>rmatch (RCons l r) (RCons l' w) \<rho> =
-     (if l = l' then rmatch r w \<rho> else None)\<close>
-| \<open>rmatch r w \<rho> = None\<close>
+lemma bsubst_tuple_from[simp]:
+  \<open>bsubst \<theta> \<rho> (tuple_from i ts) = tuple_from i (map (bsubst \<theta> \<rho>) ts)\<close>
+  by (induction ts arbitrary: i) simp_all
 
-fun tmatch :: \<open>kty \<Rightarrow> kty \<Rightarrow> tsub \<times> rsub \<Rightarrow> (tsub \<times> rsub) option\<close>
-and tmatchs :: \<open>kty list \<Rightarrow> kty list \<Rightarrow> tsub \<times> rsub \<Rightarrow> (tsub \<times> rsub) option\<close> where
-  \<open>tmatch (TV a) w \<sigma> = (if w = TV a then Some \<sigma> else None)\<close>
-| \<open>tmatch (TK a) w \<sigma> = (if w = TK a then Some \<sigma> else None)\<close>
-| \<open>tmatch (TA k i) w \<sigma> = (if w = TA k i then Some \<sigma> else None)\<close>
-| \<open>tmatch (TB a) w (\<theta>, \<rho>) =
-     (case \<theta> a of
-        None \<Rightarrow> Some (\<theta>(a \<mapsto> w), \<rho>)
-      | Some w' \<Rightarrow> (if w' = w then Some (\<theta>, \<rho>) else None))\<close>
-| \<open>tmatch (TC c ts) (TC c' ws) \<sigma> =
-     (if c = c' then tmatchs ts ws \<sigma> else None)\<close>
-| \<open>tmatch (TFn t\<^sub>1 e t\<^sub>2) (TFn w\<^sub>1 f w\<^sub>2) \<sigma> =
-     tmatch t\<^sub>1 w\<^sub>1 \<sigma> \<bind> (\<lambda>(\<theta>, \<rho>).
-       rmatch e f \<rho> \<bind> (\<lambda>\<rho>'. tmatch t\<^sub>2 w\<^sub>2 (\<theta>, \<rho>')))\<close>
-| \<open>tmatch (TDep i sg T e t) (TDep i' sg' T' f w) (\<theta>, \<rho>) =
-     (if i = i' \<and> sg = sg' \<and> T = T'
-      then rmatch e f \<rho> \<bind> (\<lambda>\<rho>'. tmatch t w (\<theta>, \<rho>')) else None)\<close>
-| \<open>tmatch (TApp t\<^sub>1 t\<^sub>2) (TApp w\<^sub>1 w\<^sub>2) \<sigma> =
-     tmatch t\<^sub>1 w\<^sub>1 \<sigma> \<bind> tmatch t\<^sub>2 w\<^sub>2\<close>
-| \<open>tmatch (TEv l s t) (TEv l' s' w) \<sigma> =
-     tmatch l l' \<sigma> \<bind> (\<lambda>\<sigma>\<^sub>1. tmatch s s' \<sigma>\<^sub>1 \<bind> tmatch t w)\<close>
-| \<open>tmatch (TAct l K e t) (TAct l' K' f w) \<sigma> =
-     (if K = K'
-      then tmatch l l' \<sigma> \<bind> (\<lambda>(\<theta>, \<rho>). rmatch e f \<rho> \<bind> (\<lambda>\<rho>'. tmatch t w (\<theta>, \<rho>')))
-      else None)\<close>
-| \<open>tmatch t w \<sigma> = None\<close>
-| \<open>tmatchs [] [] \<sigma> = Some \<sigma>\<close>
-| \<open>tmatchs (t # ts) (w # ws) \<sigma> =
-     tmatch t w \<sigma> \<bind> tmatchs ts ws\<close>
-| \<open>tmatchs ts ws \<sigma> = None\<close>  (* ~13s *)
-
-lemmas tmatch_induct = tmatch_tmatchs.induct[named_cases tmatch]
-
-lemma obind_SomeE:
-  assumes \<open>(a \<bind> f) = Some r\<close>
-  obtains x where \<open>a = Some x\<close> and \<open>f x = Some r\<close>
-  using assms by (auto simp: bind_eq_Some_conv)
-
-lemma rmatch_le: \<open>rmatch r w \<rho> = Some \<rho>' \<Longrightarrow> \<rho> \<subseteq>\<^sub>m \<rho>'\<close>
-  by (induction r w \<rho> rule: rmatch.induct)
-     (auto simp: map_le_def split: if_split_asm option.split_asm)
-
-lemma map_le_upd_None: \<open>m a = None \<Longrightarrow> m \<subseteq>\<^sub>m m(a \<mapsto> w)\<close>
-  by (auto simp: map_le_def dom_def)
-
-lemma map_le_SomeD: \<open>m \<subseteq>\<^sub>m m' \<Longrightarrow> m a = Some y \<Longrightarrow> m' a = Some y\<close>
-  by (auto simp: map_le_def dom_def)
-
-lemma tmatch_le:
-  \<open>tmatch t w (\<theta>, \<rho>) = Some (\<theta>', \<rho>') \<Longrightarrow> \<theta> \<subseteq>\<^sub>m \<theta>' \<and> \<rho> \<subseteq>\<^sub>m \<rho>'\<close>
-  and tmatchs_le: \<open>tmatchs ts ws (\<theta>, \<rho>) = Some (\<theta>', \<rho>') \<Longrightarrow> \<theta> \<subseteq>\<^sub>m \<theta>' \<and> \<rho> \<subseteq>\<^sub>m \<rho>'\<close>
-proof (induction t w \<open>(\<theta>, \<rho>)\<close> and ts ws \<open>(\<theta>, \<rho>)\<close>
-       arbitrary: \<theta> \<rho> \<theta>' \<rho>' and \<theta> \<rho> \<theta>' \<rho>' rule: tmatch_induct)
-  case (tmatch_TEv l s t l' s' w \<theta> \<rho> \<theta>' \<rho>')
-  from tmatch_TEv.prems obtain \<theta>\<^sub>1 \<rho>\<^sub>1 \<theta>\<^sub>2 \<rho>\<^sub>2 where
-    m\<^sub>1: \<open>tmatch l l' (\<theta>, \<rho>) = Some (\<theta>\<^sub>1, \<rho>\<^sub>1)\<close> and
-    m\<^sub>2: \<open>tmatch s s' (\<theta>\<^sub>1, \<rho>\<^sub>1) = Some (\<theta>\<^sub>2, \<rho>\<^sub>2)\<close> and
-    m\<^sub>3: \<open>tmatch t w (\<theta>\<^sub>2, \<rho>\<^sub>2) = Some (\<theta>', \<rho>')\<close>
-    by (auto elim!: obind_SomeE split: prod.split_asm)
-  show ?case using tmatch_TEv.hyps m\<^sub>1 m\<^sub>2 m\<^sub>3 by (blast intro: map_le_trans)
+lemma ty_eq_tuple_from[simp]: \<open>tuple_from i ts \<simeq> tuple_from i us \<longleftrightarrow> ts [\<simeq>] us\<close>
+proof (induction ts arbitrary: i us)
+  case Nil
+  then show ?case by (cases us) simp_all
 next
-  case (tmatch_TAct l K e t l' K' f w \<theta> \<rho> \<theta>' \<rho>')
-  from tmatch_TAct.prems obtain \<theta>\<^sub>1 \<rho>\<^sub>1 \<rho>\<^sub>2 where
-    m\<^sub>1: \<open>tmatch l l' (\<theta>, \<rho>) = Some (\<theta>\<^sub>1, \<rho>\<^sub>1)\<close> and
-    m\<^sub>2: \<open>rmatch e f \<rho>\<^sub>1 = Some \<rho>\<^sub>2\<close> and
-    m\<^sub>3: \<open>tmatch t w (\<theta>\<^sub>1, \<rho>\<^sub>2) = Some (\<theta>', \<rho>')\<close>
-    by (auto elim!: obind_SomeE split: prod.split_asm if_split_asm)
-  show ?case using tmatch_TAct.hyps tmatch_TAct.prems m\<^sub>1 m\<^sub>2 m\<^sub>3 rmatch_le[OF m\<^sub>2]
-    by (auto split: if_split_asm intro: map_le_trans)
-qed (auto elim!: obind_SomeE
-          split: if_split_asm option.split_asm prod.split_asm,
-     ((blast intro: map_le_refl map_le_upd_None map_le_trans dest: rmatch_le)+)?)  (* ~6s *)
-
-text \<open>Soundness, in extension-stable form: a successful match makes the
-  pattern instantiate to the target under any extension of the final
-  bindings:\<close>
-
-lemma rmatch_sound:
-  \<open>rmatch r w \<rho> = Some \<rho>' \<Longrightarrow> \<rho>' \<subseteq>\<^sub>m \<rho>'' \<Longrightarrow> brsubst (mk_brsub \<rho>'') r = w\<close>
-proof (induction r w \<rho> arbitrary: \<rho>' rule: rmatch.induct)
-qed (auto simp: mk_brsub_def map_le_def dom_def
-     split: if_split_asm option.split_asm option.split)
-
-lemma tmatch_sound:
-  \<open>tmatch t w (\<theta>, \<rho>) = Some (\<theta>', \<rho>') \<Longrightarrow> \<theta>' \<subseteq>\<^sub>m \<theta>'' \<Longrightarrow> \<rho>' \<subseteq>\<^sub>m \<rho>'' \<Longrightarrow>
-     bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'') t = w\<close>
-  and tmatchs_sound:
-  \<open>tmatchs ts ws (\<theta>, \<rho>) = Some (\<theta>', \<rho>') \<Longrightarrow> \<theta>' \<subseteq>\<^sub>m \<theta>'' \<Longrightarrow> \<rho>' \<subseteq>\<^sub>m \<rho>'' \<Longrightarrow>
-     map (bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'')) ts = ws\<close>
-proof (induction t w \<open>(\<theta>, \<rho>)\<close> and ts ws \<open>(\<theta>, \<rho>)\<close>
-       arbitrary: \<theta> \<rho> \<theta>' \<rho>' and \<theta> \<rho> \<theta>' \<rho>' rule: tmatch_induct)
-  case (tmatch_TB a w \<theta> \<rho> \<theta>' \<rho>')
-  then have \<open>\<theta>' a = Some w\<close> by (auto split: option.split_asm if_split_asm)
-  then have \<open>\<theta>'' a = Some w\<close> using \<open>\<theta>' \<subseteq>\<^sub>m \<theta>''\<close> map_le_SomeD by fast
-  then show ?case by (simp add: mk_btsub_def)
-next
-  case (tmatch_TFn t\<^sub>1 e t\<^sub>2 w\<^sub>1 f w\<^sub>2 \<theta> \<rho> \<theta>' \<rho>')
-  note le = \<open>\<theta>' \<subseteq>\<^sub>m \<theta>''\<close> \<open>\<rho>' \<subseteq>\<^sub>m \<rho>''\<close>
-  from tmatch_TFn.prems obtain \<theta>\<^sub>1 \<rho>\<^sub>1 \<rho>\<^sub>2 where
-    m\<^sub>1: \<open>tmatch t\<^sub>1 w\<^sub>1 (\<theta>, \<rho>) = Some (\<theta>\<^sub>1, \<rho>\<^sub>1)\<close> and
-    m\<^sub>2: \<open>rmatch e f \<rho>\<^sub>1 = Some \<rho>\<^sub>2\<close> and
-    m\<^sub>3: \<open>tmatch t\<^sub>2 w\<^sub>2 (\<theta>\<^sub>1, \<rho>\<^sub>2) = Some (\<theta>', \<rho>')\<close>
-    by (auto elim!: obind_SomeE split: prod.split_asm)
-  have le\<^sub>2: \<open>\<theta>\<^sub>1 \<subseteq>\<^sub>m \<theta>''\<close> \<open>\<rho>\<^sub>2 \<subseteq>\<^sub>m \<rho>''\<close>
-    using tmatch_le[OF m\<^sub>3] le map_le_trans by blast+
-  have le\<^sub>1: \<open>\<theta>\<^sub>1 \<subseteq>\<^sub>m \<theta>''\<close> \<open>\<rho>\<^sub>1 \<subseteq>\<^sub>m \<rho>''\<close>
-    using rmatch_le[OF m\<^sub>2] le\<^sub>2 map_le_trans by blast+
-  have \<open>bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'') t\<^sub>1 = w\<^sub>1\<close>
-    using m\<^sub>1 le\<^sub>1 by (rule tmatch_TFn.hyps)
-  moreover have \<open>bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'') t\<^sub>2 = w\<^sub>2\<close>
-    using m\<^sub>1 refl m\<^sub>2 m\<^sub>3 le by (rule tmatch_TFn.hyps)
-  ultimately show ?case using rmatch_sound[OF m\<^sub>2 le\<^sub>2(2)] by simp
-next
-  case (tmatch_TDep i sg T e t i' sg' T' f w \<theta> \<rho> \<theta>' \<rho>')
-  note le = \<open>\<theta>' \<subseteq>\<^sub>m \<theta>''\<close> \<open>\<rho>' \<subseteq>\<^sub>m \<rho>''\<close>
-  from tmatch_TDep.prems obtain \<rho>\<^sub>1 where
-    eq: \<open>i = i'\<close> \<open>sg = sg'\<close> \<open>T = T'\<close> and
-    m\<^sub>1: \<open>rmatch e f \<rho> = Some \<rho>\<^sub>1\<close> and
-    m\<^sub>2: \<open>tmatch t w (\<theta>, \<rho>\<^sub>1) = Some (\<theta>', \<rho>')\<close>
-    by (auto elim!: obind_SomeE split: if_split_asm)
-  have le\<^sub>1: \<open>\<rho>\<^sub>1 \<subseteq>\<^sub>m \<rho>''\<close>
-    using tmatch_le[OF m\<^sub>2] le map_le_trans by blast
-  have \<open>bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'') t = w\<close>
-    using conjI[OF eq(1) conjI[OF eq(2,3)]] m\<^sub>1 m\<^sub>2 le by (rule tmatch_TDep.hyps)
-  then show ?case using eq rmatch_sound[OF m\<^sub>1 le\<^sub>1] by simp
-next
-  case (tmatch_TApp t\<^sub>1 t\<^sub>2 w\<^sub>1 w\<^sub>2 \<theta> \<rho> \<theta>' \<rho>')
-  note le = \<open>\<theta>' \<subseteq>\<^sub>m \<theta>''\<close> \<open>\<rho>' \<subseteq>\<^sub>m \<rho>''\<close>
-  from tmatch_TApp.prems obtain \<theta>\<^sub>1 \<rho>\<^sub>1 where
-    m\<^sub>1: \<open>tmatch t\<^sub>1 w\<^sub>1 (\<theta>, \<rho>) = Some (\<theta>\<^sub>1, \<rho>\<^sub>1)\<close> and
-    m\<^sub>2: \<open>tmatch t\<^sub>2 w\<^sub>2 (\<theta>\<^sub>1, \<rho>\<^sub>1) = Some (\<theta>', \<rho>')\<close>
-    by (auto elim!: obind_SomeE split: prod.split_asm)
-  have le\<^sub>1: \<open>\<theta>\<^sub>1 \<subseteq>\<^sub>m \<theta>''\<close> \<open>\<rho>\<^sub>1 \<subseteq>\<^sub>m \<rho>''\<close>
-    using tmatch_le[OF m\<^sub>2] le map_le_trans by blast+
-  have \<open>bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'') t\<^sub>1 = w\<^sub>1\<close>
-    using m\<^sub>1 le\<^sub>1 by (rule tmatch_TApp.hyps)
-  moreover have \<open>bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'') t\<^sub>2 = w\<^sub>2\<close>
-    using m\<^sub>1 m\<^sub>2 le by (rule tmatch_TApp.hyps)
-  ultimately show ?case by simp
-next
-  case (tmatch_TEv l s t l' s' w \<theta> \<rho> \<theta>' \<rho>')
-  note le = \<open>\<theta>' \<subseteq>\<^sub>m \<theta>''\<close> \<open>\<rho>' \<subseteq>\<^sub>m \<rho>''\<close>
-  from tmatch_TEv.prems obtain \<theta>\<^sub>1 \<rho>\<^sub>1 \<theta>\<^sub>2 \<rho>\<^sub>2 where
-    m\<^sub>1: \<open>tmatch l l' (\<theta>, \<rho>) = Some (\<theta>\<^sub>1, \<rho>\<^sub>1)\<close> and
-    m\<^sub>2: \<open>tmatch s s' (\<theta>\<^sub>1, \<rho>\<^sub>1) = Some (\<theta>\<^sub>2, \<rho>\<^sub>2)\<close> and
-    m\<^sub>3: \<open>tmatch t w (\<theta>\<^sub>2, \<rho>\<^sub>2) = Some (\<theta>', \<rho>')\<close>
-    by (auto elim!: obind_SomeE split: prod.split_asm)
-  have le\<^sub>2: \<open>\<theta>\<^sub>2 \<subseteq>\<^sub>m \<theta>''\<close> \<open>\<rho>\<^sub>2 \<subseteq>\<^sub>m \<rho>''\<close>
-    using tmatch_le[OF m\<^sub>3] le map_le_trans by blast+
-  have le\<^sub>1: \<open>\<theta>\<^sub>1 \<subseteq>\<^sub>m \<theta>''\<close> \<open>\<rho>\<^sub>1 \<subseteq>\<^sub>m \<rho>''\<close>
-    using tmatch_le[OF m\<^sub>2] le\<^sub>2 map_le_trans by blast+
-  have \<open>bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'') l = l'\<close>
-    using m\<^sub>1 le\<^sub>1 by (rule tmatch_TEv.hyps)
-  moreover have \<open>bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'') s = s'\<close>
-    using m\<^sub>1 m\<^sub>2 le\<^sub>2 by (rule tmatch_TEv.hyps)
-  moreover have \<open>bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'') t = w\<close>
-    using m\<^sub>1 m\<^sub>2 m\<^sub>3 le by (rule tmatch_TEv.hyps)
-  ultimately show ?case by simp
-next
-  case (tmatch_TAct l K e t l' K' f w \<theta> \<rho> \<theta>' \<rho>')
-  note le = \<open>\<theta>' \<subseteq>\<^sub>m \<theta>''\<close> \<open>\<rho>' \<subseteq>\<^sub>m \<rho>''\<close>
-  from tmatch_TAct.prems obtain \<theta>\<^sub>1 \<rho>\<^sub>1 \<rho>\<^sub>2 where
-    eq: \<open>K = K'\<close> and
-    m\<^sub>1: \<open>tmatch l l' (\<theta>, \<rho>) = Some (\<theta>\<^sub>1, \<rho>\<^sub>1)\<close> and
-    m\<^sub>2: \<open>rmatch e f \<rho>\<^sub>1 = Some \<rho>\<^sub>2\<close> and
-    m\<^sub>3: \<open>tmatch t w (\<theta>\<^sub>1, \<rho>\<^sub>2) = Some (\<theta>', \<rho>')\<close>
-    by (auto elim!: obind_SomeE split: prod.split_asm if_split_asm)
-  have le\<^sub>2: \<open>\<theta>\<^sub>1 \<subseteq>\<^sub>m \<theta>''\<close> \<open>\<rho>\<^sub>2 \<subseteq>\<^sub>m \<rho>''\<close>
-    using tmatch_le[OF m\<^sub>3] le map_le_trans by blast+
-  have le\<^sub>1: \<open>\<rho>\<^sub>1 \<subseteq>\<^sub>m \<rho>''\<close>
-    using rmatch_le[OF m\<^sub>2] le\<^sub>2 map_le_trans by blast
-  have \<open>bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'') l = l'\<close>
-    using eq m\<^sub>1 le\<^sub>2(1) le\<^sub>1 by (rule tmatch_TAct.hyps)
-  moreover have \<open>bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'') t = w\<close>
-    using eq m\<^sub>1 refl m\<^sub>2 m\<^sub>3 le by (rule tmatch_TAct.hyps)
-  ultimately show ?case using eq rmatch_sound[OF m\<^sub>2 le\<^sub>2(2)] by simp
-next
-  case (tmatchs_Cons t ts w ws \<theta> \<rho> \<theta>' \<rho>')
-  note le = \<open>\<theta>' \<subseteq>\<^sub>m \<theta>''\<close> \<open>\<rho>' \<subseteq>\<^sub>m \<rho>''\<close>
-  from tmatchs_Cons.prems obtain \<theta>\<^sub>1 \<rho>\<^sub>1 where
-    m\<^sub>1: \<open>tmatch t w (\<theta>, \<rho>) = Some (\<theta>\<^sub>1, \<rho>\<^sub>1)\<close> and
-    m\<^sub>2: \<open>tmatchs ts ws (\<theta>\<^sub>1, \<rho>\<^sub>1) = Some (\<theta>', \<rho>')\<close>
-    by (auto elim!: obind_SomeE split: prod.split_asm)
-  have le\<^sub>1: \<open>\<theta>\<^sub>1 \<subseteq>\<^sub>m \<theta>''\<close> \<open>\<rho>\<^sub>1 \<subseteq>\<^sub>m \<rho>''\<close>
-    using tmatchs_le[OF m\<^sub>2] le map_le_trans by blast+
-  have \<open>bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'') t = w\<close>
-    using m\<^sub>1 le\<^sub>1 by (rule tmatchs_Cons.hyps)
-  moreover have \<open>map (bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'')) ts = ws\<close>
-    using m\<^sub>1 m\<^sub>2 le by (rule tmatchs_Cons.hyps)
-  ultimately show ?case by simp
-qed (auto split: if_split_asm option.split_asm)
-
-text \<open>A partial map agrees with a total one where it is defined.\<close>
-
-abbreviation agrees :: \<open>('a \<rightharpoonup> 'b) \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow> bool\<close> where
-  \<open>agrees m g \<equiv> \<forall>a y. m a = Some y \<longrightarrow> g a = y\<close>
-
-text \<open>Completeness: any \<open>\<succeq>\<close>-witness is found by the matcher, from any
-  accumulator consistent with the witness:\<close>
-
-lemma rmatch_complete:
-  \<open>brsubst g r = w \<Longrightarrow> agrees \<rho> g \<Longrightarrow>
-   \<exists>\<rho>'. rmatch r w \<rho> = Some \<rho>' \<and> agrees \<rho>' g\<close>
-  by (induction r arbitrary: w \<rho>) (auto split: option.split)
-
-lemma tmatchs_complete_pre:
-  \<open>(\<forall>t \<in> set ts. \<forall>w \<theta> \<rho>. bsubst gt gr t = w \<longrightarrow> agrees \<theta> gt \<longrightarrow> agrees \<rho> gr \<longrightarrow>
-       (\<exists>\<theta>' \<rho>'. tmatch t w (\<theta>, \<rho>) = Some (\<theta>', \<rho>') \<and> agrees \<theta>' gt \<and> agrees \<rho>' gr)) \<Longrightarrow>
-   map (bsubst gt gr) ts = ws \<Longrightarrow> agrees \<theta> gt \<Longrightarrow> agrees \<rho> gr \<Longrightarrow>
-   \<exists>\<theta>' \<rho>'. tmatchs ts ws (\<theta>, \<rho>) = Some (\<theta>', \<rho>') \<and> agrees \<theta>' gt \<and> agrees \<rho>' gr\<close>
-proof (induction ts arbitrary: ws \<theta> \<rho>)
-  case (Cons t ts)
-  note ok = \<open>agrees \<theta> gt\<close> \<open>agrees \<rho> gr\<close>
-  from Cons.prems have \<open>\<forall>w \<theta> \<rho>. bsubst gt gr t = w \<longrightarrow> agrees \<theta> gt \<longrightarrow> agrees \<rho> gr \<longrightarrow>
-      (\<exists>\<theta>' \<rho>'. tmatch t w (\<theta>, \<rho>) = Some (\<theta>', \<rho>') \<and> agrees \<theta>' gt \<and> agrees \<rho>' gr)\<close>
-    by simp
-  with ok obtain \<theta>\<^sub>1 \<rho>\<^sub>1 where
-    m\<^sub>1: \<open>tmatch t (bsubst gt gr t) (\<theta>, \<rho>) = Some (\<theta>\<^sub>1, \<rho>\<^sub>1)\<close> and
-    c\<^sub>1: \<open>agrees \<theta>\<^sub>1 gt\<close> \<open>agrees \<rho>\<^sub>1 gr\<close>
-    by blast
-  from Cons.IH[of \<open>map (bsubst gt gr) ts\<close> \<theta>\<^sub>1 \<rho>\<^sub>1] Cons.prems c\<^sub>1
-  obtain \<theta>\<^sub>2 \<rho>\<^sub>2 where
-    m\<^sub>2: \<open>tmatchs ts (map (bsubst gt gr) ts) (\<theta>\<^sub>1, \<rho>\<^sub>1) = Some (\<theta>\<^sub>2, \<rho>\<^sub>2)\<close> and
-    c\<^sub>2: \<open>agrees \<theta>\<^sub>2 gt\<close> \<open>agrees \<rho>\<^sub>2 gr\<close>
-    by auto
-  show ?case using \<open>map (bsubst gt gr) (t # ts) = ws\<close>[symmetric] m\<^sub>1 m\<^sub>2 c\<^sub>2 by auto
-qed auto
-
-lemma tmatch_complete:
-  \<open>bsubst gt gr t = w \<Longrightarrow> agrees \<theta> gt \<Longrightarrow> agrees \<rho> gr \<Longrightarrow>
-   \<exists>\<theta>' \<rho>'. tmatch t w (\<theta>, \<rho>) = Some (\<theta>', \<rho>') \<and> agrees \<theta>' gt \<and> agrees \<rho>' gr\<close>
-proof (induction t arbitrary: w \<theta> \<rho>)
-  case (TB a)
-  then show ?case by (auto split: option.split)
-next
-  case (TC c ts)
-  note ok = \<open>agrees \<theta> gt\<close> \<open>agrees \<rho> gr\<close>
-  have el: \<open>\<forall>t \<in> set ts. \<forall>w \<theta> \<rho>. bsubst gt gr t = w \<longrightarrow> agrees \<theta> gt \<longrightarrow> agrees \<rho> gr \<longrightarrow>
-       (\<exists>\<theta>' \<rho>'. tmatch t w (\<theta>, \<rho>) = Some (\<theta>', \<rho>') \<and> agrees \<theta>' gt \<and> agrees \<rho>' gr)\<close>
-    using TC.IH by blast
-  from tmatchs_complete_pre[OF el _ ok, of \<open>map (bsubst gt gr) ts\<close>]
-  obtain \<theta>' \<rho>' where
-    \<open>tmatchs ts (map (bsubst gt gr) ts) (\<theta>, \<rho>) = Some (\<theta>', \<rho>')\<close>
-    \<open>agrees \<theta>' gt\<close> \<open>agrees \<rho>' gr\<close>
-    by auto
-  then show ?case using TC.prems by auto
-next
-  case (TFn t\<^sub>1 e t\<^sub>2)
-  from TFn.prems obtain \<theta>\<^sub>1 \<rho>\<^sub>1 where
-    m\<^sub>1: \<open>tmatch t\<^sub>1 (bsubst gt gr t\<^sub>1) (\<theta>, \<rho>) = Some (\<theta>\<^sub>1, \<rho>\<^sub>1)\<close> and
-    c\<^sub>1t: \<open>agrees \<theta>\<^sub>1 gt\<close> and c\<^sub>1r: \<open>agrees \<rho>\<^sub>1 gr\<close>
-    using TFn.IH[of \<open>bsubst gt gr t\<^sub>1\<close> \<theta> \<rho>] by auto
-  from rmatch_complete[of gr e \<open>brsubst gr e\<close> \<rho>\<^sub>1] c\<^sub>1r obtain \<rho>\<^sub>2 where
-    m\<^sub>2: \<open>rmatch e (brsubst gr e) \<rho>\<^sub>1 = Some \<rho>\<^sub>2\<close> and
-    c\<^sub>2r: \<open>agrees \<rho>\<^sub>2 gr\<close>
-    by auto
-  from TFn.IH[of \<open>bsubst gt gr t\<^sub>2\<close> \<theta>\<^sub>1 \<rho>\<^sub>2] c\<^sub>1t c\<^sub>2r obtain \<theta>\<^sub>3 \<rho>\<^sub>3 where
-    m\<^sub>3: \<open>tmatch t\<^sub>2 (bsubst gt gr t\<^sub>2) (\<theta>\<^sub>1, \<rho>\<^sub>2) = Some (\<theta>\<^sub>3, \<rho>\<^sub>3)\<close> and
-    c\<^sub>3: \<open>agrees \<theta>\<^sub>3 gt\<close> \<open>agrees \<rho>\<^sub>3 gr\<close>
-    by auto
-  show ?case using TFn.prems m\<^sub>1 m\<^sub>2 m\<^sub>3 c\<^sub>3 by auto
-next
-  case (TDep i sg T e t)
-  from rmatch_complete[of gr e \<open>brsubst gr e\<close> \<rho>] TDep.prems obtain \<rho>\<^sub>1 where
-    m\<^sub>1: \<open>rmatch e (brsubst gr e) \<rho> = Some \<rho>\<^sub>1\<close> and
-    c\<^sub>1: \<open>agrees \<rho>\<^sub>1 gr\<close>
-    by auto
-  from TDep.IH[of \<open>bsubst gt gr t\<close> \<theta> \<rho>\<^sub>1] TDep.prems c\<^sub>1 obtain \<theta>\<^sub>2 \<rho>\<^sub>2 where
-    m\<^sub>2: \<open>tmatch t (bsubst gt gr t) (\<theta>, \<rho>\<^sub>1) = Some (\<theta>\<^sub>2, \<rho>\<^sub>2)\<close> and
-    c\<^sub>2: \<open>agrees \<theta>\<^sub>2 gt\<close> \<open>agrees \<rho>\<^sub>2 gr\<close>
-    by auto
-  show ?case using TDep.prems m\<^sub>1 m\<^sub>2 c\<^sub>2 by auto
-next
-  case (TApp t\<^sub>1 t\<^sub>2)
-  from TApp.prems obtain \<theta>\<^sub>1 \<rho>\<^sub>1 where
-    m\<^sub>1: \<open>tmatch t\<^sub>1 (bsubst gt gr t\<^sub>1) (\<theta>, \<rho>) = Some (\<theta>\<^sub>1, \<rho>\<^sub>1)\<close> and
-    c\<^sub>1: \<open>agrees \<theta>\<^sub>1 gt\<close> \<open>agrees \<rho>\<^sub>1 gr\<close>
-    using TApp.IH[of \<open>bsubst gt gr t\<^sub>1\<close> \<theta> \<rho>] by auto
-  from TApp.IH[of \<open>bsubst gt gr t\<^sub>2\<close> \<theta>\<^sub>1 \<rho>\<^sub>1] TApp.prems c\<^sub>1 obtain \<theta>\<^sub>2 \<rho>\<^sub>2 where
-    m\<^sub>2: \<open>tmatch t\<^sub>2 (bsubst gt gr t\<^sub>2) (\<theta>\<^sub>1, \<rho>\<^sub>1) = Some (\<theta>\<^sub>2, \<rho>\<^sub>2)\<close> and
-    c\<^sub>2: \<open>agrees \<theta>\<^sub>2 gt\<close> \<open>agrees \<rho>\<^sub>2 gr\<close>
-    by auto
-  show ?case using TApp.prems m\<^sub>1 m\<^sub>2 c\<^sub>2 by auto
-next
-  case (TEv l s t)
-  from TEv.prems obtain \<theta>\<^sub>1 \<rho>\<^sub>1 where
-    m\<^sub>1: \<open>tmatch l (bsubst gt gr l) (\<theta>, \<rho>) = Some (\<theta>\<^sub>1, \<rho>\<^sub>1)\<close> and
-    c\<^sub>1: \<open>agrees \<theta>\<^sub>1 gt\<close> \<open>agrees \<rho>\<^sub>1 gr\<close>
-    using TEv.IH[of \<open>bsubst gt gr l\<close> \<theta> \<rho>] by auto
-  from TEv.IH[of \<open>bsubst gt gr s\<close> \<theta>\<^sub>1 \<rho>\<^sub>1] TEv.prems c\<^sub>1 obtain \<theta>\<^sub>2 \<rho>\<^sub>2 where
-    m\<^sub>2: \<open>tmatch s (bsubst gt gr s) (\<theta>\<^sub>1, \<rho>\<^sub>1) = Some (\<theta>\<^sub>2, \<rho>\<^sub>2)\<close> and
-    c\<^sub>2: \<open>agrees \<theta>\<^sub>2 gt\<close> \<open>agrees \<rho>\<^sub>2 gr\<close>
-    by auto
-  from TEv.IH[of \<open>bsubst gt gr t\<close> \<theta>\<^sub>2 \<rho>\<^sub>2] TEv.prems c\<^sub>2 obtain \<theta>\<^sub>3 \<rho>\<^sub>3 where
-    m\<^sub>3: \<open>tmatch t (bsubst gt gr t) (\<theta>\<^sub>2, \<rho>\<^sub>2) = Some (\<theta>\<^sub>3, \<rho>\<^sub>3)\<close> and
-    c\<^sub>3: \<open>agrees \<theta>\<^sub>3 gt\<close> \<open>agrees \<rho>\<^sub>3 gr\<close>
-    by auto
-  show ?case using TEv.prems m\<^sub>1 m\<^sub>2 m\<^sub>3 c\<^sub>3 by auto
-next
-  case (TAct l K e t)
-  from TAct.prems obtain \<theta>\<^sub>1 \<rho>\<^sub>1 where
-    m\<^sub>1: \<open>tmatch l (bsubst gt gr l) (\<theta>, \<rho>) = Some (\<theta>\<^sub>1, \<rho>\<^sub>1)\<close> and
-    c\<^sub>1: \<open>agrees \<theta>\<^sub>1 gt\<close> \<open>agrees \<rho>\<^sub>1 gr\<close>
-    using TAct.IH[of \<open>bsubst gt gr l\<close> \<theta> \<rho>] by auto
-  from rmatch_complete[of gr e \<open>brsubst gr e\<close> \<rho>\<^sub>1] c\<^sub>1 obtain \<rho>\<^sub>2 where
-    m\<^sub>2: \<open>rmatch e (brsubst gr e) \<rho>\<^sub>1 = Some \<rho>\<^sub>2\<close> and
-    c\<^sub>2: \<open>agrees \<rho>\<^sub>2 gr\<close>
-    by auto
-  from TAct.IH[of \<open>bsubst gt gr t\<close> \<theta>\<^sub>1 \<rho>\<^sub>2] TAct.prems c\<^sub>1 c\<^sub>2 obtain \<theta>\<^sub>3 \<rho>\<^sub>3 where
-    m\<^sub>3: \<open>tmatch t (bsubst gt gr t) (\<theta>\<^sub>1, \<rho>\<^sub>2) = Some (\<theta>\<^sub>3, \<rho>\<^sub>3)\<close> and
-    c\<^sub>3: \<open>agrees \<theta>\<^sub>3 gt\<close> \<open>agrees \<rho>\<^sub>3 gr\<close>
-    by auto
-  show ?case using TAct.prems m\<^sub>1 m\<^sub>2 m\<^sub>3 c\<^sub>3 by auto
-qed auto
-
-fun imatch :: \<open>scheme \<Rightarrow> kty \<Rightarrow> bool\<close> where
-  \<open>imatch (Sch t) \<tau> =
-     (case tmatch t \<tau> (Map.empty, Map.empty) of
-        None \<Rightarrow> False
-      | Some (\<theta>', \<rho>') \<Rightarrow>
-          btv \<tau> = {} \<and> brv \<tau> = {} \<and>
-          (\<forall>a \<in> btv t. case \<theta>' a of Some u \<Rightarrow> taclosed u | None \<Rightarrow> True))\<close>
-| \<open>imatch (Mono t) \<tau> \<longleftrightarrow> \<tau> = t\<close>
-
-theorem imatch_sinst: \<open>imatch \<sigma> \<tau> \<longleftrightarrow> \<sigma> \<succeq> \<tau>\<close>
-proof (cases \<sigma>)
-  case (Sch t)
-  show ?thesis
-  proof
-    assume \<open>imatch \<sigma> \<tau>\<close>
-    then obtain \<theta>' \<rho>' where m: \<open>tmatch t \<tau> (Map.empty, Map.empty) = Some (\<theta>', \<rho>')\<close>
-      and bf: \<open>btv \<tau> = {}\<close> \<open>brv \<tau> = {}\<close>
-      and im: \<open>\<forall>a \<in> btv t. case \<theta>' a of Some u \<Rightarrow> taclosed u | None \<Rightarrow> True\<close>
-      unfolding Sch by (auto split: option.splits)
-    have e: \<open>bsubst (mk_btsub \<theta>') (mk_brsub \<rho>') t = \<tau>\<close>
-      using tmatch_sound[OF m map_le_refl map_le_refl] .
-    define \<theta>\<^sub>c where \<open>\<theta>\<^sub>c = (\<lambda>a. if a \<in> btv t then mk_btsub \<theta>' a else TB a)\<close>
-    have \<open>bsubst \<theta>\<^sub>c (mk_brsub \<rho>') t = \<tau>\<close>
-      unfolding e[symmetric] by (rule bsubst_cong_eq) (simp_all add: \<theta>\<^sub>c_def)
-    moreover have \<open>taclosed (\<theta>\<^sub>c a)\<close> for a
-    proof (cases \<open>a \<in> btv t\<close>)
-      case True
-      show ?thesis
-      proof (cases \<open>\<theta>' a\<close>)
-        case (Some u)
-        then show ?thesis using True bspec[OF im True] by (simp add: \<theta>\<^sub>c_def mk_btsub_def)
-      qed (simp add: \<theta>\<^sub>c_def mk_btsub_def)
-    qed (simp add: \<theta>\<^sub>c_def)
-    ultimately show \<open>\<sigma> \<succeq> \<tau>\<close> using bf unfolding Sch sinst_Sch by blast
-  next
-    assume \<open>\<sigma> \<succeq> \<tau>\<close>
-    then obtain gt gr where \<open>bsubst gt gr t = \<tau>\<close> and bf: \<open>btv \<tau> = {}\<close> \<open>brv \<tau> = {}\<close>
-      and im: \<open>\<forall>a. taclosed (gt a)\<close> unfolding Sch sinst_Sch by blast
-    then show \<open>imatch \<sigma> \<tau>\<close>
-      using tmatch_complete[of gt gr t \<tau> Map.empty Map.empty] im unfolding Sch
-      by (fastforce split: option.splits)
-  qed
-qed simp
-
-lemma imatch_sinst'[code_unfold]: \<open>\<sigma> \<succeq> \<tau> \<longleftrightarrow> imatch \<sigma> \<tau>\<close>
-  by (simp add: imatch_sinst)
+  case Cons
+  then show ?case by (cases us) simp_all
+qed
 
 end

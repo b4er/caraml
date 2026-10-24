@@ -663,9 +663,9 @@ where
 
 | \<open>infer_cls uf B A pd nm \<tau>\<^sub>0 targs [] n = Some (sid, [], \<tau>\<^sub>0, pd, n)\<close>
 | \<open>infer_cls uf B A pd nm \<tau>\<^sub>0 targs (HOp opn ps k b # cls) n =
-     (case (tlookup B [n_txt opn], targs) of
-        (Some (TEop l eps \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0), TC c args) \<Rightarrow>
-          (if c = tuple_ty (length eps) \<and> length args = length eps then
+     (case (tlookup B [n_txt opn], untuple targs) of
+        (Some (TEop l eps \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0), Some args) \<Rightarrow>
+          (if length args = length eps then
           (let \<tau>\<^sub>1 = op_inst eps args \<tau>\<^sub>1\<^sub>0; \<tau>\<^sub>2 = op_inst eps args \<tau>\<^sub>2\<^sub>0 in
           infer_pats uf B ps n \<bind> (\<lambda>(sp, \<tau>s, \<Gamma>, n\<^sub>1).
             uni uf (fn_ty \<tau>s) (sapp sp \<tau>\<^sub>1) n\<^sub>1 \<bind> (\<lambda>(s\<^sub>1, n\<^sub>2).

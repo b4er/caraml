@@ -1070,6 +1070,11 @@ definition con_clause :: \<open>tenv \<Rightarrow> nat \<Rightarrow> name \<Righ
            | _ \<Rightarrow> False)
       | None \<Rightarrow> False)\<close>
 
+text \<open>Exhaustiveness: a clause list covers a type when a clause is irrefutable
+  or the type is a datatype each of whose constructors has a clause. A record
+  type, tuples included, is covered only by an irrefutable clause, that is a
+  tuple pattern of irrefutable components.\<close>
+
 definition covers :: \<open>tenv \<Rightarrow> kty \<Rightarrow> mpat list \<Rightarrow> bool\<close> where
   \<open>covers B \<tau> ps \<longleftrightarrow>
      list_ex (irrefutable B) ps \<or>
@@ -1570,7 +1575,14 @@ fun tsigs :: \<open>kty \<Rightarrow> name set\<close> where
 | \<open>tsigs (TDep i sg m e t) = sig_key sg \<union> tsigs t\<close>
 | \<open>tsigs (TEv l s t) = tsigs l \<union> tsigs s \<union> tsigs t\<close>
 | \<open>tsigs (TAct l K e t) = tsigs l \<union> tsigs t\<close>
+| \<open>tsigs (TRCons l t r) = tsigs t \<union> tsigs r\<close>
 | \<open>tsigs t = {}\<close>
+
+lemma fpull_tsigs: \<open>fpull l u = Some (t', r') \<Longrightarrow> tsigs u = tsigs t' \<union> tsigs r'\<close>
+  by (rule fpull_set) simp_all
+
+lemma tsigs_tuple_from[simp]: \<open>tsigs (tuple_from i ts) = \<Union>(set (map tsigs ts))\<close>
+  by (induction ts arbitrary: i) simp_all
 
 fun tsigs_sch :: \<open>scheme \<Rightarrow> name set\<close> where
   \<open>tsigs_sch (Sch t) = tsigs t\<close>

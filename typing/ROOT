@@ -4,6 +4,7 @@ session CaraML_Typing = CaraML_Core +
   options [document = false, threads = 4]
   theories
     Types
+    Matching
     Basis
     Unify
     Desugar

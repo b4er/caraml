@@ -503,6 +503,22 @@ next
   case (kunify_Cons_TAct_TAct f l T e u l' T' g w cs n)
   then show ?case
     using runify_mono by (fastforce split: option.split_asm if_split_asm dest: order_trans)
+next
+  case (kunify_Cons_TRCons_TRCons f l u r l' w r' cs n)
+  show ?case
+  proof (cases \<open>fpull l (TRCons l' w r')\<close>)
+    case (Some p)
+    then show ?thesis
+      using kunify_Cons_TRCons_TRCons.IH kunify_Cons_TRCons_TRCons.prems by (cases p) auto
+  next
+    case None
+    then obtain b where tl: \<open>rtail (TRCons l' w r') = TV b\<close> and ne: \<open>TV b \<noteq> rtail r\<close> and
+      ku: \<open>kunify f ((TV b, TRCons l (TV n) (TV (Suc n))) # (TRCons l u r, TRCons l' w r') # cs)
+                    (Suc (Suc n)) = Some (\<theta>, \<rho>, n')\<close>
+      using kunify_Cons_TRCons_TRCons.prems by (auto split: kty.splits if_split_asm)
+    have \<open>Suc (Suc n) \<le> n'\<close> using kunify_Cons_TRCons_TRCons.IH None tl ne ku by blast
+    then show ?thesis by simp
+  qed
 qed (auto split: if_split_asm option.split_asm)
 
 lemma unis_mono: \<open>unis f cs n = Some (s, n') \<Longrightarrow> n \<le> n'\<close>
@@ -600,14 +616,16 @@ lemma runify_range:
   using runify_sconf[OF assms, of \<open>{}\<close>] unfolding sconf_def
   by (cases \<open>v \<in> frv_row r\<^sub>1 \<union> frv_row r\<^sub>2 \<union> {n ..< n'}\<close>) auto
 
-text \<open>Type unification binds only variables of its constraints, and its
-  rows only those and the fresh ones.\<close>
+text \<open>Type unification binds only variables of its constraints and the fresh
+  ones it mints: record unification mints type variables, row unification row
+  variables.\<close>
 
 lemma
   shows kunify_sconf: \<open>kunify f cs n = Some (\<theta>, \<rho>, n') \<Longrightarrow>
-      sconf (\<theta>, \<rho>) (ftv_cs cs) (frv_cs cs \<union> {n ..< n'})\<close>
+      sconf (\<theta>, \<rho>) (ftv_cs cs \<union> {n ..< n'}) (frv_cs cs \<union> {n ..< n'})\<close>
     and kbind_sconf: \<open>kbind f a u cs n = Some (\<theta>, \<rho>, n') \<Longrightarrow>
-      sconf (\<theta>, \<rho>) (insert a (ftv u \<union> ftv_cs cs)) (frv u \<union> frv_cs cs \<union> {n ..< n'})\<close>
+      sconf (\<theta>, \<rho>) (insert a (ftv u \<union> ftv_cs cs) \<union> {n ..< n'})
+        (frv u \<union> frv_cs cs \<union> {n ..< n'})\<close>
 proof (induction f cs n and f a u cs n
        arbitrary: \<theta> \<rho> n' and \<theta> \<rho> n' rule: kunify_induct)
   case (kunify_Cons_TC_TC f c ts c' ts' cs n)
@@ -627,15 +645,15 @@ next
     \<theta>: \<open>\<theta> = \<theta>\<^sub>1\<close> and \<rho>: \<open>\<rho> = (\<lambda>v. rsubst \<rho>\<^sub>1 (mk_rsub \<rho>m v))\<close>
     by (auto split: option.split_asm)
   have nn: \<open>n \<le> n\<^sub>1\<close> \<open>n\<^sub>1 \<le> n'\<close> using runify_mono[OF rm] kunify_mono[OF ku] by simp_all
-  define V where \<open>V = ftv_cs ((TFn u\<^sub>1 e u\<^sub>2, TFn w\<^sub>1 g w\<^sub>2) # cs)\<close>
+  define V where \<open>V = ftv_cs ((TFn u\<^sub>1 e u\<^sub>2, TFn w\<^sub>1 g w\<^sub>2) # cs) \<union> {n ..< n'}\<close>
   define R where \<open>R = frv_cs ((TFn u\<^sub>1 e u\<^sub>2, TFn w\<^sub>1 g w\<^sub>2) # cs) \<union> {n ..< n'}\<close>
   have s1: \<open>sconf (TV, mk_rsub \<rho>m) V R\<close>
     by (rule sconf_mono[OF runify_sconf[OF rm, of V]]) (use nn in \<open>auto simp: R_def\<close>)
   have s2: \<open>sconf (\<theta>\<^sub>1, \<rho>\<^sub>1) V R\<close>
   proof (rule sconf_mono[OF kunify_Cons_TFn_TFn.IH[OF rm _ ku]])
     show \<open>ftv_cs (map (\<lambda>(x, y). (tsubst TV (mk_rsub \<rho>m) x, tsubst TV (mk_rsub \<rho>m) y))
-                      ((u\<^sub>1, w\<^sub>1) # (u\<^sub>2, w\<^sub>2) # cs)) \<subseteq> V\<close>
-      unfolding V_def ftv_cs_map_TV by auto
+                      ((u\<^sub>1, w\<^sub>1) # (u\<^sub>2, w\<^sub>2) # cs)) \<union> {n\<^sub>1 ..< n'} \<subseteq> V\<close>
+      unfolding V_def ftv_cs_map_TV using nn by auto
     have \<open>frv_row (mk_rsub \<rho>m v) \<subseteq> R\<close> if \<open>v \<in> frv_cs ((u\<^sub>1, w\<^sub>1) # (u\<^sub>2, w\<^sub>2) # cs)\<close> for v
       using runify_range[OF rm, of v] that nn unfolding R_def by (auto simp: frv_cs_def)
     then show \<open>frv_cs (map (\<lambda>(x, y). (tsubst TV (mk_rsub \<rho>m) x, tsubst TV (mk_rsub \<rho>m) y))
@@ -655,20 +673,21 @@ next
     \<theta>: \<open>\<theta> = \<theta>\<^sub>1\<close> and \<rho>: \<open>\<rho> = (\<lambda>v. rsubst \<rho>\<^sub>1 (mk_rsub \<rho>m v))\<close>
     by (auto split: option.split_asm if_split_asm)
   have nn: \<open>n \<le> n\<^sub>1\<close> \<open>n\<^sub>1 \<le> n'\<close> using runify_mono[OF rm] kunify_mono[OF ku] by simp_all
-  define V where \<open>V = ftv_cs ((TDep i sg T e u, TDep i' sg' T' g w) # cs)\<close>
+  define V where \<open>V = ftv_cs ((TDep i sg T e u, TDep i' sg' T' g w) # cs) \<union> {n ..< n'}\<close>
   define R where \<open>R = frv_cs ((TDep i sg T e u, TDep i' sg' T' g w) # cs) \<union> {n ..< n'}\<close>
   have s1: \<open>sconf (TV, mk_rsub \<rho>m) V R\<close>
     by (rule sconf_mono[OF runify_sconf[OF rm, of V]]) (use nn in \<open>auto simp: R_def\<close>)
   have IH: \<open>sconf (\<theta>\<^sub>1, \<rho>\<^sub>1)
-      (ftv_cs (map (\<lambda>(x, y). (tsubst TV (mk_rsub \<rho>m) x, tsubst TV (mk_rsub \<rho>m) y)) ((u, w) # cs)))
+      (ftv_cs (map (\<lambda>(x, y). (tsubst TV (mk_rsub \<rho>m) x, tsubst TV (mk_rsub \<rho>m) y)) ((u, w) # cs))
+        \<union> {n\<^sub>1 ..< n'})
       (frv_cs (map (\<lambda>(x, y). (tsubst TV (mk_rsub \<rho>m) x, tsubst TV (mk_rsub \<rho>m) y)) ((u, w) # cs))
         \<union> {n\<^sub>1 ..< n'})\<close>
     using kunify_Cons_TDep_TDep.IH[OF _ rm _ ku] eq rm by fastforce
   have s2: \<open>sconf (\<theta>\<^sub>1, \<rho>\<^sub>1) V R\<close>
   proof (rule sconf_mono[OF IH])
     show \<open>ftv_cs (map (\<lambda>(x, y). (tsubst TV (mk_rsub \<rho>m) x, tsubst TV (mk_rsub \<rho>m) y))
-                      ((u, w) # cs)) \<subseteq> V\<close>
-      unfolding V_def ftv_cs_map_TV by auto
+                      ((u, w) # cs)) \<union> {n\<^sub>1 ..< n'} \<subseteq> V\<close>
+      unfolding V_def ftv_cs_map_TV using nn by auto
     have \<open>frv_row (mk_rsub \<rho>m v) \<subseteq> R\<close> if \<open>v \<in> frv_cs ((u, w) # cs)\<close> for v
       using runify_range[OF rm, of v] that nn unfolding R_def by (auto simp: frv_cs_def)
     then show \<open>frv_cs (map (\<lambda>(x, y). (tsubst TV (mk_rsub \<rho>m) x, tsubst TV (mk_rsub \<rho>m) y))
@@ -688,21 +707,21 @@ next
     \<theta>: \<open>\<theta> = \<theta>\<^sub>1\<close> and \<rho>: \<open>\<rho> = (\<lambda>v. rsubst \<rho>\<^sub>1 (mk_rsub \<rho>m v))\<close>
     by (auto split: option.split_asm if_split_asm)
   have nn: \<open>n \<le> n\<^sub>1\<close> \<open>n\<^sub>1 \<le> n'\<close> using runify_mono[OF rm] kunify_mono[OF ku] by simp_all
-  define V where \<open>V = ftv_cs ((TAct l T e u, TAct l' T' g w) # cs)\<close>
+  define V where \<open>V = ftv_cs ((TAct l T e u, TAct l' T' g w) # cs) \<union> {n ..< n'}\<close>
   define R where \<open>R = frv_cs ((TAct l T e u, TAct l' T' g w) # cs) \<union> {n ..< n'}\<close>
   have s1: \<open>sconf (TV, mk_rsub \<rho>m) V R\<close>
     by (rule sconf_mono[OF runify_sconf[OF rm, of V]]) (use nn in \<open>auto simp: R_def\<close>)
   have IH: \<open>sconf (\<theta>\<^sub>1, \<rho>\<^sub>1)
       (ftv_cs (map (\<lambda>(x, y). (tsubst TV (mk_rsub \<rho>m) x, tsubst TV (mk_rsub \<rho>m) y))
-        ((l, l') # (u, w) # cs)))
+        ((l, l') # (u, w) # cs)) \<union> {n\<^sub>1 ..< n'})
       (frv_cs (map (\<lambda>(x, y). (tsubst TV (mk_rsub \<rho>m) x, tsubst TV (mk_rsub \<rho>m) y))
         ((l, l') # (u, w) # cs)) \<union> {n\<^sub>1 ..< n'})\<close>
     using kunify_Cons_TAct_TAct.IH[OF _ rm _ ku] eq rm by fastforce
   have s2: \<open>sconf (\<theta>\<^sub>1, \<rho>\<^sub>1) V R\<close>
   proof (rule sconf_mono[OF IH])
     show \<open>ftv_cs (map (\<lambda>(x, y). (tsubst TV (mk_rsub \<rho>m) x, tsubst TV (mk_rsub \<rho>m) y))
-                      ((l, l') # (u, w) # cs)) \<subseteq> V\<close>
-      unfolding V_def ftv_cs_map_TV by auto
+                      ((l, l') # (u, w) # cs)) \<union> {n\<^sub>1 ..< n'} \<subseteq> V\<close>
+      unfolding V_def ftv_cs_map_TV using nn by auto
     have \<open>frv_row (mk_rsub \<rho>m v) \<subseteq> R\<close> if \<open>v \<in> frv_cs ((l, l') # (u, w) # cs)\<close> for v
       using runify_range[OF rm, of v] that nn unfolding R_def by (auto simp: frv_cs_def)
     then show \<open>frv_cs (map (\<lambda>(x, y). (tsubst TV (mk_rsub \<rho>m) x, tsubst TV (mk_rsub \<rho>m) y))
@@ -718,7 +737,7 @@ next
   proof (cases \<open>u = TV a\<close>)
     case True
     with kbind_Suc.prems have ku: \<open>kunify f cs n = Some (\<theta>, \<rho>, n')\<close> by simp
-    from True ku have \<open>sconf (\<theta>, \<rho>) (ftv_cs cs) (frv_cs cs \<union> {n ..< n'})\<close>
+    from True ku have \<open>sconf (\<theta>, \<rho>) (ftv_cs cs \<union> {n ..< n'}) (frv_cs cs \<union> {n ..< n'})\<close>
       by (rule kbind_Suc.IH)
     then show ?thesis by (rule sconf_mono) auto
   next
@@ -734,9 +753,10 @@ next
         \<theta>: \<open>\<theta> = (\<lambda>b. tsubst \<theta>\<^sub>1 \<rho>\<^sub>1 (sing a u b))\<close> and \<rho>: \<open>\<rho> = \<rho>\<^sub>1\<close>
         by (auto split: option.split_asm if_split_asm)
       have nb: \<open>\<not> (a \<in> ftv u \<or> \<not> taclosed u)\<close> using notin fa by simp
-      from notv nb ku have IH: \<open>sconf (\<theta>\<^sub>1, \<rho>\<^sub>1) (ftv_cs ?cs) (frv_cs ?cs \<union> {n ..< n'})\<close>
+      from notv nb ku have IH:
+        \<open>sconf (\<theta>\<^sub>1, \<rho>\<^sub>1) (ftv_cs ?cs \<union> {n ..< n'}) (frv_cs ?cs \<union> {n ..< n'})\<close>
         by (rule kbind_Suc.IH)
-      define V where \<open>V = insert a (ftv u \<union> ftv_cs cs)\<close>
+      define V where \<open>V = insert a (ftv u \<union> ftv_cs cs) \<union> {n ..< n'}\<close>
       define R where \<open>R = frv u \<union> frv_cs cs \<union> {n ..< n'}\<close>
       have s1: \<open>sconf (sing a u, RV) V R\<close> by (rule sconf_sing) (auto simp: V_def R_def)
       have s2: \<open>sconf (\<theta>\<^sub>1, \<rho>\<^sub>1) V R\<close>
@@ -747,14 +767,44 @@ next
       then show ?thesis unfolding V_def R_def \<theta> \<rho> by simp
     qed
   qed
+next
+  case (kunify_Cons_TRCons_TRCons f l u r l' w r' cs n)
+  show ?case
+  proof (cases \<open>fpull l (TRCons l' w r')\<close>)
+    case (Some p)
+    then obtain w' r'' where p: \<open>fpull l (TRCons l' w r') = Some (w', r'')\<close> by (cases p) auto
+    with kunify_Cons_TRCons_TRCons.prems have
+      ku: \<open>kunify f ((u, w') # (r, r'') # cs) n = Some (\<theta>, \<rho>, n')\<close> by simp
+    have IH: \<open>sconf (\<theta>, \<rho>) (ftv_cs ((u, w') # (r, r'') # cs) \<union> {n ..< n'})
+                (frv_cs ((u, w') # (r, r'') # cs) \<union> {n ..< n'})\<close>
+      by (rule kunify_Cons_TRCons_TRCons.IH(2)[OF p refl ku])
+    show ?thesis
+      by (rule sconf_mono[OF IH]) (use fpull_ftv[OF p] fpull_frv[OF p] in auto)
+  next
+    case None
+    then obtain b where tl: \<open>rtail (TRCons l' w r') = TV b\<close> and ne: \<open>TV b \<noteq> rtail r\<close> and
+      ku: \<open>kunify f ((TV b, TRCons l (TV n) (TV (Suc n))) # (TRCons l u r, TRCons l' w r') # cs)
+                    (Suc (Suc n)) = Some (\<theta>, \<rho>, n')\<close>
+      using kunify_Cons_TRCons_TRCons.prems by (auto split: kty.splits if_split_asm)
+    have IH: \<open>sconf (\<theta>, \<rho>)
+        (ftv_cs ((TV b, TRCons l (TV n) (TV (Suc n))) # (TRCons l u r, TRCons l' w r') # cs)
+           \<union> {Suc (Suc n) ..< n'})
+        (frv_cs ((TV b, TRCons l (TV n) (TV (Suc n))) # (TRCons l u r, TRCons l' w r') # cs)
+           \<union> {Suc (Suc n) ..< n'})\<close>
+      by (rule kunify_Cons_TRCons_TRCons.IH(1)[OF None tl ne ku])
+    have b: \<open>b \<in> ftv (TRCons l' w r')\<close> using rtail_TV_ftv[OF tl] .
+    have nn: \<open>Suc (Suc n) \<le> n'\<close> using kunify_mono[OF ku] .
+    show ?thesis by (rule sconf_mono[OF IH]) (use b nn in auto)
+  qed
 qed (auto simp: sconf_sid[unfolded sid_def] Un_ac split: if_split_asm option.split_asm)
 
 lemma unis_sconf:
-  \<open>unis f cs n = Some (s, n') \<Longrightarrow> sconf s (ftv_cs cs) (frv_cs cs \<union> {n ..< n'})\<close>
+  \<open>unis f cs n = Some (s, n') \<Longrightarrow> sconf s (ftv_cs cs \<union> {n ..< n'}) (frv_cs cs \<union> {n ..< n'})\<close>
   using kunify_sconf by (auto simp: unis_def split: option.split_asm)
 
 lemma uni_sconf:
-  \<open>uni f t\<^sub>1 t\<^sub>2 n = Some (s, n') \<Longrightarrow> sconf s (ftv t\<^sub>1 \<union> ftv t\<^sub>2) (frv t\<^sub>1 \<union> frv t\<^sub>2 \<union> {n ..< n'})\<close>
+  \<open>uni f t\<^sub>1 t\<^sub>2 n = Some (s, n') \<Longrightarrow>
+     sconf s (ftv t\<^sub>1 \<union> ftv t\<^sub>2 \<union> {n ..< n'}) (frv t\<^sub>1 \<union> frv t\<^sub>2 \<union> {n ..< n'})\<close>
   using unis_sconf[of f \<open>[(t\<^sub>1, t\<^sub>2)]\<close> n s n'] by (simp add: uni_def Un_assoc)
 
 text \<open>Hygiene of the abstract types: the unifier of constraints whose free
@@ -830,18 +880,18 @@ next
     rm: \<open>runify n e g = Some (\<rho>m, n\<^sub>1)\<close> and
     ku: \<open>kunify f (map (\<lambda>(x, y). (tsubst TV (mk_rsub \<rho>m) x, tsubst TV (mk_rsub \<rho>m) y))
                        ((l, l') # (u, w) # cs)) n\<^sub>1 = Some (\<theta>, \<rho>\<^sub>1, n')\<close> and
-    chk: \<open>\<forall>a \<in> ftv_cs ((l, l') # (u, w) # cs). set T \<inter> ktv (\<theta> a) = {}\<close>
+    chk: \<open>\<forall>a \<in> ftv_cs ((l, l') # (u, w) # cs) \<union> {n\<^sub>1 ..< n'}. set T \<inter> ktv (\<theta> a) = {}\<close>
     by (auto split: option.split_asm if_split_asm)
   have \<open>ktv_cs ((TAct l T e u, TAct l' T' g w) # cs) \<subseteq> FK\<close> by fact
   then have IH: \<open>\<forall>a. ktv (\<theta> a) \<subseteq> FK \<union> set T\<close>
     using kunify_Cons_TAct_TAct.IH[of _ \<rho>m n\<^sub>1 \<theta> \<rho>\<^sub>1 n' \<open>FK \<union> set T\<close>] eq rm ku
     by (auto simp: ktv_cs_map_TV) blast
-  have id: \<open>\<theta> a = TV a\<close> if \<open>a \<notin> ftv_cs ((l, l') # (u, w) # cs)\<close> for a
+  have id: \<open>\<theta> a = TV a\<close> if \<open>a \<notin> ftv_cs ((l, l') # (u, w) # cs) \<union> {n\<^sub>1 ..< n'}\<close> for a
     using kunify_sconf[OF ku] that unfolding sconf_def ftv_cs_map_TV by simp
   show ?case
   proof (rule allI)
     fix a show \<open>ktv (\<theta> a) \<subseteq> FK\<close>
-    proof (cases \<open>a \<in> ftv_cs ((l, l') # (u, w) # cs)\<close>)
+    proof (cases \<open>a \<in> ftv_cs ((l, l') # (u, w) # cs) \<union> {n\<^sub>1 ..< n'}\<close>)
       case True
       then show ?thesis using IH[rule_format, of a] chk[rule_format, OF True] by blast
     qed (simp add: id)
@@ -873,6 +923,28 @@ next
       have \<open>ktv (sing a u b) \<subseteq> FK\<close> for b using \<open>ktv u \<subseteq> FK\<close> ktv_sing[of a u b] by blast
       then show ?thesis unfolding \<theta> by (intro allI ktv_tsubst_sub) (use IH in auto)
     qed
+  qed
+next
+  case (kunify_Cons_TRCons_TRCons f l u r l' w r' cs n)
+  show ?case
+  proof (cases \<open>fpull l (TRCons l' w r')\<close>)
+    case (Some p)
+    then obtain w' r'' where p: \<open>fpull l (TRCons l' w r') = Some (w', r'')\<close> by (cases p) auto
+    with kunify_Cons_TRCons_TRCons.prems have
+      ku: \<open>kunify f ((u, w') # (r, r'') # cs) n = Some (\<theta>, \<rho>, n')\<close> by simp
+    have \<open>ktv_cs ((TRCons l u r, TRCons l' w r') # cs) \<subseteq> FK\<close> by fact
+    then have k: \<open>ktv_cs ((u, w') # (r, r'') # cs) \<subseteq> FK\<close> using fpull_ktv[OF p] by auto
+    show ?thesis by (rule kunify_Cons_TRCons_TRCons.IH(2)[OF p refl ku k])
+  next
+    case None
+    then obtain b where tl: \<open>rtail (TRCons l' w r') = TV b\<close> and ne: \<open>TV b \<noteq> rtail r\<close> and
+      ku: \<open>kunify f ((TV b, TRCons l (TV n) (TV (Suc n))) # (TRCons l u r, TRCons l' w r') # cs)
+                    (Suc (Suc n)) = Some (\<theta>, \<rho>, n')\<close>
+      using kunify_Cons_TRCons_TRCons.prems by (auto split: kty.splits if_split_asm)
+    have \<open>ktv_cs ((TRCons l u r, TRCons l' w r') # cs) \<subseteq> FK\<close> by fact
+    then have k: \<open>ktv_cs ((TV b, TRCons l (TV n) (TV (Suc n))) #
+                          (TRCons l u r, TRCons l' w r') # cs) \<subseteq> FK\<close> by simp
+    show ?thesis by (rule kunify_Cons_TRCons_TRCons.IH(1)[OF None tl ne ku k])
   qed
 qed (auto split: if_split_asm option.split_asm)
 
@@ -913,7 +985,20 @@ lemma bfree_simps[simp]:
   \<open>bfree (TDep i sg m e t) \<longleftrightarrow> brv_row e = {} \<and> bfree t\<close>
   \<open>bfree (TEv l s t) \<longleftrightarrow> bfree l \<and> bfree s \<and> bfree t\<close>
   \<open>bfree (TAct l K e t) \<longleftrightarrow> bfree l \<and> brv_row e = {} \<and> bfree t\<close>
+  \<open>bfree TRNil\<close> \<open>bfree (TRCons lb t r) \<longleftrightarrow> bfree t \<and> bfree r\<close>
   by (auto simp: bfree_def)
+
+lemma bfree_tuple_from[simp]: \<open>bfree (tuple_from i ts) \<longleftrightarrow> (\<forall>t \<in> set ts. bfree t)\<close>
+  by (auto simp: bfree_def)
+
+lemma fpull_bfree:
+  assumes p: \<open>fpull l u = Some (t', r')\<close>
+  shows \<open>bfree u \<longleftrightarrow> bfree t' \<and> bfree r'\<close>
+proof -
+  have \<open>btv u = btv t' \<union> btv r'\<close> by (rule fpull_set[OF _ p]) simp
+  moreover have \<open>brv u = brv t' \<union> brv r'\<close> by (rule fpull_set[OF _ p]) simp
+  ultimately show ?thesis by (auto simp: bfree_def)
+qed
 
 lemma brv_row_mk_row[simp]: \<open>brv_row (mk_row xs t) = brv_row t\<close>
 proof -
@@ -1036,6 +1121,28 @@ next
         unfolding \<theta> \<rho> using IH \<open>bfree u\<close> bfree_sapp[of \<open>(\<theta>\<^sub>1, \<rho>\<^sub>1)\<close>] fa
         by (auto simp: bfree_sub_def sing_def intro: taok_tsubst)
     qed
+  qed
+next
+  case (kunify_Cons_TRCons_TRCons f l u r l' w r' cs n)
+  show ?case
+  proof (cases \<open>fpull l (TRCons l' w r')\<close>)
+    case (Some p)
+    then obtain w' r'' where p: \<open>fpull l (TRCons l' w r') = Some (w', r'')\<close> by (cases p) auto
+    with kunify_Cons_TRCons_TRCons.prems have
+      ku: \<open>kunify f ((u, w') # (r, r'') # cs) n = Some (\<theta>, \<rho>, n')\<close> by simp
+    have \<open>bfree_cs ((TRCons l u r, TRCons l' w r') # cs)\<close> by fact
+    then have b: \<open>bfree_cs ((u, w') # (r, r'') # cs)\<close> using fpull_bfree[OF p] by simp
+    show ?thesis by (rule kunify_Cons_TRCons_TRCons.IH(2)[OF p refl ku b])
+  next
+    case None
+    then obtain b where tl: \<open>rtail (TRCons l' w r') = TV b\<close> and ne: \<open>TV b \<noteq> rtail r\<close> and
+      ku: \<open>kunify f ((TV b, TRCons l (TV n) (TV (Suc n))) # (TRCons l u r, TRCons l' w r') # cs)
+                    (Suc (Suc n)) = Some (\<theta>, \<rho>, n')\<close>
+      using kunify_Cons_TRCons_TRCons.prems by (auto split: kty.splits if_split_asm)
+    have \<open>bfree_cs ((TRCons l u r, TRCons l' w r') # cs)\<close> by fact
+    then have b: \<open>bfree_cs ((TV b, TRCons l (TV n) (TV (Suc n))) #
+                            (TRCons l u r, TRCons l' w r') # cs)\<close> by simp
+    show ?thesis by (rule kunify_Cons_TRCons_TRCons.IH(1)[OF None tl ne ku b])
   qed
 qed (auto simp: bfree_sub_def bfree_def split: if_split_asm option.split_asm)
 
@@ -1894,7 +2001,8 @@ lemma fresh_ty_TAct:
 lemma fresh_ty_eff_ty: \<open>\<forall>\<tau> \<in> set \<tau>s. fresh_ty ve n n' B \<tau> \<Longrightarrow> fresh_ty ve n n' B (eff_ty l \<tau>s)\<close>
   by (auto simp: fresh_ty_def bfree_def eff_ty_def)
 
-lemma fresh_ty_tuple: \<open>\<forall>\<tau> \<in> set \<tau>s. fresh_ty ve n n' B \<tau> \<Longrightarrow> fresh_ty ve n n' B (tuple \<tau>s)\<close>
+lemma fresh_ty_tuple:
+  \<open>\<forall>\<tau> \<in> set \<tau>s. fresh_ty ve n n' B \<tau> \<Longrightarrow> fresh_ty ve n n' B (tuple_from i \<tau>s)\<close>
   by (auto simp: fresh_ty_def bfree_def)
 
 lemma fresh_ty_foldl_tapp:
@@ -2502,7 +2610,13 @@ lemma fresh_ok_TV: \<open>fresh_ok (TV n) n (Suc n) FK\<close>
 lemma fresh_ok_TC0: \<open>fresh_ok (TC c []) n n' FK\<close>
   by (simp add: fresh_ok_def bfree_def)
 
-lemma fresh_ok_tuple: \<open>\<forall>\<tau> \<in> set \<tau>s. fresh_ok \<tau> n n' FK \<Longrightarrow> fresh_ok (tuple \<tau>s) n n' FK\<close>
+lemma fresh_ok_TRNil[simp]: \<open>fresh_ok TRNil n n' FK\<close>
+  by (simp add: fresh_ok_def bfree_def)
+
+lemma fresh_ok_unit: \<open>fresh_ok unit_ty n n' FK\<close>
+  by simp
+
+lemma fresh_ok_tuple: \<open>\<forall>\<tau> \<in> set \<tau>s. fresh_ok \<tau> n n' FK \<Longrightarrow> fresh_ok (tuple_from i \<tau>s) n n' FK\<close>
   by (auto simp: fresh_ok_def bfree_def)
 
 lemma fresh_ok_list: \<open>fresh_ok \<tau> n n' FK \<Longrightarrow> fresh_ok (TC list_ty [\<tau>]) n n' FK\<close>
@@ -2516,8 +2630,9 @@ proof -
   have le: \<open>n \<le> n'\<close> by (rule unis_mono[OF assms(1)])
   have \<open>sconf s {n\<^sub>0 ..< n'} {n\<^sub>0 ..< n'}\<close>
   proof (rule sconf_mono[OF unis_sconf[OF assms(1)]])
-    show \<open>ftv_cs cs \<subseteq> {n\<^sub>0 ..< n'}\<close>
-      using assms(2) ivl_mono[OF order_refl le, of n\<^sub>0] by blast
+    show \<open>ftv_cs cs \<union> {n ..< n'} \<subseteq> {n\<^sub>0 ..< n'}\<close>
+      using assms(2) ivl_mono[OF order_refl le, of n\<^sub>0] ivl_mono[OF assms(6) order_refl, of n']
+      by blast
     show \<open>frv_cs cs \<union> {n ..< n'} \<subseteq> {n\<^sub>0 ..< n'}\<close>
       using assms(3) ivl_mono[OF order_refl le, of n\<^sub>0] ivl_mono[OF assms(6) order_refl, of n']
       by blast
@@ -2776,7 +2891,7 @@ next
   case (infer_patom_PParen_Nil uf B n)
   then have e: \<open>s = sid\<close> \<open>\<tau> = unit_ty\<close> \<open>\<Gamma> = []\<close> \<open>n' = n\<close>
     by (auto split: Option.bind_split_asm)
-  show ?case unfolding e by (simp add: fresh_ok_TC0)
+  show ?case unfolding e by simp
 next
   case (infer_patom_PParen_Cons_Cons uf B v vb vc n)
   from infer_patom_PParen_Cons_Cons.prems obtain s' \<tau>s \<Gamma>' where

@@ -306,6 +306,28 @@ next
       then show ?thesis unfolding \<theta> by (intro allI tsigs_tsubst_le) (use IH in auto)
     qed
   qed
+next
+  case (kunify_Cons_TRCons_TRCons f l u r l' w r' cs n)
+  show ?case
+  proof (cases \<open>fpull l (TRCons l' w r')\<close>)
+    case (Some p)
+    then obtain w' r'' where p: \<open>fpull l (TRCons l' w r') = Some (w', r'')\<close> by (cases p) auto
+    with kunify_Cons_TRCons_TRCons.prems have
+      ku: \<open>kunify f ((u, w') # (r, r'') # cs) n = Some (\<theta>, \<rho>, n')\<close> by simp
+    have ts: \<open>tsigs_cs ((u, w') # (r, r'') # cs) \<subseteq> X\<close>
+      using kunify_Cons_TRCons_TRCons.prems fpull_tsigs[OF p] by auto
+    show ?thesis by (rule kunify_Cons_TRCons_TRCons.IH(2)[OF p refl ku ts])
+  next
+    case None
+    then obtain b where tl: \<open>rtail (TRCons l' w r') = TV b\<close> and ne: \<open>TV b \<noteq> rtail r\<close> and
+      ku: \<open>kunify f ((TV b, TRCons l (TV n) (TV (Suc n))) # (TRCons l u r, TRCons l' w r') # cs)
+                    (Suc (Suc n)) = Some (\<theta>, \<rho>, n')\<close>
+      using kunify_Cons_TRCons_TRCons.prems by (auto split: kty.splits if_split_asm)
+    have \<open>tsigs_cs ((TV b, TRCons l (TV n) (TV (Suc n))) #
+                     (TRCons l u r, TRCons l' w r') # cs) \<subseteq> X\<close>
+      using kunify_Cons_TRCons_TRCons.prems by simp
+    then show ?thesis by (rule kunify_Cons_TRCons_TRCons.IH(1)[OF None tl ne ku])
+  qed
 qed (auto split: if_split_asm option.split_asm)
 
 lemma unis_shyg: \<open>unis f cs n = Some (s, n') \<Longrightarrow> tsigs_cs cs \<subseteq> X \<Longrightarrow> shyg s X\<close>
@@ -2066,6 +2088,22 @@ next
     next
       case ih2 from TAct show ?case by (rule infer_args.IH) (use ih2 in auto)
     qed (simp add: TAct)
+  next
+    case TRNil
+    show ?thesis
+    proof (rule infer_args_step_sigs[OF infer_args.prems], goal_cases nd ih1 ih2)
+      case ih1 from TRNil ih1 show ?case by (rule infer_args.IH)
+    next
+      case ih2 from TRNil show ?case by (rule infer_args.IH) (use ih2 in auto)
+    qed (simp add: TRNil)
+  next
+    case (TRCons lb t r)
+    show ?thesis
+    proof (rule infer_args_step_sigs[OF infer_args.prems], goal_cases nd ih1 ih2)
+      case ih1 from TRCons ih1 show ?case by (rule infer_args.IH)
+    next
+      case ih2 from TRCons show ?case by (rule infer_args.IH) (use ih2 in auto)
+    qed (simp add: TRCons)
   qed
 next
   case (infer_exps_Cons uf B A pd e es n s es' \<tau>s pd' n')
@@ -2175,14 +2213,15 @@ next
     and Targs: \<open>tsigs targs \<subseteq> X\<close> by blast+
   define eps where \<open>eps sq = (if nm then sappr sq A else canon_row
     (rext (hlabels B cls) (sappr sq A)))\<close> for sq
-  have \<open>\<exists>l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0 c args. tlookup B [n_txt opn] = Some (TEop l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0) \<and>
-          targs = TC c args \<and>
-          c = tuple_ty (length ps\<^sub>e) \<and> length args = length ps\<^sub>e\<close>
+  have \<open>\<exists>l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0 args. tlookup B [n_txt opn] = Some (TEop l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0) \<and>
+          untuple targs = Some args \<and> length args = length ps\<^sub>e\<close>
     using infer_cls_Cons_HOp.prems
-    by (cases \<open>tlookup B [n_txt opn]\<close>; cases targs; simp split: tentry.split_asm if_split_asm)
-  then obtain l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0 c args where lk: \<open>tlookup B [n_txt opn] = Some (TEop l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0)\<close>
-    and ta: \<open>targs = TC c args\<close> and lc: \<open>c = tuple_ty (length ps\<^sub>e)\<close> \<open>length args = length ps\<^sub>e\<close>
+    by (cases \<open>tlookup B [n_txt opn]\<close>; cases \<open>untuple targs\<close>;
+        simp split: tentry.split_asm if_split_asm)
+  then obtain l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0 args where lk: \<open>tlookup B [n_txt opn] = Some (TEop l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0)\<close>
+    and ta: \<open>untuple targs = Some args\<close> and lc: \<open>length args = length ps\<^sub>e\<close>
       by blast
+  have ta': \<open>targs = tuple args\<close> using ta by simp
   define \<tau>\<^sub>1 where \<open>\<tau>\<^sub>1 = op_inst ps\<^sub>e args \<tau>\<^sub>1\<^sub>0\<close>
   define \<tau>\<^sub>2 where \<open>\<tau>\<^sub>2 = op_inst ps\<^sub>e args \<tau>\<^sub>2\<^sub>0\<close>
   have lkm: \<open>map_of B (n_txt opn) = Some (TEop l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0)\<close> using lk by simp
@@ -2200,13 +2239,14 @@ next
               cls n\<^sub>4
             = Some (s\<^sub>4, cls'', \<tau>, pd', n')\<close> and
     se: \<open>s = s\<^sub>4 \<odot> (s\<^sub>3 \<odot> s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp))\<close>
-    by (auto simp: lkm ta lc eps_def[symmetric] \<tau>\<^sub>1_def[symmetric] \<tau>\<^sub>2_def[symmetric] Let_def
+    by (auto simp: lkm ta ta' lc eps_def[symmetric] \<tau>\<^sub>1_def[symmetric] \<tau>\<^sub>2_def[symmetric] Let_def
                    bind_eq_Some_conv split: if_split_asm)
   have covk: \<open>covers (sappe (s\<^sub>1 \<odot> sp) B) (sapp s\<^sub>1 (fn_ty \<tau>s)) [fn_pat ps]
     \<and> (case k of None \<Rightarrow> True | Some kn \<Rightarrow> n_txt kn \<notin> set (map fst \<Gamma>) \<and> nm_ok (n_txt kn))\<close>
     using infer_cls_Cons_HOp.prems
-    by (simp add: lkm ta lc dps u1 \<tau>\<^sub>1_def[symmetric] \<tau>\<^sub>2_def[symmetric] Let_def split: if_split_asm)
-  have ar: \<open>\<forall>t \<in> set args. tsigs t \<subseteq> X\<close> using Targs ta by auto
+    by (simp add: lkm ta ta' lc dps u1 \<tau>\<^sub>1_def[symmetric] \<tau>\<^sub>2_def[symmetric] Let_def
+             split: if_split_asm)
+  have ar: \<open>\<forall>t \<in> set args. tsigs t \<subseteq> X\<close> using Targs ta' by auto
   have o: \<open>tsigs \<tau>\<^sub>1 \<subseteq> X\<close> \<open>tsigs \<tau>\<^sub>2 \<subseteq> X\<close>
     using sigs_in_tlookup[OF B lk] ar by (simp_all add: \<tau>\<^sub>1_def \<tau>\<^sub>2_def tsigs_op_inst)
   have p: \<open>shyg sp X \<and> (\<forall>\<tau> \<in> set \<tau>s. tsigs \<tau> \<subseteq> X) \<and> tsigs_bs \<Gamma> \<subseteq> X\<close>
@@ -2224,7 +2264,7 @@ next
                             (sapp (s\<^sub>1 \<odot> sp) \<tau>\<^sub>0)))) # mono_env s\<^sub>1 \<Gamma>) @ sappe (s\<^sub>1 \<odot> sp) B) X\<close>
     using G sigs_in_sappe[OF s1p B] by simp
   have wb: \<open>shyg s\<^sub>2 X \<and> tsigs \<tau>\<^sub>b \<subseteq> X \<and> tsigs_pend pd\<^sub>2 \<subseteq> X\<close>
-    using refl lk refl ta conjI[OF lc] \<tau>\<^sub>1_def \<tau>\<^sub>2_def dps refl refl refl u1 refl refl refl eps_def
+    using refl lk refl ta lc \<tau>\<^sub>1_def \<tau>\<^sub>2_def dps refl refl refl u1 refl refl refl eps_def
       refl refl covk db ib
     by (rule infer_cls_Cons_HOp.IH) (use tsigs_sub_pend[OF s1p P] in simp)
   have s21: \<open>shyg (s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) X\<close> using s1p wb by (simp add: shyg_scomp)
@@ -2233,7 +2273,7 @@ next
       tsigs_sapp[OF conjunct1[OF wb] tsigs_sapp[OF s1p T0]] in \<open>simp_all split: option.split\<close>)
   have s321: \<open>shyg (s\<^sub>3 \<odot> s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) X\<close> using s1p wb s3 by (simp add: shyg_scomp)
   have wc: \<open>shyg s\<^sub>4 X \<and> tsigs \<tau> \<subseteq> X \<and> tsigs_pend pd' \<subseteq> X\<close>
-    using refl lk refl ta conjI[OF lc] \<tau>\<^sub>1_def \<tau>\<^sub>2_def dps refl refl refl u1 refl refl refl eps_def
+    using refl lk refl ta lc \<tau>\<^sub>1_def \<tau>\<^sub>2_def dps refl refl refl u1 refl refl refl eps_def
       refl refl covk db refl refl refl refl u2 refl refl dc sigs_in_sappe[OF s321 B]
     by (rule infer_cls_Cons_HOp.IH)
       (use tsigs_sub_pend[OF s3] wb tsigs_sapp[OF s321 T0] tsigs_sapp[OF s321 Targs] in simp_all)

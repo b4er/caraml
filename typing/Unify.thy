@@ -196,6 +196,32 @@ lemma row_eq_code[code]: \<open>r \<approx> r' \<longleftrightarrow> canon_row r
 lemma canon_row_idem[simp]: \<open>canon_row (canon_row r) = canon_row r\<close>
   using canon_row_iff canon_row_req by blast
 
+text \<open>A record is canonical when its fields are sorted by label, stably, so
+  that the first of two equal labels stays first: \<open>finsort\<close> inserts a field
+  before the first label at or above its own, as \<^const>\<open>insort\<close> does on the
+  label list \<open>rlabels\<close>.\<close>
+
+fun finsort :: \<open>name \<Rightarrow> kty \<Rightarrow> kty \<Rightarrow> kty\<close> where
+  \<open>finsort l t (TRCons l' t' r) =
+     (if l' < l then TRCons l' t' (finsort l t r) else TRCons l t (TRCons l' t' r))\<close>
+| \<open>finsort l t r = TRCons l t r\<close>
+
+fun rlabels :: \<open>kty \<Rightarrow> name list\<close> where
+  \<open>rlabels (TRCons l t r) = l # rlabels r\<close>
+| \<open>rlabels _ = []\<close>
+
+lemma finsort_ne[simp]:
+  \<open>finsort l t c \<noteq> TV a\<close> \<open>finsort l t c \<noteq> TB a\<close> \<open>finsort l t c \<noteq> TK a\<close>
+  \<open>finsort l t c \<noteq> TA k i\<close> \<open>finsort l t c \<noteq> TC n ts\<close> \<open>finsort l t c \<noteq> TApp u v\<close>
+  \<open>finsort l t c \<noteq> TFn u e v\<close> \<open>finsort l t c \<noteq> TDep b sg m e v\<close>
+  \<open>finsort l t c \<noteq> TEv u v w\<close> \<open>finsort l t c \<noteq> TAct u K e v\<close> \<open>finsort l t c \<noteq> TRNil\<close>
+  by (cases c; simp)+
+
+lemma finsortE:
+  assumes \<open>finsort l t c = u\<close>
+  obtains l' t' c' where \<open>u = TRCons l' t' c'\<close>
+  using assms by (cases c) (auto split: if_split_asm)
+
 fun canon_ty :: \<open>kty \<Rightarrow> kty\<close> where
   \<open>canon_ty (TV a) = TV a\<close>
 | \<open>canon_ty (TB a) = TB a\<close>
@@ -207,6 +233,92 @@ fun canon_ty :: \<open>kty \<Rightarrow> kty\<close> where
 | \<open>canon_ty (TDep i sg T e t) = TDep i sg T (canon_row e) (canon_ty t)\<close>
 | \<open>canon_ty (TEv l s t) = TEv (canon_ty l) (canon_ty s) (canon_ty t)\<close>
 | \<open>canon_ty (TAct l K e t) = TAct (canon_ty l) K (canon_row e) (canon_ty t)\<close>
+| \<open>canon_ty TRNil = TRNil\<close>
+| \<open>canon_ty (TRCons l t r) = finsort l (canon_ty t) (canon_ty r)\<close>
+
+text \<open>Pulling a field out of a sorted record and out of its canonical form:
+  the canonical form of a record is the sorted insertion of any of its fields
+  into the canonical form of the rest.\<close>
+
+lemma fpull_finsort[simp]: \<open>fpull l (finsort l t c) = Some (t, c)\<close>
+  by (induction c) auto
+
+lemma rlabels_finsort[simp]: \<open>rlabels (finsort l t c) = insort l (rlabels c)\<close>
+  by (induction c) (auto simp: not_less)
+
+lemma rsorted_canon_ty: \<open>sorted (rlabels (canon_ty u))\<close>
+  by (induction u) (auto simp: sorted_insort)
+
+lemma finsort_sorted_hd: \<open>\<forall>m \<in> set (rlabels c). l \<le> m \<Longrightarrow> finsort l t c = TRCons l t c\<close>
+  by (cases c) (auto simp: not_less)
+
+lemma fpull_finsort_None: \<open>l \<noteq> l' \<Longrightarrow> fpull l c = None \<Longrightarrow> fpull l (finsort l' x c) = None\<close>
+  by (induction c) (auto split: if_splits)
+
+lemma fpull_finsort_Some:
+  \<open>l \<noteq> l' \<Longrightarrow> sorted (rlabels c) \<Longrightarrow> fpull l c = Some (y, c') \<Longrightarrow>
+     fpull l (finsort l' x c) = Some (y, finsort l' x c')\<close>
+proof (induction c arbitrary: c')
+  case (TRCons l'' z d)
+  have hd: \<open>finsort l' x d = TRCons l' x d\<close> if \<open>l' \<le> l''\<close>
+    using TRCons.prems(2) that by (intro finsort_sorted_hd) (auto intro: order_trans)
+  show ?case
+  proof (cases \<open>l = l''\<close>)
+    case True
+    then show ?thesis using TRCons.prems hd by (auto simp: not_less)
+  next
+    case False
+    then obtain d' where d': \<open>fpull l d = Some (y, d')\<close> and c': \<open>c' = TRCons l'' z d'\<close>
+      using TRCons.prems by (auto split: option.splits)
+    have \<open>fpull l (finsort l' x d) = Some (y, finsort l' x d')\<close>
+      using TRCons.prems d' by (intro TRCons.IH) auto
+    then show ?thesis using False TRCons.prems by (auto simp: not_less c')
+  qed
+qed simp_all
+
+lemma fpull_canon_ty:
+  \<open>fpull l (canon_ty u) = map_option (map_prod canon_ty canon_ty) (fpull l u)\<close>
+proof (induction u)
+  case (TRCons l' a b)
+  show ?case
+  proof (cases \<open>l = l'\<close>)
+    case True
+    then show ?thesis by simp
+  next
+    case False
+    show ?thesis
+    proof (cases \<open>fpull l b\<close>)
+      case None
+      then show ?thesis using False TRCons.IH by (simp add: fpull_finsort_None)
+    next
+      case (Some p)
+      then obtain a' b' where p: \<open>fpull l b = Some (a', b')\<close> by (cases p) auto
+      then have c: \<open>fpull l (canon_ty b) = Some (canon_ty a', canon_ty b')\<close>
+        using TRCons.IH by simp
+      show ?thesis using False p fpull_finsort_Some[OF False rsorted_canon_ty c] by simp
+    qed
+  qed
+qed simp_all
+
+lemma finsort_comm:
+  \<open>l \<noteq> l' \<Longrightarrow> finsort l' x (finsort l y c) = finsort l y (finsort l' x c)\<close>
+  by (induction c) (auto simp: not_less dest: le_less_trans less_le_trans)
+
+lemma canon_ty_fpull:
+  \<open>fpull l u = Some (t', r') \<Longrightarrow> canon_ty u = finsort l (canon_ty t') (canon_ty r')\<close>
+proof (induction u arbitrary: t' r')
+  case (TRCons l' a b)
+  show ?case
+  proof (cases \<open>l = l'\<close>)
+    case True
+    then show ?thesis using TRCons.prems by simp
+  next
+    case False
+    then obtain a' b' where p: \<open>fpull l b = Some (a', b')\<close> and \<open>t' = a'\<close> \<open>r' = TRCons l' a b'\<close>
+      using TRCons.prems by (auto split: option.splits)
+    then show ?thesis using False TRCons.IH finsort_comm[OF False] by simp
+  qed
+qed simp_all
 
 text \<open>Canonical equality is structural equivalence: \<^const>\<open>canon_row\<close>
   decides \<open>\<approx>\<close> and \<^const>\<open>canon_ty\<close> is otherwise structural, like \<open>\<simeq>\<close>.\<close>
@@ -235,8 +347,25 @@ proof (induction t arbitrary: u)
       qed auto
     qed
     with TC show ?thesis by auto
-  qed auto
-qed (case_tac u; auto simp: canon_row_iff)+
+  qed (auto elim!: finsortE finsortE[OF sym])
+next
+  case (TRCons l t r)
+  show ?case
+  proof
+    assume \<open>canon_ty (TRCons l t r) = canon_ty u\<close>
+    then have \<open>fpull l (canon_ty u) = Some (canon_ty t, canon_ty r)\<close>
+      using fpull_finsort[of l \<open>canon_ty t\<close> \<open>canon_ty r\<close>] by simp
+    then obtain t' r' where \<open>fpull l u = Some (t', r')\<close>
+      and \<open>canon_ty t' = canon_ty t\<close> \<open>canon_ty r' = canon_ty r\<close>
+      by (auto simp: fpull_canon_ty)
+    then show \<open>TRCons l t r \<simeq> u\<close> using TRCons.IH[of t'] TRCons.IH[of r'] by auto
+  next
+    assume \<open>TRCons l t r \<simeq> u\<close>
+    then obtain t' r' where p: \<open>fpull l u = Some (t', r')\<close> and \<open>t \<simeq> t'\<close> \<open>r \<simeq> r'\<close> by auto
+    then show \<open>canon_ty (TRCons l t r) = canon_ty u\<close>
+      using TRCons.IH[of t'] TRCons.IH[of r'] by (simp add: canon_ty_fpull[OF p])
+  qed
+qed (case_tac u; auto simp: canon_row_iff elim!: finsortE finsortE[OF sym])+
 
 subsection \<open>Substitution composition\<close>
 
@@ -288,7 +417,9 @@ text \<open>Two action types unify only on the same binder list; their bodies un
   with the bound abstract types as constants, and a solution that binds a
   variable of the constraints to a type mentioning one of them is rejected as
   a skolem escape \<^cite>\<open>\<open>Sect. 4.2\<close> in vivien2024\<close> (the bound types mean nothing
-  outside their binder).\<close>
+  outside their binder). The check ranges over the variables of the constraints
+  and over those the recursive call mints: record unification binds fresh type
+  variables, whose images are part of the solution too.\<close>
 
 fun kunify :: \<open>nat \<Rightarrow> (kty \<times> kty) list \<Rightarrow> nat
                \<Rightarrow> ((tvar \<Rightarrow> kty) \<times> (rvar \<Rightarrow> krow) \<times> nat) option\<close>
@@ -345,10 +476,22 @@ where
                              ((l, l') # (u, w) # cs)) n' of
                    None \<Rightarrow> None
                  | Some (\<theta>, \<rho>, n'') \<Rightarrow>
-                     (if \<forall>a \<in> ftv_cs ((l, l') # (u, w) # cs). set T \<inter> ktv (\<theta> a) = {}
+                     (if \<forall>a \<in> ftv_cs ((l, l') # (u, w) # cs) \<union> {n' ..< n''}.
+                          set T \<inter> ktv (\<theta> a) = {}
                       then Some (\<theta>, (\<lambda>v. rsubst \<rho> (mk_rsub \<rho>m v)), n'')
                       else None)))
       else None)\<close>
+| \<open>kunify (Suc f) ((TRNil, TRNil) # cs) n = kunify f cs n\<close>
+| \<open>kunify (Suc f) ((TRCons l u r, TRCons l' w r') # cs) n =
+     (case fpull l (TRCons l' w r') of
+        Some (w', r'') \<Rightarrow> kunify f ((u, w') # (r, r'') # cs) n
+      | None \<Rightarrow>
+          (case rtail (TRCons l' w r') of
+             TV b \<Rightarrow>
+               (if TV b = rtail r then None
+                else kunify f ((TV b, TRCons l (TV n) (TV (Suc n))) #
+                               (TRCons l u r, TRCons l' w r') # cs) (Suc (Suc n)))
+           | _ \<Rightarrow> None))\<close>
 | \<open>kunify (Suc f) (c # cs) n = None\<close>
 
 | \<open>kbind 0 a u cs n = None\<close>
@@ -498,6 +641,29 @@ next
       ultimately show ?thesis by simp
     qed
     from IH comp head show ?thesis by fastforce
+  qed
+next
+  case (kunify_Cons_TRCons_TRCons f l u r l' w r' cs n)
+  show ?case
+  proof (cases \<open>fpull l (TRCons l' w r')\<close>)
+    case (Some p)
+    then obtain w' r'' where p: \<open>fpull l (TRCons l' w r') = Some (w', r'')\<close> by (cases p) auto
+    with kunify_Cons_TRCons_TRCons.prems have
+      ku: \<open>kunify f ((u, w') # (r, r'') # cs) n = Some (\<theta>, \<rho>, n')\<close> by simp
+    have IH: \<open>\<forall>(t\<^sub>1, t\<^sub>2) \<in> set ((u, w') # (r, r'') # cs).
+                canon_ty (tsubst \<theta> \<rho> t\<^sub>1) = canon_ty (tsubst \<theta> \<rho> t\<^sub>2)\<close>
+      using kunify_Cons_TRCons_TRCons.IH p ku by blast
+    have \<open>canon_ty (tsubst \<theta> \<rho> (TRCons l' w r')) =
+          finsort l (canon_ty (tsubst \<theta> \<rho> w')) (canon_ty (tsubst \<theta> \<rho> r''))\<close>
+      by (rule canon_ty_fpull[OF fpull_tsubst[OF p]])
+    with IH show ?thesis by simp
+  next
+    case None
+    then obtain b where tl: \<open>rtail (TRCons l' w r') = TV b\<close> and ne: \<open>TV b \<noteq> rtail r\<close> and
+      ku: \<open>kunify f ((TV b, TRCons l (TV n) (TV (Suc n))) # (TRCons l u r, TRCons l' w r') # cs)
+                    (Suc (Suc n)) = Some (\<theta>, \<rho>, n')\<close>
+      using kunify_Cons_TRCons_TRCons.prems by (auto split: kty.splits if_split_asm)
+    then show ?thesis using kunify_Cons_TRCons_TRCons.IH None by fastforce
   qed
 qed (auto split: if_split_asm option.split_asm)
 
@@ -656,6 +822,8 @@ fun btv_list :: \<open>kty \<Rightarrow> tvar list\<close> where
 | \<open>btv_list (TDep i sg K e t) = btv_list t\<close>
 | \<open>btv_list (TEv l s t) = btv_list l @ btv_list s @ btv_list t\<close>
 | \<open>btv_list (TAct l K e t) = btv_list l @ btv_list t\<close>
+| \<open>btv_list TRNil = []\<close>
+| \<open>btv_list (TRCons l t r) = btv_list t @ btv_list r\<close>
 
 fun brv_list_row :: \<open>krow \<Rightarrow> rvar list\<close> where
   \<open>brv_list_row RNil = []\<close>
@@ -674,6 +842,8 @@ fun brv_list :: \<open>kty \<Rightarrow> rvar list\<close> where
 | \<open>brv_list (TDep i sg K e t) = brv_list_row e @ brv_list t\<close>
 | \<open>brv_list (TEv l s t) = brv_list l @ brv_list s @ brv_list t\<close>
 | \<open>brv_list (TAct l K e t) = brv_list l @ brv_list_row e @ brv_list t\<close>
+| \<open>brv_list TRNil = []\<close>
+| \<open>brv_list (TRCons l t r) = brv_list t @ brv_list r\<close>
 
 lemma set_btv_list[simp]: \<open>set (btv_list t) = btv t\<close>
   by (induction t) auto
@@ -783,5 +953,7 @@ fun kty_bnd :: \<open>kty \<Rightarrow> nat\<close> where
 | \<open>kty_bnd (TDep i sg T e t) = max (krow_bnd e) (kty_bnd t)\<close>
 | \<open>kty_bnd (TEv l s t) = max (kty_bnd l) (max (kty_bnd s) (kty_bnd t))\<close>
 | \<open>kty_bnd (TAct l K e t) = max (kty_bnd l) (max (krow_bnd e) (kty_bnd t))\<close>
+| \<open>kty_bnd TRNil = 0\<close>
+| \<open>kty_bnd (TRCons l t r) = max (kty_bnd t) (kty_bnd r)\<close>
 
 end

@@ -48,8 +48,8 @@ qed
 lemma sapp_TDep[simp]: \<open>sapp s (TDep i sg K e t) = TDep i sg K (sappr s e) (sapp s t)\<close>
   by (cases s) simp
 
-lemma sapp_tuple[simp]: \<open>sapp s (tuple \<tau>s) = tuple (map (sapp s) \<tau>s)\<close>
-  by simp
+lemma sapp_tuple_from[simp]: \<open>sapp s (tuple_from i \<tau>s) = tuple_from i (map (sapp s) \<tau>s)\<close>
+  by (cases s) simp
 
 subsection \<open>Confinement of the expression algorithm\<close>
 
@@ -3516,7 +3516,7 @@ lemma infer_wf:
       and f3: \<open>fresh_ok \<tau>t 0 n\<^sub>3 FK\<close> by simp_all
     from o3 have ftp3: \<open>ftv_pend pd\<^sub>3 \<subseteq> {..< n\<^sub>3}\<close> and frp3: \<open>frv_pend pd\<^sub>3 \<subseteq> {..< n\<^sub>3}\<close>
       by (auto simp: outwf_def)
-    note uf2 = uni_fresh[OF u2 fresh_ok_mono[OF f3 le_refl le_refl] fresh_ok_TC_nil le0]
+    note uf2 = uni_fresh[OF u2 fresh_ok_mono[OF f3 le_refl le_refl] fresh_ok_unit le0]
     have le4: \<open>n\<^sub>3 \<le> n'\<close> using uf2 by simp
     have sc4: \<open>sconf s\<^sub>4 {..< n'} {..< n'}\<close> using uf2 by (simp add: atLeast0LessThan)
     have kh4: \<open>khyg s\<^sub>4 FK\<close> and bf4: \<open>bfree_sub s\<^sub>4\<close> using uf2 by simp_all
@@ -3614,7 +3614,7 @@ lemma infer_wf:
     have be2: \<open>brv_row (sappr s (RV n)) = {}\<close> by (rule bfree_sappr[OF bfs]) simp
     have finner: \<open>fresh_ok (TFn unit_ty (sappr s (canon_row (rext (hlabels B cls) (RV n))))
                             (sapp s (TV (Suc n)))) 0 n' FK\<close>
-      by (rule fresh_ok_TFn[OF fresh_ok_TC_nil ft1 fe1 be1])
+      by (rule fresh_ok_TFn[OF fresh_ok_unit ft1 fe1 be1])
     have fresh: \<open>fresh_ok \<tau> 0 n' FK\<close>
       unfolding te by (rule fresh_ok_TFn[OF finner w[THEN conjunct2, THEN conjunct2] fe2 be2])
     show ?case using o le2 fresh by simp
@@ -3973,6 +3973,18 @@ lemma infer_wf:
       proof (rule infer_args_step[OF E I F])
         show \<open>\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t\<close> by (simp add: TAct)
       qed (rule infer_args.IH, rule TAct, (assumption | rule refl)+)+
+    next
+      case TRNil
+      show ?thesis
+      proof (rule infer_args_step[OF E I F])
+        show \<open>\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t\<close> by (simp add: TRNil)
+      qed (rule infer_args.IH, rule TRNil, (assumption | rule refl)+)+
+    next
+      case (TRCons lb t r)
+      show ?thesis
+      proof (rule infer_args_step[OF E I F])
+        show \<open>\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t\<close> by (simp add: TRCons)
+      qed (rule infer_args.IH, rule TRCons, (assumption | rule refl)+)+
     qed
   next
     case (infer_exps_Cons uf B A pd e es n s es' \<tau>s pd' n' FK)
@@ -4174,15 +4186,17 @@ lemma infer_wf:
     define eps
       where \<open>eps sq = (if nm then sappr sq A else canon_row (rext (hlabels B cls) (sappr sq A)))\<close>
       for sq
-    have \<open>\<exists>l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0 c args.
-            tlookup B [n_txt opn] = Some (TEop l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0) \<and> targs = TC c args \<and>
-            c = tuple_ty (length ps\<^sub>e) \<and> length args = length ps\<^sub>e\<close>
+    have \<open>\<exists>l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0 args.
+            tlookup B [n_txt opn] = Some (TEop l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0) \<and> untuple targs = Some args \<and>
+            length args = length ps\<^sub>e\<close>
       using E
-      by (cases \<open>tlookup B [n_txt opn]\<close>; cases targs; simp split: tentry.split_asm if_split_asm)
-    then obtain l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0 c args
+      by (cases \<open>tlookup B [n_txt opn]\<close>; cases \<open>untuple targs\<close>;
+          simp split: tentry.split_asm if_split_asm)
+    then obtain l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0 args
       where lk: \<open>tlookup B [n_txt opn] = Some (TEop l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0)\<close>
-      and ta: \<open>targs = TC c args\<close>
-      and lc: \<open>c = tuple_ty (length ps\<^sub>e)\<close> \<open>length args = length ps\<^sub>e\<close> by blast
+      and ta: \<open>untuple targs = Some args\<close>
+      and lc: \<open>length args = length ps\<^sub>e\<close> by blast
+    have ta': \<open>targs = tuple args\<close> using ta by simp
     define \<tau>\<^sub>1 where \<open>\<tau>\<^sub>1 = op_inst ps\<^sub>e args \<tau>\<^sub>1\<^sub>0\<close>
     define \<tau>\<^sub>2 where \<open>\<tau>\<^sub>2 = op_inst ps\<^sub>e args \<tau>\<^sub>2\<^sub>0\<close>
     have lkm: \<open>map_of B (n_txt opn) = Some (TEop l ps\<^sub>e \<tau>\<^sub>1\<^sub>0 \<tau>\<^sub>2\<^sub>0)\<close> using lk by simp
@@ -4200,14 +4214,13 @@ lemma infer_wf:
               (sapp (s\<^sub>3 \<odot> s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) targs) cls n\<^sub>4
               = Some (s\<^sub>4, cls'', \<tau>, pd', n')\<close> and
       se: \<open>s = s\<^sub>4 \<odot> (s\<^sub>3 \<odot> s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp))\<close>
-      by (auto simp: lkm ta lc eps_def[symmetric] \<tau>\<^sub>1_def[symmetric] \<tau>\<^sub>2_def[symmetric] Let_def
+      by (auto simp: lkm ta ta' lc eps_def[symmetric] \<tau>\<^sub>1_def[symmetric] \<tau>\<^sub>2_def[symmetric] Let_def
                      bind_eq_Some_conv split: if_split_asm)
-    have lc': \<open>c = tuple_ty (length ps\<^sub>e) \<and> length args = length ps\<^sub>e\<close> using lc by simp
     have covk: \<open>covers (sappe (s\<^sub>1 \<odot> sp) B) (sapp s\<^sub>1 (fn_ty \<tau>s)) [fn_pat ps]
         \<and> (case k of None \<Rightarrow> True
              | Some kn \<Rightarrow> n_txt kn \<notin> set (map fst \<Gamma>) \<and> nm_ok (n_txt kn))\<close>
       using E
-      by (simp add: lkm ta lc dps u1 \<tau>\<^sub>1_def[symmetric] \<tau>\<^sub>2_def[symmetric] Let_def
+      by (simp add: lkm ta ta' lc dps u1 \<tau>\<^sub>1_def[symmetric] \<tau>\<^sub>2_def[symmetric] Let_def
           split: if_split_asm)
     note cov = covk[THEN conjunct1]
     from I have cenvB: \<open>cenv B\<close> and bfB: \<open>bfree_env B\<close> and ktvB: \<open>ktv_env B \<subseteq> FK\<close>
@@ -4228,9 +4241,9 @@ lemma infer_wf:
       \<open>brv \<tau>\<^sub>1\<^sub>0 = {}\<close> \<open>brv \<tau>\<^sub>2\<^sub>0 = {}\<close>
       using ktv_env_tlookup[OF lk] ktvB bfree_env_tlookup[OF bfB lk] by auto
     have fargs: \<open>\<forall>t \<in> set args. fresh_ok t 0 n FK\<close>
-      using F\<^sub>t unfolding ta by (auto simp: fresh_ok_def bfree_def)
+      using F\<^sub>t unfolding ta' by (auto simp: fresh_ok_def bfree_def)
     have fo1: \<open>fresh_ok \<tau>\<^sub>1 0 n FK\<close> and fo2: \<open>fresh_ok \<tau>\<^sub>2 0 n FK\<close> unfolding \<tau>\<^sub>1_def \<tau>\<^sub>2_def
-      by (rule op_inst_fresh[OF _ _ _ _ _ lc(2) fargs]; use ct0 kt0 in simp)+
+      by (rule op_inst_fresh[OF _ _ _ _ _ lc fargs]; use ct0 kt0 in simp)+
     have f\<tau>1: \<open>fresh_ok (sapp sp \<tau>\<^sub>1) 0 n\<^sub>1 FK\<close> by (rule fresh_ok_sapp0[OF fo1 o_sp le1])
     note uf1 = uni_fresh[OF u1 ffn f\<tau>1 le0]
     have le2: \<open>n\<^sub>1 \<le> n\<^sub>2\<close> using uf1 by simp
@@ -4282,7 +4295,7 @@ lemma infer_wf:
     qed
     have wb: \<open>n\<^sub>2 \<le> n\<^sub>3 \<and> outwf s\<^sub>2 pd\<^sub>2 FK n\<^sub>3 \<and> fresh_ok \<tau>\<^sub>b 0 n\<^sub>3 FK\<close>
       by (rule infer_cls_Cons_HOp.IH)
-        (rule lk ta dps u1 covk db ib refl eps_def \<tau>\<^sub>1_def \<tau>\<^sub>2_def lc')+
+        (rule lk ta dps u1 covk db ib refl eps_def \<tau>\<^sub>1_def \<tau>\<^sub>2_def lc)+
     have le3: \<open>n\<^sub>2 \<le> n\<^sub>3\<close> using wb by simp
     have o_b: \<open>outwf s\<^sub>2 pd\<^sub>2 FK n\<^sub>3\<close> using wb by simp
     have ftb: \<open>fresh_ok \<tau>\<^sub>b 0 n\<^sub>3 FK\<close> using wb by simp
@@ -4328,7 +4341,7 @@ lemma infer_wf:
       by (rule fresh_ok_sapp0[OF F\<^sub>t os' le14])
     have wc: \<open>n\<^sub>4 \<le> n' \<and> outwf s\<^sub>4 pd' FK n' \<and> fresh_ok \<tau> 0 n' FK\<close>
       by (rule infer_cls_Cons_HOp.IH)
-        (rule lk ta dps u1 covk db u2 dc ic f\<tau>0b ftb' refl eps_def \<tau>\<^sub>1_def \<tau>\<^sub>2_def lc')+
+        (rule lk ta dps u1 covk db u2 dc ic f\<tau>0b ftb' refl eps_def \<tau>\<^sub>1_def \<tau>\<^sub>2_def lc)+
     have le5: \<open>n\<^sub>4 \<le> n'\<close> using wc by simp
     have o_c: \<open>outwf s\<^sub>4 pd' FK n'\<close> using wc by simp
     have fresh: \<open>fresh_ok \<tau> 0 n' FK\<close> using wc by simp
@@ -4353,7 +4366,7 @@ lemma infer_wf:
       and f1: \<open>fresh_ok \<tau>\<^sub>f 0 n\<^sub>1 FK\<close> by simp_all
     from o1 have ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close>
       by (auto simp: outwf_def)
-    note uf1 = uni_fresh[OF u1 fresh_ok_mono[OF f1 le_refl le_refl] fresh_ok_TC_nil le0]
+    note uf1 = uni_fresh[OF u1 fresh_ok_mono[OF f1 le_refl le_refl] fresh_ok_unit le0]
     have le2: \<open>n\<^sub>1 \<le> n\<^sub>2\<close> using uf1 by simp
     have sc2: \<open>sconf s\<^sub>2 {..< n\<^sub>2} {..< n\<^sub>2}\<close> using uf1 by (simp add: atLeast0LessThan)
     have kh2: \<open>khyg s\<^sub>2 FK\<close> and bf2: \<open>bfree_sub s\<^sub>2\<close> using uf1 by simp_all
