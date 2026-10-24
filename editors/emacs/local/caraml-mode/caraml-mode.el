@@ -1,6 +1,7 @@
 ;;; caraml-mode.el --- major mode for the CaraML language -*- lexical-binding: t; -*-
 
 ;; Author: b4er
+;; URL: https://caraml-lang.org
 ;; SPDX-License-Identifier: BSD-3-Clause
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1"))

@@ -38,9 +38,14 @@ div (id: "editors", picker) \<open>
   \<close>
 
   div (option, label: "Command line") \<open>
-    text \<open>Without an editor plugin, build and install \<^verbatim>\<open>caraml\<close> from source with Cabal:\<close>
-    pre (code, shell) \<open>curl -fsSL https://github.com/b4er/caraml/releases/latest/download/caraml-src.tar.gz | tar -xz
+    text \<open>Without an editor plugin, download a pre-built \<^verbatim>\<open>caraml\<close> into \<^verbatim>\<open>~/.local/bin\<close>; pick
+      \<^verbatim>\<open>linux-x64\<close>, \<^verbatim>\<open>linux-arm64\<close>, or \<^verbatim>\<open>darwin-arm64\<close> (Windows users take
+      \<^verbatim>\<open>caraml-win32-x64.tar.gz\<close>, which holds \<^verbatim>\<open>caraml.exe\<close>):\<close>
+    pre (code, shell) \<open>curl -fsSL https://caraml-lang.org/releases/latest/caraml-linux-x64.tar.gz | tar -xz -C ~/.local/bin ./caraml\<close>
+    text \<open>Or build and install it from source with Cabal:\<close>
+    pre (code, shell) \<open>curl -fsSL https://caraml-lang.org/releases/latest/caraml-src.tar.gz | tar -xz
 cd caraml-*/ && cabal install exe:caraml\<close>
+    text \<open>Replace \<^verbatim>\<open>latest\<close> by a version such as \<^verbatim>\<open>v0.1.0\<close> to pin a release.\<close>
     text \<open>Any editor with a language client can then run \<^verbatim>\<open>caraml lsp\<close>, which serves the
       Language Server Protocol on stdin and stdout.\<close>
   \<close>

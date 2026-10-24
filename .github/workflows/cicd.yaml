@@ -123,7 +123,7 @@ jobs:
           path: dist/site
 
   sdist:
-    name: Source dist
+    name: Source distribution
     needs: isabelle
     runs-on: ubuntu-24.04
     steps:
@@ -227,12 +227,11 @@ jobs:
     name: Editor plugins
     needs: lint
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      id-token: write
-    env:
-      VSCE: 4.0.0
-      OVSX: 1.2.0
+    outputs:
+      vscode: ${{steps.versions.outputs.vscode}}
+      vscode_new: ${{steps.versions.outputs.vscode_new}}
+      emacs: ${{steps.versions.outputs.emacs}}
+      emacs_new: ${{steps.versions.outputs.emacs_new}}
     steps:
       - uses: actions/checkout@v7
 
@@ -242,6 +241,8 @@ jobs:
 
       - name: Package .vsix
         working-directory: editors/vscode
+        env:
+          VSCE: 4.0.0
         run: |
           npm ci
           npx --yes "@vscode/vsce@$VSCE" package -o ../../caraml.vsix
@@ -264,27 +265,52 @@ jobs:
             echo "emacs=$e";   echo "emacs_new=$(new "emacs-v$e")"
           } >> "$GITHUB_OUTPUT"
 
+  publish-editors:
+    name: Publish editor plugins
+    needs: editors
+    if: needs.editors.outputs.vscode_new == 'true' || needs.editors.outputs.emacs_new == 'true'
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      VSCE: 4.0.0
+      OVSX: 1.2.0
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        if: needs.editors.outputs.vscode_new == 'true'
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v8
+        if: needs.editors.outputs.vscode_new == 'true'
+        with:
+          name: vsix
+
       - uses: azure/login@v3
-        if: steps.versions.outputs.vscode_new == 'true'
+        if: needs.editors.outputs.vscode_new == 'true'
         with:
           client-id: ${{vars.AZURE_CLIENT_ID}}
           tenant-id: ${{vars.AZURE_TENANT_ID}}
           allow-no-subscriptions: true
 
       - name: Publish .vsix
-        if: steps.versions.outputs.vscode_new == 'true'
+        if: needs.editors.outputs.vscode_new == 'true'
         env:
-          VERSION: vscode-v${{steps.versions.outputs.vscode}}
+          VERSION: vscode-v${{needs.editors.outputs.vscode}}
         run: |
-          # npx --yes "@vscode/vsce@$VSCE" publish --azure-credential --packagePath caraml.vsix --skip-duplicate
-          # npx --yes "ovsx@$OVSX" publish caraml.vsix --skip-duplicate
+          npx --yes "@vscode/vsce@$VSCE" publish --azure-credential --packagePath caraml.vsix --skip-duplicate
+          npx --yes "ovsx@$OVSX" publish caraml.vsix --trusted-publishing --skip-duplicate
 
           git tag "$VERSION" && git push origin "$VERSION"
 
       - name: Tag emacs
-        if: steps.versions.outputs.emacs_new == 'true'
+        if: needs.editors.outputs.emacs_new == 'true'
         env:
-          VERSION: emacs-v${{steps.versions.outputs.emacs}}
+          VERSION: emacs-v${{needs.editors.outputs.emacs}}
         run: |
           git tag "$VERSION" && git push origin "$VERSION"
 
@@ -293,6 +319,7 @@ jobs:
     needs: [sdist, haskell]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-24.04
+    environment: release
     permissions:
       contents: write
     steps:

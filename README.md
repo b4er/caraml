@@ -3,12 +3,14 @@
 
   <h3>A strict functional language in the ML family,<br>with a compiler verified in Isabelle/HOL.</h3>
 
-  [![CI/CD](https://github.com/b4er/caraml-test/actions/workflows/cicd.yaml/badge.svg?branch=main)](https://github.com/b4er/caraml-test/actions/workflows/cicd.yaml)
-  [![Release](https://img.shields.io/github/v/release/b4er/caraml-test)](https://github.com/b4er/caraml-test/releases/latest)
+  [![CI/CD](https://github.com/b4er/caraml/actions/workflows/cicd.yaml/badge.svg?branch=main)](https://github.com/b4er/caraml/actions/workflows/cicd.yaml)
+  [![Release](https://img.shields.io/github/v/release/b4er/caraml)](https://github.com/b4er/caraml/releases/latest)
   [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 
-  [Website](https://b4er.github.io/caraml-test/) |
-  [Releases](https://github.com/b4er/caraml-test/releases)
+  [Website](https://caraml-lang.org) |
+  [Get started](https://caraml-lang.org/Get_Started.html) |
+  [Documentation](https://caraml-lang.org/Tools.html) |
+  [Releases](https://github.com/b4er/caraml/releases)
 </div>
 
 ---
@@ -45,7 +47,7 @@ install the compiler (either download from release, or build from sources).
 Install the extension from either
 
 - [`b4er.caraml`](https://marketplace.visualstudio.com/items?itemName=b4er.caraml) (Visual Studio Marketplace), or
-- [`b4er.caraml`](https://open-vsx.org/extension/ms-python/python) (Open VSX Registry).
+- [`b4er.caraml`](https://open-vsx.org/extension/b4er/caraml) (Open VSX Registry).
 
 ### Spacemacs
 

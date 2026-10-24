@@ -6,6 +6,10 @@
   "publisher": "b4er",
   "license": "BSD-3-Clause",
   "icon": "images/caraml-logo.png",
+  "homepage": "https://caraml-lang.org",
+  "bugs": {
+    "url": "https://github.com/b4er/caraml/issues"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/b4er/caraml"

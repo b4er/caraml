@@ -6,12 +6,19 @@ license-file:   LICENSE
 category:       Compiler, Development
 maintainer:     Basil Fürer <fuererb@protonmail.com>
 synopsis:       CaraML compiler and tools.
+homepage:       https://caraml-lang.org
+bug-reports:    https://github.com/b4er/caraml/issues
 build-type:     Simple
 description:
   The @caraml@ command line tool for CaraML, a strict functional programming
   language in the ML family with modular implicits. The commands, build system
   and language server are built on top of the library @caraml-verified@ which is
   generated from the Isabelle/HOL formalisation of the language.
+
+source-repository head
+  type:     git
+  location: https://github.com/b4er/caraml
+  subdir:   haskell
 
 flag werror
   description: Turn warnings into errors.
