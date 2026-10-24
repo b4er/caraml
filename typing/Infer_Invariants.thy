@@ -60,6 +60,7 @@ lemma sapp_simps[simp]:
   \<open>sapp s (TC c ts) = TC c (map (sapp s) ts)\<close> \<open>sapp s (TApp t\<^sub>1 t\<^sub>2) = TApp (sapp s t\<^sub>1) (sapp s t\<^sub>2)\<close>
   \<open>sapp s (TFn t\<^sub>1 e t\<^sub>2) = TFn (sapp s t\<^sub>1) (sappr s e) (sapp s t\<^sub>2)\<close>
   \<open>sapp s (TDep i sg m e t) = TDep i sg m (sappr s e) (sapp s t)\<close>
+  \<open>sapp s (TOff x q t) = TOff x (sapp s q) (sapp s t)\<close>
   \<open>sappr s RNil = RNil\<close> \<open>sappr s (RV v) = snd s v\<close> \<open>sappr s (RB v) = RB v\<close>
   \<open>sappr s (RCons l r) = RCons l (sappr s r)\<close>
   by (cases s; simp)+
@@ -84,7 +85,7 @@ lemma cenv_append[simp]: \<open>cenv (E\<^sub>1 @ E\<^sub>2) \<longleftrightarro
   by (simp add: cenv_def ball_Un)
 
 lemma sub_ent_closed: \<open>ftv_ent e = {} \<Longrightarrow> frv_ent e = {} \<Longrightarrow> sub_ent \<theta> \<rho> e = e\<close>
-  by (cases e) (auto simp: sub_scheme_closed)
+  by (cases e) (auto simp: sub_scheme_closed intro!: tsubst_id_on)
 
 lemma sub_env_simps[simp]:
   \<open>sub_env \<theta> \<rho> [] = []\<close> \<open>sub_env \<theta> \<rho> ((x, e) # E) = (x, sub_ent \<theta> \<rho> e) # sub_env \<theta> \<rho> E\<close>
@@ -162,12 +163,9 @@ lemma tlookup_sappe_val:
     (\<exists>\<sigma>. tlookup B p = Some (TEval \<sigma>) \<and> \<sigma>' = sapps s \<sigma>)\<close>
   by (cases s) (auto simp: tlookup_sub_env elim!: sub_ent.elims)
 
-lemma sub_ent_eq_nonval: \<open>(\<forall>\<sigma>. e \<noteq> TEval \<sigma>) \<Longrightarrow> sub_ent \<theta> \<rho> z = e \<longleftrightarrow> z = e\<close>
-  by (cases z) auto
-
-lemma tlookup_sappe_other:
-  \<open>cenv B \<Longrightarrow> (\<forall>\<sigma>. e \<noteq> TEval \<sigma>) \<Longrightarrow> tlookup (sappe s B) p = Some e \<longleftrightarrow> tlookup B p = Some e\<close>
-  by (cases s) (auto simp: tlookup_sub_env sub_ent_eq_nonval)
+lemma sub_ent_eq_nonval:
+  \<open>(\<forall>\<sigma>. z \<noteq> TEval \<sigma>) \<Longrightarrow> ftv_ent z = {} \<Longrightarrow> frv_ent z = {} \<Longrightarrow> sub_ent \<theta> \<rho> z = e \<longleftrightarrow> z = e\<close>
+  by (simp add: sub_ent_closed)
 
 subsection \<open>A confinement calculus for substitutions\<close>
 
@@ -270,11 +268,11 @@ lemma frv_sapps_sconf: \<open>sconf s V R \<Longrightarrow> ftv_sch \<sigma> \<s
 
 lemma ftv_sub_ent_sconf:
   \<open>sconf (\<theta>, \<rho>) V R \<Longrightarrow> ftv_ent e \<subseteq> V \<Longrightarrow> ftv_ent (sub_ent \<theta> \<rho> e) \<subseteq> V\<close>
-  by (cases e) (simp_all add: ftv_sub_scheme_sconf)
+  by (cases e) (simp_all add: ftv_sub_scheme_sconf ftv_tsubst_sconf)
 
 lemma frv_sub_ent_sconf:
   \<open>sconf (\<theta>, \<rho>) V R \<Longrightarrow> ftv_ent e \<subseteq> V \<Longrightarrow> frv_ent e \<subseteq> R \<Longrightarrow> frv_ent (sub_ent \<theta> \<rho> e) \<subseteq> R\<close>
-  by (cases e) (simp_all add: frv_sub_scheme_sconf)
+  by (cases e) (simp_all add: frv_sub_scheme_sconf frv_tsubst_sconf)
 
 lemma ftv_sub_env_sconf: \<open>sconf (\<theta>, \<rho>) V R \<Longrightarrow> ftv_env B \<subseteq> V \<Longrightarrow> ftv_env (sub_env \<theta> \<rho> B) \<subseteq> V\<close>
 proof (induction B)
@@ -983,6 +981,7 @@ lemma bfree_simps[simp]:
   \<open>bfree (TApp t\<^sub>1 t\<^sub>2) \<longleftrightarrow> bfree t\<^sub>1 \<and> bfree t\<^sub>2\<close>
   \<open>bfree (TFn t\<^sub>1 e t\<^sub>2) \<longleftrightarrow> bfree t\<^sub>1 \<and> brv_row e = {} \<and> bfree t\<^sub>2\<close>
   \<open>bfree (TDep i sg m e t) \<longleftrightarrow> brv_row e = {} \<and> bfree t\<close>
+  \<open>bfree (TOff x r t) \<longleftrightarrow> bfree r \<and> bfree t\<close>
   \<open>bfree (TEv l s t) \<longleftrightarrow> bfree l \<and> bfree s \<and> bfree t\<close>
   \<open>bfree (TAct l K e t) \<longleftrightarrow> bfree l \<and> brv_row e = {} \<and> bfree t\<close>
   \<open>bfree TRNil\<close> \<open>bfree (TRCons lb t r) \<longleftrightarrow> bfree t \<and> bfree r\<close>
@@ -1178,9 +1177,9 @@ definition lookup_eq :: \<open>tenv \<Rightarrow> tenv \<Rightarrow> bool\<close
 lemma ent_sim_refl[simp]: \<open>ent_sim e e\<close>
   by (cases e) auto
 
-lemma ent_sim_sub_ent: \<open>ent_sim e (sub_ent \<theta> \<rho> e)\<close>
-  by (cases e) auto
-
+lemma ent_sim_sub_ent:
+  \<open>(\<exists>\<sigma>. e = TEval \<sigma>) \<or> ftv_ent e = {} \<and> frv_ent e = {} \<Longrightarrow> ent_sim e (sub_ent \<theta> \<rho> e)\<close>
+  by (cases e) (auto simp: sub_ent_closed intro!: tsubst_id_on)
 lemma lookup_eq_refl[simp]: \<open>lookup_eq B B\<close>
   by (simp add: lookup_eq_def option.rel_refl)
 
@@ -1196,18 +1195,21 @@ proof -
        (auto intro: None Val Other elim!: ent_sim.elims)
 qed
 
-lemma lookup_eq_sub_env: \<open>lookup_eq B (sub_env \<theta> \<rho> B)\<close>
+lemma lookup_eq_sub_env: \<open>cenv B \<Longrightarrow> lookup_eq B (sub_env \<theta> \<rho> B)\<close>
 proof (unfold lookup_eq_def, intro allI)
-  fix p show \<open>rel_option ent_sim (tlookup B p) (tlookup (sub_env \<theta> \<rho> B) p)\<close>
+  fix p assume c: \<open>cenv B\<close>
+  have es: \<open>ent_sim e (sub_ent \<theta> \<rho> e)\<close> if \<open>map_of B x = Some e\<close> for x e
+    using c map_of_SomeD[OF that] by (auto simp: cenv_def intro: ent_sim_sub_ent)
+  show \<open>rel_option ent_sim (tlookup B p) (tlookup (sub_env \<theta> \<rho> B) p)\<close>
   proof (cases p)
     case (Cons x xs)
     then show ?thesis
-      by (cases xs) (auto simp: map_of_sub_env ent_sim_sub_ent option.rel_map
+      by (cases xs) (auto simp: map_of_sub_env es option.rel_map
                           intro!: option.rel_refl_strong split: option.split tentry.split)
   qed simp
 qed
 
-lemma lookup_eq_sappe: \<open>lookup_eq B (sappe s B)\<close>
+lemma lookup_eq_sappe: \<open>cenv B \<Longrightarrow> lookup_eq B (sappe s B)\<close>
   by (cases s) (simp add: lookup_eq_sub_env)
 
 lemma tlookup_Cons:
@@ -1856,6 +1858,28 @@ qed simp
 lemma cenv_tlookup_nonval:
   \<open>cenv B \<Longrightarrow> tlookup B p = Some e \<Longrightarrow> \<forall>\<sigma>. e \<noteq> TEval \<sigma> \<Longrightarrow> ftv_ent e = {} \<and> frv_ent e = {}\<close>
   by (auto dest: cenv_tlookup)
+
+lemma tlookup_sappe_other:
+  assumes c: \<open>cenv B\<close> and nv: \<open>\<forall>\<sigma>. e \<noteq> TEval \<sigma>\<close>
+  shows \<open>tlookup (sappe s B) p = Some e \<longleftrightarrow> tlookup B p = Some e\<close>
+proof (cases s)
+  case (Pair \<theta> \<rho>)
+  have l: \<open>tlookup (sappe s B) p = map_option (sub_ent \<theta> \<rho>) (tlookup B p)\<close>
+    using tlookup_sub_env[OF c] Pair by simp
+  show ?thesis
+  proof
+    assume \<open>tlookup (sappe s B) p = Some e\<close>
+    then obtain z where z: \<open>tlookup B p = Some z\<close> \<open>sub_ent \<theta> \<rho> z = e\<close>
+      unfolding l by auto
+    have \<open>\<forall>\<sigma>. z \<noteq> TEval \<sigma>\<close> using z nv by auto
+    then show \<open>tlookup B p = Some e\<close>
+      using cenv_tlookup_nonval[OF c z(1)] z sub_ent_closed by auto
+  next
+    assume z: \<open>tlookup B p = Some e\<close>
+    then show \<open>tlookup (sappe s B) p = Some e\<close>
+      using cenv_tlookup_nonval[OF c z] nv sub_ent_closed unfolding l by auto
+  qed
+qed
 
 text \<open>The type and row variables of a type-variable environment, and its well-formedness: it holds
   no abstract type and no bound variable.\<close>
@@ -2539,8 +2563,13 @@ lemma ktv_sub_scheme:
   by (cases \<sigma>) (simp_all add: khyg_def ktv_tsubst_sub)
 
 lemma ktv_sub_ent:
-  \<open>khyg (\<theta>, \<rho>) FK \<Longrightarrow> ktv_ent e \<subseteq> FK \<Longrightarrow> ktv_ent (sub_ent \<theta> \<rho> e) \<subseteq> FK\<close>
-  by (cases e) (auto simp: ktv_sub_scheme)
+  assumes kh: \<open>khyg (\<theta>, \<rho>) FK\<close> and ke: \<open>ktv_ent e \<subseteq> FK\<close>
+  shows \<open>ktv_ent (sub_ent \<theta> \<rho> e) \<subseteq> FK\<close>
+proof (cases e)
+  case (TEoff x r)
+  have \<open>ktv (\<theta> a) \<subseteq> FK\<close> for a using kh by (simp add: khyg_def)
+  then show ?thesis using ke TEoff by (simp add: ktv_tsubst_sub)
+qed (use kh ke in \<open>auto simp: ktv_sub_scheme\<close>)
 
 lemma ktv_env_sub_env:
   \<open>khyg (\<theta>, \<rho>) FK \<Longrightarrow> ktv_env B \<subseteq> FK \<Longrightarrow> ktv_env (sub_env \<theta> \<rho> B) \<subseteq> FK\<close>

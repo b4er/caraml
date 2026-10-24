@@ -75,6 +75,23 @@ fun ktv_preq :: \<open>preq \<Rightarrow> tvar set\<close> where
 definition ktv_pend :: \<open>pend \<Rightarrow> tvar set\<close> where
   \<open>ktv_pend pd = (\<Union>(x, q) \<in> set pd. ktv_preq q)\<close>
 
+text \<open>The abstract types the pending offset requests' rows mention. Implicit requests
+  contribute nothing: their realisations never enter the basis, whereas offset rows do,
+  through \<^text>\<open>gen_off\<close> (\<^text>\<open>TEoff\<close> entries and \<^text>\<open>TOff\<close> schemes). A binder's
+  abstract type must not escape through them.\<close>
+
+fun ktv_req :: \<open>preq \<Rightarrow> tvar set\<close> where
+  \<open>ktv_req (POff x r) = ktv r\<close>
+| \<open>ktv_req q = {}\<close>
+
+definition ktv_rows :: \<open>pend \<Rightarrow> tvar set\<close> where
+  \<open>ktv_rows pd = (\<Union>(v, q) \<in> set pd. ktv_req q)\<close>
+
+lemma ktv_rows_simps [simp]:
+  \<open>ktv_rows [] = {}\<close> \<open>ktv_rows ((v, q) # pd) = ktv_req q \<union> ktv_rows pd\<close>
+  \<open>ktv_rows (pd @ pd') = ktv_rows pd \<union> ktv_rows pd'\<close>
+  by (auto simp: ktv_rows_def)
+
 text \<open>At a binder's exit, the open implicit requests mentioning its abstract
   types are resolved from their own scope.\<close>
 
@@ -108,6 +125,43 @@ definition gen_p :: \<open>tenv \<Rightarrow> krow \<Rightarrow> pend \<Rightarr
   \<open>gen_p B A pd n \<tau> =
      (ftv \<tau> - ftv_env B - ftv_pend pd - set [0 ..< n],
       frv \<tau> - frv_env B - frv_row A - frv_pend pd - set [0 ..< n])\<close>
+
+text \<open>A binding that generalises abstracts the projections whose record type ends
+  in a variable it generalises: they become evidence
+  parameters of the binding, prefixes of its scheme, and leave the pending
+  resolutions. The other projections, and the implicit requests, keep their
+  variables monomorphic as before. The evidence variable of an abstracted
+  projection is its placeholder, bound by the binding instead of replaced.\<close>
+
+fun is_off :: \<open>preq \<Rightarrow> bool\<close> where
+  \<open>is_off (POff l r) = True\<close>
+| \<open>is_off q = False\<close>
+
+fun abs_req :: \<open>tvar set \<Rightarrow> preq \<Rightarrow> bool\<close> where
+  \<open>abs_req as (POff l r) = (case rtail r of TV a \<Rightarrow> a \<in> as | _ \<Rightarrow> False)\<close>
+| \<open>abs_req as q = False\<close>
+
+fun req_of :: \<open>name \<times> preq \<Rightarrow> name \<times> name \<times> kty\<close> where
+  \<open>req_of (v, POff l r) = (v, l, r)\<close>
+| \<open>req_of (v, q) = (v, [], TRNil)\<close>
+
+definition gen_off ::
+  \<open>tenv \<Rightarrow> krow \<Rightarrow> pend \<Rightarrow> nat \<Rightarrow> kty \<Rightarrow> tvar set \<times> rvar set \<times> reqs \<times> pend\<close>
+where
+  \<open>gen_off B A pd n \<tau> =
+     (case gen_p B A (filter (\<lambda>(v, q). \<not> is_off q) pd) n \<tau> of (as, rs) \<Rightarrow>
+        (let N = filter (\<lambda>(v, q). \<not> abs_req as q) pd
+         in (as - ftv_pend N, rs - frv_pend N,
+             map req_of (filter (\<lambda>(v, q). abs_req as q) pd), N)))\<close>
+
+text \<open>Instantiating a scheme with prefixes outside head position: one placeholder
+  and one pending projection per prefix.\<close>
+
+fun off_evs :: \<open>nat \<Rightarrow> kty \<Rightarrow> matom list \<times> pend \<times> kty \<times> nat\<close> where
+  \<open>off_evs n (TOff x r \<tau>) =
+     (case off_evs (Suc n) \<tau> of (evs, pd, \<tau>', n') \<Rightarrow>
+        (off_var (imp_name n) # evs, (imp_name n, POff x r) # pd, \<tau>', n'))\<close>
+| \<open>off_evs n \<tau> = ([], [], \<tau>, n)\<close>
 
 text \<open>Replacing placeholder module arguments by the resolved instance
   paths.\<close>
@@ -505,6 +559,7 @@ where
                (RV n\<^sub>2) pd e (Suc n\<^sub>2) \<bind> (\<lambda>(s, e', \<tau>, pd\<^sub>1, n\<^sub>3).
            resolve_inner K pd\<^sub>1 \<bind> (\<lambda>pd'.
              (if list_all (\<lambda>a. set K \<inter> ktv (fst s a) = {}) [0 ..< Suc n\<^sub>2] \<and>
+                 set K \<inter> ktv_rows pd' = {} \<and>
                  set K \<inter> ktv_env B = {} \<and>
                  named_sig (mbind_sig b) \<and> nm_ok (mbind_nm b)
               then Some (sproj (Suc n\<^sub>2) s, EFnMod b e',
@@ -517,11 +572,15 @@ where
          uni uf (sapp sp \<tau>\<^sub>e) \<tau>\<^sub>p n\<^sub>2 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>3).
            (let s = s\<^sub>2 \<odot> sp \<odot> s\<^sub>1; B' = sappe s B; A' = sappr s A; pd' = sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1;
                 \<tau>\<^sub>e' = sapp s\<^sub>2 \<tau>\<^sub>p;
-                (as, rs) = (if val_exp B e' then gen_p B' A' pd' n \<tau>\<^sub>e' else ({}, {}));
-                \<Gamma>' = map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (sapp s\<^sub>2 \<tau>)))) \<Gamma>
+                (as, rs, reqs, pdr) =
+                  (if val_exp B e'
+                   then (if var_pat p \<and> length \<Gamma> = 1 then gen_off B' A' pd' n \<tau>\<^sub>e'
+                         else (case gen_p B' A' pd' n \<tau>\<^sub>e' of (as, rs) \<Rightarrow> (as, rs, [], pd')))
+                   else ({}, {}, [], pd'));
+                \<Gamma>' = map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>))))) \<Gamma>
             in (if covers B' \<tau>\<^sub>e' [p] \<and> btv_list \<tau>\<^sub>e' = [] \<and> brv_list \<tau>\<^sub>e' = []
-                then infer uf (\<Gamma>' @ B') A' pd' b n\<^sub>3 \<bind> (\<lambda>(s\<^sub>3, b', \<tau>, pd\<^sub>3, n\<^sub>4).
-                       Some (s\<^sub>3 \<odot> s, ELet p' e' b', \<tau>, pd\<^sub>3, n\<^sub>4))
+                then infer uf (\<Gamma>' @ B') A' pdr b n\<^sub>3 \<bind> (\<lambda>(s\<^sub>3, b', \<tau>, pd\<^sub>3, n\<^sub>4).
+                       Some (s\<^sub>3 \<odot> s, ELet p' (ev_wrap reqs e') b', \<tau>, pd\<^sub>3, n\<^sub>4))
                 else None)))))\<close>
 | \<open>infer uf B A pd (ESeq e\<^sub>1 e\<^sub>2) n =
      infer uf B A pd e\<^sub>1 n \<bind> (\<lambda>(s\<^sub>1, e\<^sub>1', \<tau>\<^sub>1, pd\<^sub>1, n\<^sub>1).
@@ -583,11 +642,11 @@ where
             (\<lambda>(s\<^sub>1, r', \<tau>', pd\<^sub>1, n\<^sub>1).
             uni uf (sapp s\<^sub>1 (TV n)) \<tau>' n\<^sub>1 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>2).
               (let s = s\<^sub>2 \<odot> s\<^sub>1; B' = sappe s B; A' = sappr s A; pd' = sub_pend s\<^sub>2 pd\<^sub>1;
-                   \<tau> = sapp s\<^sub>2 \<tau>'; (as, rs) = gen_p B' A' pd' n \<tau>
+                   \<tau> = sapp s\<^sub>2 \<tau>'; (as, rs, reqs, pdr) = gen_off B' A' pd' n \<tau>
                in (if btv_list \<tau> = [] \<and> brv_list \<tau> = []
-                   then infer uf ((n_txt f, TEval (close_sch as rs \<tau>)) # B') A' pd' b n\<^sub>2 \<bind>
-                          (\<lambda>(s\<^sub>3, b', \<tau>\<^sub>b, pd\<^sub>3, n\<^sub>3).
-                          Some (s\<^sub>3 \<odot> s, ELetFun f [] [([], r')] b', \<tau>\<^sub>b, pd\<^sub>3, n\<^sub>3))
+                   then infer uf ((n_txt f, TEval (close_sch as rs (offs reqs \<tau>))) # B') A' pdr b n\<^sub>2
+                          \<bind> (\<lambda>(s\<^sub>3, b', \<tau>\<^sub>b, pd\<^sub>3, n\<^sub>3).
+                          Some (s\<^sub>3 \<odot> s, ELetFun f [] [([], ev_bind f reqs r')] b', \<tau>\<^sub>b, pd\<^sub>3, n\<^sub>3))
                    else None))))))\<close>
 | \<open>infer uf B A pd (EGuards []) n = None\<close>
 | \<open>infer uf B A pd (EGuards ((gs, e) # alts)) n =
@@ -619,7 +678,11 @@ where
 
 | \<open>infer_atom uf B A pd (APath p) n =
      (case tlookup B (path_nms p) of
-        Some (TEval \<sigma>) \<Rightarrow> (case inst_scheme n \<sigma> of (\<tau>, n') \<Rightarrow> Some (sid, APath p, \<tau>, pd, n'))
+        Some (TEval \<sigma>) \<Rightarrow>
+          (case inst_scheme n \<sigma> of (\<tau>\<^sub>0, n') \<Rightarrow>
+            (case off_evs n' \<tau>\<^sub>0 of (evs, pd\<^sub>o, \<tau>, n'') \<Rightarrow>
+              Some (sid, (if evs = [] then APath p else AParen [ESpine (APath p # evs)]),
+                    \<tau>, pd\<^sub>o @ pd, n'')))
       | Some (TEcon \<sigma> m) \<Rightarrow> (case inst_scheme n \<sigma> of (\<tau>, n') \<Rightarrow> Some (sid, APath p, \<tau>, pd, n'))
       | Some (TEop l ps \<tau>\<^sub>1 \<tau>\<^sub>2) \<Rightarrow>
           (if ps = []
@@ -695,6 +758,10 @@ where
                      | None \<Rightarrow> None)
                 | None \<Rightarrow> None)
            | _ \<Rightarrow> None)
+      | TOff x r \<tau>' \<Rightarrow>
+          (let v = imp_name n
+           in infer_args uf B A ((v, POff x r) # pd) d \<tau>' as (Suc n) \<bind>
+                (\<lambda>(s, as', \<tau>, pd', n'). Some (s, off_var v # as', \<tau>, pd', n')))
       | _ \<Rightarrow>
           (case as of
              [] \<Rightarrow> Some (sid, [], \<tau>\<^sub>0, pd, n)
@@ -797,7 +864,8 @@ where
      name's effect is known when the body is inferred (and so may be named in its
      annotations); the body is then unified with the action's result type. The scope
      variable must not escape into the substitution on the variables older than
-     the body; the variables the body minted are projected away.\<close>
+     the body nor into the pending offset rows; the variables the body minted are
+     projected away.\<close>
 | \<open>infer uf B A pd (EHandlerN cls) n =
      (case hlabels B cls of
         [] \<Rightarrow> None
@@ -835,7 +903,8 @@ where
                      (sappr s\<^sub>2 \<epsilon>\<^sub>0) pd\<^sub>2 e n\<^sub>3 \<bind> (\<lambda>(s\<^sub>3, e', \<tau>\<^sub>0', pd\<^sub>3, n\<^sub>4).
                  uni uf (sapp (s\<^sub>3 \<odot> s\<^sub>2) \<tau>\<^sub>0) \<tau>\<^sub>0' n\<^sub>4 \<bind> (\<lambda>(s\<^sub>4, n\<^sub>5).
                    (let s' = s\<^sub>4 \<odot> s\<^sub>3
-                    in (if list_all (\<lambda>a. k \<notin> ktv (fst s' a)) [0 ..< n\<^sub>3]
+                    in (if list_all (\<lambda>a. k \<notin> ktv (fst s' a)) [0 ..< n\<^sub>3] \<and>
+                           k \<notin> ktv_rows (sub_pend s\<^sub>4 pd\<^sub>3)
                         then Some (sproj n\<^sub>3 s' \<odot> s\<^sub>2 \<odot> s\<^sub>1, EWith x h' e', sapp (sproj n\<^sub>3 s') \<tau>,
                                    sub_pend s\<^sub>4 pd\<^sub>3, n\<^sub>5)
                         else None)))))))))\<close>
@@ -864,6 +933,9 @@ termination
       | Inr (Inr (Inr (uf, B, A, pd, nm, \<tau>\<^sub>0, targs, cls, n))) \<Rightarrow> 2 * size_list size cls,
       \<lambda>x. case x of
         Inl (Inr (Inr (uf, B, A, pd, d, \<tau>\<^sub>0, as, n))) \<Rightarrow> d
+      | _ \<Rightarrow> 0,
+      \<lambda>x. case x of
+        Inl (Inr (Inr (uf, B, A, pd, d, \<tau>\<^sub>0, as, n))) \<Rightarrow> size \<tau>\<^sub>0
       | _ \<Rightarrow> 0]\<close>) (auto simp: nlf_fields size_fields, (drule (1) bspec; simp)+)
 
 lemmas infer_induct =
@@ -875,7 +947,7 @@ text \<open>The equation of \<^const>\<open>infer_args\<close> at an argument wh
   instead of splitting the whole equation.\<close>
 
 lemma infer_args_Cons_plain:
-  assumes \<open>\<forall>i sg m \<epsilon> t. \<tau>\<^sub>0 \<noteq> TDep i sg m \<epsilon> t\<close>
+  assumes \<open>\<forall>i sg m \<epsilon> t. \<tau>\<^sub>0 \<noteq> TDep i sg m \<epsilon> t\<close> \<open>\<forall>x r t. \<tau>\<^sub>0 \<noteq> TOff x r t\<close>
   shows \<open>infer_args uf B A pd d \<tau>\<^sub>0 (a # rest) n =
     infer_atom uf B A pd a n \<bind> (\<lambda>(s\<^sub>1, a', \<tau>\<^sub>a, pd\<^sub>1, n\<^sub>1).
       app_arg uf (sappe s\<^sub>1 B) (sappr s\<^sub>1 A) pd\<^sub>1 (sapp s\<^sub>1 \<tau>\<^sub>0) \<tau>\<^sub>a n\<^sub>1 \<bind>
@@ -919,6 +991,120 @@ lemma infer_args_TDep_True:
                   \<bind> (\<lambda>(s\<^sub>2, as', \<tau>, pd\<^sub>2, n\<^sub>4).
                     Some (s\<^sub>2 \<odot> s\<^sub>1, AMod (MkPath [mk_nm x]) sg # as', \<tau>, pd\<^sub>2, n\<^sub>4))))))))\<close>
   by (subst infer_args.simps) (simp only: kty.case bool.case)
+
+lemma infer_args_TOff:
+  \<open>infer_args uf B A pd d (TOff x r \<tau>') as n =
+    (let v = imp_name n
+     in infer_args uf B A ((v, POff x r) # pd) d \<tau>' as (Suc n) \<bind>
+          (\<lambda>(s, as', \<tau>, pd', n'). Some (s, off_var v # as', \<tau>, pd', n')))\<close>
+  by (subst infer_args.simps) (simp only: kty.case)
+
+text \<open>Structural facts about the evidence helpers, shared by the invariant proofs.\<close>
+
+lemma offs_ftv: \<open>ftv (offs reqs \<tau>) = ftv \<tau> \<union> (\<Union>(v, x, r) \<in> set reqs. ftv r)\<close>
+  by (induction reqs \<tau> rule: offs.induct) auto
+
+lemma offs_frv: \<open>frv (offs reqs \<tau>) = frv \<tau> \<union> (\<Union>(v, x, r) \<in> set reqs. frv r)\<close>
+  by (induction reqs \<tau> rule: offs.induct) auto
+
+lemma offs_ktv: \<open>ktv (offs reqs \<tau>) = ktv \<tau> \<union> (\<Union>(v, x, r) \<in> set reqs. ktv r)\<close>
+  by (induction reqs \<tau> rule: offs.induct) auto
+
+lemma offs_btv: \<open>btv (offs reqs \<tau>) = btv \<tau> \<union> (\<Union>(v, x, r) \<in> set reqs. btv r)\<close>
+  by (induction reqs \<tau> rule: offs.induct) auto
+
+lemma offs_brv: \<open>brv (offs reqs \<tau>) = brv \<tau> \<union> (\<Union>(v, x, r) \<in> set reqs. brv r)\<close>
+  by (induction reqs \<tau> rule: offs.induct) auto
+
+lemma offs_tsigs: \<open>tsigs (offs reqs \<tau>) = tsigs \<tau> \<union> (\<Union>(v, x, r) \<in> set reqs. tsigs r)\<close>
+  by (induction reqs \<tau> rule: offs.induct) auto
+
+lemma ftv_ev_env: \<open>ftv_env (ev_env reqs) = (\<Union>(v, x, r) \<in> set reqs. ftv r)\<close>
+  by (induction reqs) (auto simp: ev_env_def)
+
+lemma frv_ev_env: \<open>frv_env (ev_env reqs) = (\<Union>(v, x, r) \<in> set reqs. frv r)\<close>
+  by (induction reqs) (auto simp: ev_env_def)
+
+lemma ktv_ev_env: \<open>ktv_env (ev_env reqs) = (\<Union>(v, x, r) \<in> set reqs. ktv r)\<close>
+  by (induction reqs) (auto simp: ev_env_def)
+
+lemma off_evs_le: \<open>off_evs n \<tau>\<^sub>0 = (evs, pdo, \<tau>, n') \<Longrightarrow> n \<le> n'\<close>
+  by (induction n \<tau>\<^sub>0 arbitrary: evs pdo \<tau> n' rule: off_evs.induct)
+     (auto split: prod.split_asm)
+
+lemma off_evs_no_TOff: \<open>off_evs n \<tau>\<^sub>0 = (evs, pdo, \<tau>, n') \<Longrightarrow> \<forall>x r t. \<tau> \<noteq> TOff x r t\<close>
+  by (induction n \<tau>\<^sub>0 arbitrary: evs pdo \<tau> n' rule: off_evs.induct)
+     (auto split: prod.split_asm)
+
+lemma off_evs_ftv:
+  \<open>off_evs n \<tau>\<^sub>0 = (evs, pdo, \<tau>, n') \<Longrightarrow> ftv \<tau> \<subseteq> ftv \<tau>\<^sub>0 \<and> ftv_pend pdo \<subseteq> ftv \<tau>\<^sub>0\<close>
+  by (induction n \<tau>\<^sub>0 arbitrary: evs pdo \<tau> n' rule: off_evs.induct)
+     (auto simp: ftv_pend_def split: prod.split_asm)
+
+lemma off_evs_frv:
+  \<open>off_evs n \<tau>\<^sub>0 = (evs, pdo, \<tau>, n') \<Longrightarrow> frv \<tau> \<subseteq> frv \<tau>\<^sub>0 \<and> frv_pend pdo \<subseteq> frv \<tau>\<^sub>0\<close>
+  by (induction n \<tau>\<^sub>0 arbitrary: evs pdo \<tau> n' rule: off_evs.induct)
+     (auto simp: frv_pend_def split: prod.split_asm)
+
+lemma off_evs_ktv:
+  \<open>off_evs n \<tau>\<^sub>0 = (evs, pdo, \<tau>, n') \<Longrightarrow> ktv \<tau> \<subseteq> ktv \<tau>\<^sub>0 \<and> ktv_pend pdo = {}\<close>
+  by (induction n \<tau>\<^sub>0 arbitrary: evs pdo \<tau> n' rule: off_evs.induct)
+     (auto simp: ktv_pend_def split: prod.split_asm)
+
+lemma off_evs_btv:
+  \<open>off_evs n \<tau>\<^sub>0 = (evs, pdo, \<tau>, n') \<Longrightarrow> btv \<tau> \<subseteq> btv \<tau>\<^sub>0 \<and> brv \<tau> \<subseteq> brv \<tau>\<^sub>0\<close>
+  by (induction n \<tau>\<^sub>0 arbitrary: evs pdo \<tau> n' rule: off_evs.induct)
+     (auto split: prod.split_asm)
+
+lemma off_evs_tsigs:
+  \<open>off_evs n \<tau>\<^sub>0 = (evs, pdo, \<tau>, n') \<Longrightarrow>
+     tsigs \<tau> \<subseteq> tsigs \<tau>\<^sub>0 \<and> (\<forall>(v, q) \<in> set pdo. \<exists>x r. q = POff x r \<and> tsigs r \<subseteq> tsigs \<tau>\<^sub>0)\<close>
+proof (induction n \<tau>\<^sub>0 arbitrary: evs pdo \<tau> n' rule: off_evs.induct)
+  case (1 n x r t)
+  then obtain evs' pdo' where e: \<open>off_evs (Suc n) t = (evs', pdo', \<tau>, n')\<close>
+    \<open>pdo = (imp_name n, POff x r) # pdo'\<close>
+    by (auto split: prod.split_asm)
+  from "1.IH"[OF e(1)] show ?case unfolding e(2) by (auto simp: subset_iff)
+qed (auto split: prod.split_asm)
+
+lemma off_evs_names:
+  \<open>off_evs n \<tau>\<^sub>0 = (evs, pdo, \<tau>, n') \<Longrightarrow> map fst pdo = map imp_name [n ..< n']\<close>
+proof (induction n \<tau>\<^sub>0 arbitrary: evs pdo \<tau> n' rule: off_evs.induct)
+  case (1 n x r t)
+  then obtain evs' pdo' where e: \<open>off_evs (Suc n) t = (evs', pdo', \<tau>, n')\<close>
+    \<open>pdo = (imp_name n, POff x r) # pdo'\<close>
+    by (auto split: prod.split_asm)
+  with 1 off_evs_le[OF e(1)] show ?case by (simp add: upt_conv_Cons)
+qed (auto split: prod.split_asm)
+
+lemma off_evs_is_off:
+  \<open>off_evs n \<tau>\<^sub>0 = (evs, pdo, \<tau>, n') \<Longrightarrow> \<forall>(v, q) \<in> set pdo. is_off q\<close>
+  by (induction n \<tau>\<^sub>0 arbitrary: evs pdo \<tau> n' rule: off_evs.induct)
+     (auto split: prod.split_asm)
+
+lemma abs_req_is_off: \<open>abs_req as q \<Longrightarrow> is_off q\<close>
+  by (cases q) auto
+
+lemma fst_req_of: \<open>fst (req_of p) = fst p\<close>
+  by (cases p; cases \<open>snd p\<close>) auto
+
+lemma gen_off_pend:
+  \<open>gen_off B A pd n \<tau> = (as, rs, reqs, pdr) \<Longrightarrow>
+     set pdr \<subseteq> set pd \<and> (\<forall>(v, x, r) \<in> set reqs. (v, POff x r) \<in> set pd) \<and>
+     map fst reqs = map fst (filter (\<lambda>(v, q). abs_req (fst (gen_p B A (filter (\<lambda>(v, q). \<not> is_off q) pd) n \<tau>)) q) pd) \<and>
+     pdr = filter (\<lambda>(v, q). \<not> abs_req (fst (gen_p B A (filter (\<lambda>(v, q). \<not> is_off q) pd) n \<tau>)) q) pd\<close>
+  unfolding gen_off_def Let_def
+  by (auto simp: fst_req_of split: prod.split_asm elim!: abs_req.elims)
+
+lemma gen_off_distinct:
+  \<open>gen_off B A pd n \<tau> = (as, rs, reqs, pdr) \<Longrightarrow> distinct (map fst pd) \<Longrightarrow> distinct (map fst reqs)\<close>
+  by (drule gen_off_pend) (auto simp: distinct_map_filter)
+
+lemma gen_off_sub:
+  \<open>gen_off B A pd n \<tau> = (as, rs, reqs, pdr) \<Longrightarrow>
+     as \<subseteq> ftv \<tau> - ftv_env B - ftv_pend pdr - set [0 ..< n] \<and>
+     rs \<subseteq> frv \<tau> - frv_env B - frv_row A - frv_pend pdr - set [0 ..< n]\<close>
+  unfolding gen_off_def gen_p_def Let_def by (auto split: prod.split_asm)
 
 subsection \<open>Resolving pending implicit arguments\<close>
 
@@ -977,6 +1163,7 @@ where
 | \<open>bfree_ent_x (TEinst ex) = bfree_env_x ex\<close>
 | \<open>bfree_ent_x (TEsig (T, E)) = bfree_env_x E\<close>
 | \<open>bfree_ent_x (TEfun ps (T, E)) = (list_all (\<lambda>(x, T, E). bfree_env_x E) ps \<and> bfree_env_x E)\<close>
+| \<open>bfree_ent_x (TEoff x r) = bfree_x r\<close>
 | \<open>bfree_ent_x e = True\<close>
 | \<open>bfree_env_x [] = True\<close>
 | \<open>bfree_env_x ((x, e) # ex) = (bfree_ent_x e \<and> bfree_env_x ex)\<close>
@@ -994,15 +1181,19 @@ where
       then infer uf ((n_txt x, TEval (kmono (TV n))) # B) RNil [] e (Suc n) \<bind>
              (\<lambda>(s\<^sub>1, e', \<tau>', pd, n\<^sub>1).
              uni uf (sapp s\<^sub>1 (TV n)) \<tau>' n\<^sub>1 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>2).
-               resolve_pend (sub_pend s\<^sub>2 pd) \<bind> (\<lambda>tab.
-                 (let \<tau> = sapp s\<^sub>2 \<tau>'
-                  in (if \<not> bfree_x \<tau> then None else
-                      Some (DLet x (subst_imp tab e'), [(n_txt x, TEval (gen B RNil \<tau>))], n\<^sub>2))))))
+               (let \<tau> = sapp s\<^sub>2 \<tau>'; (as, rs, reqs, pdr) = gen_off B RNil (sub_pend s\<^sub>2 pd) n \<tau>
+                in resolve_pend pdr \<bind> (\<lambda>tab.
+                  (if \<not> bfree_x \<tau> then None else
+                   Some (DLet x (subst_imp tab (ev_bind x reqs e')),
+                         [(n_txt x, TEval (gen B RNil (offs reqs \<tau>)))], n\<^sub>2))))))
       else infer uf B RNil [] e n \<bind> (\<lambda>(s\<^sub>1, e', \<tau>, pd, n\<^sub>1).
-             resolve_pend pd \<bind> (\<lambda>tab.
+             (let (as, rs, reqs, pdr) =
+                    (if val_exp B e' then gen_off B RNil pd n \<tau> else ({}, {}, [], pd))
+              in resolve_pend pdr \<bind> (\<lambda>tab.
                (if \<not> bfree_x \<tau> \<or> \<not> ((ftv \<tau> \<subseteq> ftv_env B \<and> frv \<tau> \<subseteq> frv_env B) \<or> val_exp B e')
                 then None
-                else Some (DLet x (subst_imp tab e'), [(n_txt x, TEval (gen B RNil \<tau>))], n\<^sub>1)))))\<close>
+                else Some (DLet x (subst_imp tab (ev_wrap reqs e')),
+                           [(n_txt x, TEval (gen B RNil (offs reqs \<tau>)))], n\<^sub>1))))))\<close>
 
 text \<open>Declarations, declaration lists and module expressions under the module prefix
   \<open>pre\<close>: each returns the elaborated syntax, the basis it adds and its foreign
@@ -1196,6 +1387,7 @@ where
 | \<open>bnd_ent (TEop l ps t\<^sub>1 t\<^sub>2) = Max ({kty_bnd t\<^sub>1, kty_bnd t\<^sub>2} \<union> Suc ` (stamps t\<^sub>1 \<union> stamps t\<^sub>2))\<close>
 | \<open>bnd_ent (TEffi s \<sigma>) = bnd_sch \<sigma>\<close>
 | \<open>bnd_ent (TEeff l ls ar) = 0\<close>
+| \<open>bnd_ent (TEoff x r) = Max ({kty_bnd r} \<union> Suc ` stamps r)\<close>
 | \<open>bnd_env [] = first_stamp\<close>
 | \<open>bnd_env ((x, e) # ex) = max (bnd_ent e) (bnd_env ex)\<close>
 

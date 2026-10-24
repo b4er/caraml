@@ -59,6 +59,8 @@ and tmatchs :: \<open>kty list \<Rightarrow> kty list \<Rightarrow> tsub \<times
       then rmatch e f \<rho> \<bind> (\<lambda>\<rho>'. tmatch t w (\<theta>, \<rho>')) else None)\<close>
 | \<open>tmatch (TApp t\<^sub>1 t\<^sub>2) (TApp w\<^sub>1 w\<^sub>2) \<sigma> =
      tmatch t\<^sub>1 w\<^sub>1 \<sigma> \<bind> tmatch t\<^sub>2 w\<^sub>2\<close>
+| \<open>tmatch (TOff x r t) (TOff x' r' w) \<sigma> =
+     (if x = x' then tmatch r r' \<sigma> \<bind> tmatch t w else None)\<close>
 | \<open>tmatch (TEv l s t) (TEv l' s' w) \<sigma> =
      tmatch l l' \<sigma> \<bind> (\<lambda>\<sigma>\<^sub>1. tmatch s s' \<sigma>\<^sub>1 \<bind> tmatch t w)\<close>
 | \<open>tmatch (TAct l K e t) (TAct l' K' f w) \<sigma> =
@@ -182,6 +184,21 @@ next
   moreover have \<open>bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'') t\<^sub>2 = w\<^sub>2\<close>
     using m\<^sub>1 m\<^sub>2 le by (rule tmatch_TApp.hyps)
   ultimately show ?case by simp
+next
+  case (tmatch_TOff x r t x' r' w \<theta> \<rho> \<theta>' \<rho>')
+  note le = \<open>\<theta>' \<subseteq>\<^sub>m \<theta>''\<close> \<open>\<rho>' \<subseteq>\<^sub>m \<rho>''\<close>
+  from tmatch_TOff.prems obtain \<theta>\<^sub>1 \<rho>\<^sub>1 where
+    eq: \<open>x = x'\<close> and
+    m\<^sub>1: \<open>tmatch r r' (\<theta>, \<rho>) = Some (\<theta>\<^sub>1, \<rho>\<^sub>1)\<close> and
+    m\<^sub>2: \<open>tmatch t w (\<theta>\<^sub>1, \<rho>\<^sub>1) = Some (\<theta>', \<rho>')\<close>
+    by (auto elim!: obind_SomeE split: prod.split_asm if_split_asm)
+  have le\<^sub>1: \<open>\<theta>\<^sub>1 \<subseteq>\<^sub>m \<theta>''\<close> \<open>\<rho>\<^sub>1 \<subseteq>\<^sub>m \<rho>''\<close>
+    using tmatch_le[OF m\<^sub>2] le map_le_trans by blast+
+  have \<open>bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'') r = r'\<close>
+    using eq m\<^sub>1 le\<^sub>1 by (rule tmatch_TOff.hyps)
+  moreover have \<open>bsubst (mk_btsub \<theta>'') (mk_brsub \<rho>'') t = w\<close>
+    using eq m\<^sub>1 m\<^sub>2 le by (rule tmatch_TOff.hyps)
+  ultimately show ?case using eq by simp
 next
   case (tmatch_TEv l s t l' s' w \<theta> \<rho> \<theta>' \<rho>')
   note le = \<open>\<theta>' \<subseteq>\<^sub>m \<theta>''\<close> \<open>\<rho>' \<subseteq>\<^sub>m \<rho>''\<close>
@@ -341,6 +358,17 @@ next
     c\<^sub>2: \<open>agrees \<theta>\<^sub>2 gt\<close> \<open>agrees \<rho>\<^sub>2 gr\<close>
     by auto
   show ?case using TApp.prems m\<^sub>1 m\<^sub>2 c\<^sub>2 by auto
+next
+  case (TOff x r t)
+  from TOff.prems obtain \<theta>\<^sub>1 \<rho>\<^sub>1 where
+    m\<^sub>1: \<open>tmatch r (bsubst gt gr r) (\<theta>, \<rho>) = Some (\<theta>\<^sub>1, \<rho>\<^sub>1)\<close> and
+    c\<^sub>1: \<open>agrees \<theta>\<^sub>1 gt\<close> \<open>agrees \<rho>\<^sub>1 gr\<close>
+    using TOff.IH[of \<open>bsubst gt gr r\<close> \<theta> \<rho>] by auto
+  from TOff.IH[of \<open>bsubst gt gr t\<close> \<theta>\<^sub>1 \<rho>\<^sub>1] TOff.prems c\<^sub>1 obtain \<theta>\<^sub>2 \<rho>\<^sub>2 where
+    m\<^sub>2: \<open>tmatch t (bsubst gt gr t) (\<theta>\<^sub>1, \<rho>\<^sub>1) = Some (\<theta>\<^sub>2, \<rho>\<^sub>2)\<close> and
+    c\<^sub>2: \<open>agrees \<theta>\<^sub>2 gt\<close> \<open>agrees \<rho>\<^sub>2 gr\<close>
+    by auto
+  show ?case using TOff.prems m\<^sub>1 m\<^sub>2 c\<^sub>2 by auto
 next
   case (TEv l s t)
   from TEv.prems obtain \<theta>\<^sub>1 \<rho>\<^sub>1 where

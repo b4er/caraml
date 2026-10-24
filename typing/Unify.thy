@@ -225,6 +225,7 @@ lemma finsort_ne[simp]:
   \<open>finsort l t c \<noteq> TV a\<close> \<open>finsort l t c \<noteq> TB a\<close> \<open>finsort l t c \<noteq> TK a\<close>
   \<open>finsort l t c \<noteq> TA k i\<close> \<open>finsort l t c \<noteq> TC n ts\<close> \<open>finsort l t c \<noteq> TApp u v\<close>
   \<open>finsort l t c \<noteq> TFn u e v\<close> \<open>finsort l t c \<noteq> TDep b sg m e v\<close>
+  \<open>finsort l t c \<noteq> TOff x r v\<close>
   \<open>finsort l t c \<noteq> TEv u v w\<close> \<open>finsort l t c \<noteq> TAct u K e v\<close> \<open>finsort l t c \<noteq> TRNil\<close>
   by (cases c; simp)+
 
@@ -242,6 +243,7 @@ fun canon_ty :: \<open>kty \<Rightarrow> kty\<close> where
 | \<open>canon_ty (TApp t\<^sub>1 t\<^sub>2) = TApp (canon_ty t\<^sub>1) (canon_ty t\<^sub>2)\<close>
 | \<open>canon_ty (TFn t\<^sub>1 e t\<^sub>2) = TFn (canon_ty t\<^sub>1) (canon_row e) (canon_ty t\<^sub>2)\<close>
 | \<open>canon_ty (TDep i sg T e t) = TDep i sg T (canon_row e) (canon_ty t)\<close>
+| \<open>canon_ty (TOff x r t) = TOff x (canon_ty r) (canon_ty t)\<close>
 | \<open>canon_ty (TEv l s t) = TEv (canon_ty l) (canon_ty s) (canon_ty t)\<close>
 | \<open>canon_ty (TAct l K e t) = TAct (canon_ty l) K (canon_row e) (canon_ty t)\<close>
 | \<open>canon_ty TRNil = TRNil\<close>
@@ -728,7 +730,7 @@ lemma sub_scheme_comp:
 lemma sub_ent_comp:
   \<open>sub_ent \<theta>\<^sub>2 \<rho>\<^sub>2 (sub_ent \<theta>\<^sub>1 \<rho>\<^sub>1 e) =
    sub_ent (\<lambda>a. tsubst \<theta>\<^sub>2 \<rho>\<^sub>2 (\<theta>\<^sub>1 a)) (\<lambda>v. rsubst \<rho>\<^sub>2 (\<rho>\<^sub>1 v)) e\<close>
-  by (cases e) (simp_all add: sub_scheme_comp)
+  by (cases e) (simp_all add: sub_scheme_comp tsubst_comp)
 
 lemma sub_env_comp:
   \<open>sub_env \<theta>\<^sub>2 \<rho>\<^sub>2 (sub_env \<theta>\<^sub>1 \<rho>\<^sub>1 E) =
@@ -831,6 +833,7 @@ fun btv_list :: \<open>kty \<Rightarrow> tvar list\<close> where
 | \<open>btv_list (TApp t\<^sub>1 t\<^sub>2) = btv_list t\<^sub>1 @ btv_list t\<^sub>2\<close>
 | \<open>btv_list (TFn t\<^sub>1 e t\<^sub>2) = btv_list t\<^sub>1 @ btv_list t\<^sub>2\<close>
 | \<open>btv_list (TDep i sg K e t) = btv_list t\<close>
+| \<open>btv_list (TOff x r t) = btv_list r @ btv_list t\<close>
 | \<open>btv_list (TEv l s t) = btv_list l @ btv_list s @ btv_list t\<close>
 | \<open>btv_list (TAct l K e t) = btv_list l @ btv_list t\<close>
 | \<open>btv_list TRNil = []\<close>
@@ -851,6 +854,7 @@ fun brv_list :: \<open>kty \<Rightarrow> rvar list\<close> where
 | \<open>brv_list (TApp t\<^sub>1 t\<^sub>2) = brv_list t\<^sub>1 @ brv_list t\<^sub>2\<close>
 | \<open>brv_list (TFn t\<^sub>1 e t\<^sub>2) = brv_list t\<^sub>1 @ brv_list_row e @ brv_list t\<^sub>2\<close>
 | \<open>brv_list (TDep i sg K e t) = brv_list_row e @ brv_list t\<close>
+| \<open>brv_list (TOff x r t) = brv_list r @ brv_list t\<close>
 | \<open>brv_list (TEv l s t) = brv_list l @ brv_list s @ brv_list t\<close>
 | \<open>brv_list (TAct l K e t) = brv_list l @ brv_list_row e @ brv_list t\<close>
 | \<open>brv_list TRNil = []\<close>
@@ -962,6 +966,7 @@ fun kty_bnd :: \<open>kty \<Rightarrow> nat\<close> where
 | \<open>kty_bnd (TApp t\<^sub>1 t\<^sub>2) = max (kty_bnd t\<^sub>1) (kty_bnd t\<^sub>2)\<close>
 | \<open>kty_bnd (TFn t\<^sub>1 e t\<^sub>2) = max (kty_bnd t\<^sub>1) (max (krow_bnd e) (kty_bnd t\<^sub>2))\<close>
 | \<open>kty_bnd (TDep i sg T e t) = max (krow_bnd e) (kty_bnd t)\<close>
+| \<open>kty_bnd (TOff x r t) = max (kty_bnd r) (kty_bnd t)\<close>
 | \<open>kty_bnd (TEv l s t) = max (kty_bnd l) (max (kty_bnd s) (kty_bnd t))\<close>
 | \<open>kty_bnd (TAct l K e t) = max (kty_bnd l) (max (krow_bnd e) (kty_bnd t))\<close>
 | \<open>kty_bnd TRNil = 0\<close>

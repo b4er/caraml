@@ -1007,16 +1007,63 @@ fun fn_ty :: \<open>kty list \<Rightarrow> kty\<close> where
 text \<open>A closed record pattern elaborates to the one listing its fields in the
   canonical order, so that the backend reads positions off the pattern. Selection
   elaborates to the reserved primitive \<open>%sel\<close> applied to the record and to the
-  field's offset in that order, a number once the record type is closed: the
-  evidence translation of a lacks predicate, with the checker as the static
-  lookup. The checker supplies no evidence for an open record yet: a projection
-  out of a record whose type stays open is rejected.\<close>
+  field's offset in that order: the evidence translation of a lacks predicate,
+  with the checker as the static lookup. The
+  evidence is the offset itself once the record type is closed, and otherwise an
+  evidence variable (\<^const>\<open>TEoff\<close>) that the enclosing binding receives as a
+  parameter: its scheme carries one \<^const>\<open>TOff\<close> prefix per such projection, and
+  every instantiation of it applies one evidence argument per prefix, as an
+  implicit module argument is applied, in head position by prepending the evidence
+  to the spine's arguments and elsewhere by wrapping the occurrence in a spine.\<close>
 
 definition rec_pat :: \<open>(nm \<times> mpat) list \<Rightarrow> mpatom\<close> where
   \<open>rec_pat fs = PRec (sort_key (n_txt \<circ> fst) fs) False\<close>
 
 definition sel_atom :: \<open>matom \<Rightarrow> matom \<Rightarrow> matom\<close> where
   \<open>sel_atom a ev = AParen [ESpine [APath (MkPath [mk_nm (str ''%sel'')]), a, ev]]\<close>
+
+definition off_var :: \<open>name \<Rightarrow> matom\<close> where
+  \<open>off_var v = APath (MkPath [mk_nm v])\<close>
+
+inductive wt_ev :: \<open>tenv \<Rightarrow> name \<Rightarrow> kty \<Rightarrow> matom \<Rightarrow> bool\<close> where
+  Ev_num: \<open>offset_of x r = Some k \<Longrightarrow> wt_ev B x r (ANum no_loc (int k) None)\<close>
+| Ev_var: \<open>tlookup B [v] = Some (TEoff x r') \<Longrightarrow> r' \<simeq> r \<Longrightarrow> wt_ev B x r (off_var v)\<close>
+
+text \<open>The evidence arguments of an instantiation: the scheme body's prefixes, in
+  order, each discharged by one argument.\<close>
+
+inductive wt_evs :: \<open>tenv \<Rightarrow> kty \<Rightarrow> matom list \<Rightarrow> kty \<Rightarrow> bool\<close> where
+  Evs_nil: \<open>\<forall>x r t. \<tau> \<noteq> TOff x r t \<Longrightarrow> wt_evs B \<tau> [] \<tau>\<close>
+| Evs_cons: \<open>wt_ev B x r ev \<Longrightarrow> wt_evs B \<tau> evs \<tau>' \<Longrightarrow> wt_evs B (TOff x r \<tau>) (ev # evs) \<tau>'\<close>
+
+text \<open>The requests a binding abstracts: each an evidence variable, a label and a
+  record type. They prefix the binding's scheme, are in scope while its right-hand
+  side is typed, and become parameters of the elaborated right-hand side, outermost
+  first. A recursive function is rebound inside them to its own instance at the
+  same evidence, since its recursive calls are monomorphic.\<close>
+
+type_synonym reqs = \<open>(name \<times> name \<times> kty) list\<close>
+
+fun offs :: \<open>reqs \<Rightarrow> kty \<Rightarrow> kty\<close> where
+  \<open>offs [] \<tau> = \<tau>\<close>
+| \<open>offs ((v, x, r) # rs) \<tau> = TOff x r (offs rs \<tau>)\<close>
+
+definition ev_env :: \<open>reqs \<Rightarrow> tenv\<close> where
+  \<open>ev_env rs = map (\<lambda>(v, x, r). (v, TEoff x r)) rs\<close>
+
+fun ev_wrap :: \<open>reqs \<Rightarrow> expr \<Rightarrow> expr\<close> where
+  \<open>ev_wrap [] e = e\<close>
+| \<open>ev_wrap ((v, x, r) # rs) e = EFn [PatApp [PQid (MkPath [mk_nm v])]] (ev_wrap rs e)\<close>
+
+definition ev_bind :: \<open>nm \<Rightarrow> reqs \<Rightarrow> expr \<Rightarrow> expr\<close> where
+  \<open>ev_bind f rs e =
+     (if rs = [] then e
+      else ev_wrap rs (ELet (PatApp [PQid (MkPath [f])])
+                            (ESpine (APath (MkPath [f]) # map (\<lambda>(v, x, r). off_var v) rs)) e))\<close>
+
+fun var_pat :: \<open>mpat \<Rightarrow> bool\<close> where
+  \<open>var_pat (PatApp [PQid (MkPath [x])]) = True\<close>
+| \<open>var_pat p = False\<close>
 
 inductive wtp :: \<open>tenv \<Rightarrow> mpat \<Rightarrow> mpat \<Rightarrow> kty \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
   wtpa :: \<open>tenv \<Rightarrow> mpatom \<Rightarrow> mpatom \<Rightarrow> kty \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
@@ -1252,18 +1299,20 @@ where
             ((mbind_nm b, if is_imp b then TEinst E\<^sub>K else TEstr E\<^sub>K) # B),\<epsilon>' \<turnstile> e \<leadsto> e' : \<tau> \<Longrightarrow>
             named_sig (mbind_sig b) \<Longrightarrow> nm_ok (mbind_nm b) \<Longrightarrow>
             B,\<epsilon> \<turnstile> EFnMod b e \<leadsto> EFnMod b e' : TDep (is_imp b) (mbind_sig b) m \<epsilon>' (kclose K \<tau>)\<close>
-| W_let:   \<open>B,\<epsilon> \<turnstile> e \<leadsto> e' : \<tau>\<^sub>e \<Longrightarrow> wtp B p p' \<tau>\<^sub>p \<Gamma> \<Longrightarrow> \<tau>\<^sub>p \<simeq> \<tau>\<^sub>e \<Longrightarrow> covers B \<tau>\<^sub>e [p] \<Longrightarrow>
+| W_let:   \<open>(ev_env reqs @ B),\<epsilon> \<turnstile> e \<leadsto> e' : \<tau>\<^sub>e \<Longrightarrow> wtp B p p' \<tau>\<^sub>p \<Gamma> \<Longrightarrow> \<tau>\<^sub>p \<simeq> \<tau>\<^sub>e \<Longrightarrow>
+            covers B \<tau>\<^sub>e [p] \<Longrightarrow>
             as \<inter> ftv_env B = {} \<Longrightarrow> rs \<inter> frv_env B = {} \<Longrightarrow> rs \<inter> frv_row \<epsilon> = {} \<Longrightarrow>
             (as = {} \<and> rs = {}) \<or> val_exp B e' \<Longrightarrow>
-            (map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs \<tau>))) \<Gamma> @ B),\<epsilon> \<turnstile> b \<leadsto> b' : \<tau> \<Longrightarrow>
+            reqs = [] \<or> (val_exp B e' \<and> var_pat p \<and> length \<Gamma> = 1) \<Longrightarrow> distinct (map fst reqs) \<Longrightarrow>
+            (map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (offs reqs \<tau>)))) \<Gamma> @ B),\<epsilon> \<turnstile> b \<leadsto> b' : \<tau> \<Longrightarrow>
             btv \<tau>\<^sub>p = {} \<Longrightarrow> brv \<tau>\<^sub>p = {} \<Longrightarrow>
-            B,\<epsilon> \<turnstile> ELet p e b \<leadsto> ELet p' e' b' : \<tau>\<close>
+            B,\<epsilon> \<turnstile> ELet p e b \<leadsto> ELet p' (ev_wrap reqs e') b' : \<tau>\<close>
 | W_letfun: \<open>cls \<noteq> [] \<Longrightarrow> r = foldr EFnMod mbs (dfun_rhs cls) \<Longrightarrow> is_fn r \<Longrightarrow>
-            ((n_txt f, TEval (kmono \<tau>)) # B),\<epsilon> \<turnstile> r \<leadsto> r' : \<tau>' \<Longrightarrow> \<tau>' \<simeq> \<tau> \<Longrightarrow>
+            (ev_env reqs @ (n_txt f, TEval (kmono \<tau>)) # B),\<epsilon> \<turnstile> r \<leadsto> r' : \<tau>' \<Longrightarrow> \<tau>' \<simeq> \<tau> \<Longrightarrow>
             as \<inter> ftv_env B = {} \<Longrightarrow> rs \<inter> frv_env B = {} \<Longrightarrow> rs \<inter> frv_row \<epsilon> = {} \<Longrightarrow>
-            btv \<tau>' = {} \<Longrightarrow> brv \<tau>' = {} \<Longrightarrow> nm_ok (n_txt f) \<Longrightarrow>
-            ((n_txt f, TEval (close_sch as rs \<tau>')) # B),\<epsilon> \<turnstile> b \<leadsto> b' : \<tau> \<Longrightarrow>
-            B,\<epsilon> \<turnstile> ELetFun f mbs cls b \<leadsto> ELetFun f [] [([], r')] b' : \<tau>\<close>
+            btv \<tau>' = {} \<Longrightarrow> brv \<tau>' = {} \<Longrightarrow> nm_ok (n_txt f) \<Longrightarrow> distinct (map fst reqs) \<Longrightarrow>
+            ((n_txt f, TEval (close_sch as rs (offs reqs \<tau>'))) # B),\<epsilon> \<turnstile> b \<leadsto> b' : \<tau> \<Longrightarrow>
+            B,\<epsilon> \<turnstile> ELetFun f mbs cls b \<leadsto> ELetFun f [] [([], ev_bind f reqs r')] b' : \<tau>\<close>
 | W_seq:   \<open>B,\<epsilon> \<turnstile> e\<^sub>1 \<leadsto> e\<^sub>1' : \<tau>\<^sub>1 \<Longrightarrow> B,\<epsilon> \<turnstile> e\<^sub>2 \<leadsto> e\<^sub>2' : \<tau> \<Longrightarrow>
             B,\<epsilon> \<turnstile> ESeq e\<^sub>1 e\<^sub>2 \<leadsto> ESeq e\<^sub>1' e\<^sub>2' : \<tau>\<close>
 | W_if:    \<open>B,\<epsilon> \<turnstile> c \<leadsto> c' : \<tau>\<^sub>c \<Longrightarrow> \<tau>\<^sub>c \<simeq> TC bool_ty [] \<Longrightarrow>
@@ -1317,7 +1366,10 @@ where
             wt_head B \<epsilon> (APath p) (APath p) \<tau>\<close>
 | H_atom:  \<open>wt_atom B \<epsilon> a a' \<tau> \<Longrightarrow> (\<forall>p. a \<noteq> APath p) \<Longrightarrow> wt_head B \<epsilon> a a' \<tau>\<close>
 
-| A_path:  \<open>wt_head B \<epsilon> (APath p) (APath p) \<tau> \<Longrightarrow> wt_atom B \<epsilon> (APath p) (APath p) \<tau>\<close>
+| A_path:  \<open>wt_head B \<epsilon> (APath p) (APath p) \<tau> \<Longrightarrow> \<forall>x r t. \<tau> \<noteq> TOff x r t \<Longrightarrow>
+            wt_atom B \<epsilon> (APath p) (APath p) \<tau>\<close>
+| A_pathev: \<open>wt_head B \<epsilon> (APath p) (APath p) \<tau>\<^sub>0 \<Longrightarrow> wt_evs B \<tau>\<^sub>0 evs \<tau> \<Longrightarrow> evs \<noteq> [] \<Longrightarrow>
+            wt_atom B \<epsilon> (APath p) (AParen [ESpine (APath p # evs)]) \<tau>\<close>
 | A_num:   \<open>wt_atom B \<epsilon> (ANum l v None) (ANum l v None) (TC int_ty [])\<close>
 | A_numsfx: \<open>sfx_ok k v \<Longrightarrow>
             wt_atom B \<epsilon> (ANum l v (Some k)) (ANum l v (Some k)) (TC (sfx_ty k) [])\<close>
@@ -1334,10 +1386,12 @@ where
             wt_atom B \<epsilon> (ARec fs) (ARec (zip (map fst fs) es'))
                     (rec_of (zip (map (n_txt \<circ> fst) fs) \<tau>s) TRNil)\<close>
 | A_dot:   \<open>wt_atom B \<epsilon> a a' r \<Longrightarrow> fpull (n_txt x) r = Some (\<tau>, r') \<Longrightarrow>
-            offset_of (n_txt x) r = Some k \<Longrightarrow>
-            wt_atom B \<epsilon> (ADot a x) (sel_atom a' (ANum no_loc (int k) None)) \<tau>\<close>
+            wt_ev B (n_txt x) r ev \<Longrightarrow>
+            wt_atom B \<epsilon> (ADot a x) (sel_atom a' ev) \<tau>\<close>
 
-| G_nil:   \<open>wt_args B \<epsilon> \<tau> [] [] \<tau>\<close>
+| G_nil:   \<open>\<forall>x r t. \<tau> \<noteq> TOff x r t \<Longrightarrow> wt_args B \<epsilon> \<tau> [] [] \<tau>\<close>
+| G_off:   \<open>\<tau>\<^sub>0 \<simeq> TOff x r \<tau>\<^sub>2 \<Longrightarrow> wt_ev B x r ev \<Longrightarrow> wt_args B \<epsilon> \<tau>\<^sub>2 as as' \<tau> \<Longrightarrow>
+            wt_args B \<epsilon> \<tau>\<^sub>0 as (ev # as') \<tau>\<close>
 | G_app:   \<open>\<tau>\<^sub>0 \<simeq> TFn \<tau>\<^sub>1 \<epsilon>\<^sub>l \<tau>\<^sub>2 \<Longrightarrow> \<epsilon>\<^sub>l \<approx> \<epsilon> \<Longrightarrow> wt_atom B \<epsilon> a a' \<tau>\<^sub>1' \<Longrightarrow> \<tau>\<^sub>1' \<simeq> \<tau>\<^sub>1 \<Longrightarrow>
             wt_args B \<epsilon> \<tau>\<^sub>2 as as' \<tau> \<Longrightarrow>
             wt_args B \<epsilon> \<tau>\<^sub>0 (a # as) (a' # as') \<tau>\<close>
@@ -1615,6 +1669,7 @@ fun tsigs :: \<open>kty \<Rightarrow> name set\<close> where
 | \<open>tsigs (TApp t\<^sub>1 t\<^sub>2) = tsigs t\<^sub>1 \<union> tsigs t\<^sub>2\<close>
 | \<open>tsigs (TFn t\<^sub>1 e t\<^sub>2) = tsigs t\<^sub>1 \<union> tsigs t\<^sub>2\<close>
 | \<open>tsigs (TDep i sg m e t) = sig_key sg \<union> tsigs t\<close>
+| \<open>tsigs (TOff x r t) = tsigs r \<union> tsigs t\<close>
 | \<open>tsigs (TEv l s t) = tsigs l \<union> tsigs s \<union> tsigs t\<close>
 | \<open>tsigs (TAct l K e t) = tsigs l \<union> tsigs t\<close>
 | \<open>tsigs (TRCons l t r) = tsigs t \<union> tsigs r\<close>
@@ -1649,6 +1704,7 @@ where
 | \<open>tsigs_ent (TEop l ps t\<^sub>1 t\<^sub>2) = tsigs t\<^sub>1 \<union> tsigs t\<^sub>2\<close>
 | \<open>tsigs_ent (TEffi s \<sigma>) = tsigs_sch \<sigma>\<close>
 | \<open>tsigs_ent (TEeff l ls ar) = {}\<close>
+| \<open>tsigs_ent (TEoff x r) = tsigs r\<close>
 | \<open>tsigs_env [] = {}\<close>
 | \<open>tsigs_env ((x, e) # ex) = tsigs_ent e \<union> tsigs_env ex\<close>
 
@@ -1715,19 +1771,21 @@ inductive
   wtds :: \<open>tenv \<Rightarrow> name \<Rightarrow> mdecl list \<Rightarrow> mdecl list \<Rightarrow> tenv \<Rightarrow> fenv \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> bool\<close> and
   wtm :: \<open>tenv \<Rightarrow> name \<Rightarrow> mexpr \<Rightarrow> mexpr \<Rightarrow> tentry \<Rightarrow> fenv \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> bool\<close>
 where
-  D_let:   \<open>\<not> is_fn e \<Longrightarrow> B,RNil \<turnstile> e \<leadsto> e' : \<tau> \<Longrightarrow>
-            \<sigma> = gen B RNil \<tau> \<Longrightarrow>
+  D_let:   \<open>\<not> is_fn e \<Longrightarrow> (ev_env reqs @ B),RNil \<turnstile> e \<leadsto> e' : \<tau> \<Longrightarrow>
+            \<sigma> = gen B RNil (offs reqs \<tau>) \<Longrightarrow>
             rebind_ok B (n_txt x) \<Longrightarrow>
             (ftv \<tau> \<subseteq> ftv_env B \<and> frv \<tau> \<subseteq> frv_env B) \<or> val_exp B e' \<Longrightarrow>
+            reqs = [] \<or> val_exp B e' \<Longrightarrow> distinct (map fst reqs) \<Longrightarrow>
             btv \<tau> = {} \<Longrightarrow> brv \<tau> = {} \<Longrightarrow> nm_ok (n_txt x) \<Longrightarrow> ktv \<tau> \<subseteq> ktv_env B \<Longrightarrow>
             tsigs \<tau> \<subseteq> sig_scope B \<Longrightarrow> j \<le> j' \<Longrightarrow>
-            wtd B pre (DLet x e) (DLet x e') [(n_txt x, TEval \<sigma>)] [] j j'\<close>
-| D_letrec: \<open>is_fn e \<Longrightarrow> ((n_txt x, TEval (kmono \<tau>)) # B),RNil \<turnstile> e \<leadsto> e' : \<tau>' \<Longrightarrow> \<tau>' \<simeq> \<tau> \<Longrightarrow>
-            \<sigma> = gen B RNil \<tau>' \<Longrightarrow>
-            rebind_ok B (n_txt x) \<Longrightarrow>
+            wtd B pre (DLet x e) (DLet x (ev_wrap reqs e')) [(n_txt x, TEval \<sigma>)] [] j j'\<close>
+| D_letrec: \<open>is_fn e \<Longrightarrow> (ev_env reqs @ (n_txt x, TEval (kmono \<tau>)) # B),RNil \<turnstile> e \<leadsto> e' : \<tau>' \<Longrightarrow>
+            \<tau>' \<simeq> \<tau> \<Longrightarrow>
+            \<sigma> = gen B RNil (offs reqs \<tau>') \<Longrightarrow>
+            rebind_ok B (n_txt x) \<Longrightarrow> distinct (map fst reqs) \<Longrightarrow>
             btv \<tau>' = {} \<Longrightarrow> brv \<tau>' = {} \<Longrightarrow> nm_ok (n_txt x) \<Longrightarrow> ktv \<tau>' \<subseteq> ktv_env B \<Longrightarrow>
             tsigs \<tau>' \<subseteq> sig_scope B \<Longrightarrow> j \<le> j' \<Longrightarrow>
-            wtd B pre (DLet x e) (DLet x e') [(n_txt x, TEval \<sigma>)] [] j j'\<close>
+            wtd B pre (DLet x e) (DLet x (ev_bind x reqs e')) [(n_txt x, TEval \<sigma>)] [] j j'\<close>
 | D_fun:   \<open>cls \<noteq> [] \<Longrightarrow> wtd B pre (dsg_decl (DFun f mbs cls)) d' E F j j' \<Longrightarrow>
             wtd B pre (DFun f mbs cls) d' E F j j'\<close>
 | D_extern: \<open>ty_stat B True ([], []) n ty = Some (\<tau>, ve, n') \<Longrightarrow> (\<exists>t\<^sub>1 e t\<^sub>2. \<tau> = TFn t\<^sub>1 e t\<^sub>2) \<Longrightarrow>

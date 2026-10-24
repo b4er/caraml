@@ -36,16 +36,18 @@ lemma tlookup_other_sapp:
 text \<open>\<open>covers\<close> and the operator-chain tree read only the head stamp of the
   scrutinee and the basis's lookups (both invariant).\<close>
 
-lemma covers_sapp: \<open>covers B \<tau> ps \<Longrightarrow> covers (sappe s B) (sapp s \<tau>) ps\<close>
+lemma covers_sapp: \<open>cenv B \<Longrightarrow> covers B \<tau> ps \<Longrightarrow> covers (sappe s B) (sapp s \<tau>) ps\<close>
 proof -
-  assume \<open>covers B \<tau> ps\<close>
+  assume c: \<open>cenv B\<close> and \<open>covers B \<tau> ps\<close>
   then have \<open>covers B (sapp s \<tau>) ps\<close>
     by (cases \<tau>) (auto simp: covers_def split: prod.split)
   then show \<open>covers (sappe s B) (sapp s \<tau>) ps\<close>
-    unfolding covers_eq[OF lookup_eq_sappe, symmetric] .
+    unfolding covers_eq[OF lookup_eq_sappe[OF c], symmetric] .
 qed
-
 lemma sapp_TDep[simp]: \<open>sapp s (TDep i sg K e t) = TDep i sg K (sappr s e) (sapp s t)\<close>
+  by (cases s) simp
+
+lemma sapp_TOff[simp]: \<open>sapp s (TOff x r t) = TOff x (sapp s r) (sapp s t)\<close>
   by (cases s) simp
 
 lemma sapp_tuple_from[simp]: \<open>sapp s (tuple_from i \<tau>s) = tuple_from i (map (sapp s) \<tau>s)\<close>
@@ -57,16 +59,59 @@ text \<open>Well-formed inputs to \<open>infer\<close>: the basis is closed and 
   its abstract types inside \<open>FK\<close>. The ambient row and the pending requests
   mention only variables below the counter and abstract types inside \<open>FK\<close>.\<close>
 
+lemma ftv_pend_append [simp]: \<open>ftv_pend (pd @ pd') = ftv_pend pd \<union> ftv_pend pd'\<close>
+  by (auto simp: ftv_pend_def)
+
+lemma frv_pend_append [simp]: \<open>frv_pend (pd @ pd') = frv_pend pd \<union> frv_pend pd'\<close>
+  by (auto simp: frv_pend_def)
+
+lemma ftv_pend_mono: \<open>set pd \<subseteq> set pd' \<Longrightarrow> ftv_pend pd \<subseteq> ftv_pend pd'\<close>
+  by (auto simp: ftv_pend_def)
+
+lemma frv_pend_mono: \<open>set pd \<subseteq> set pd' \<Longrightarrow> frv_pend pd \<subseteq> frv_pend pd'\<close>
+  by (auto simp: frv_pend_def)
+
+lemma ktv_rows_mono: \<open>set pd \<subseteq> set pd' \<Longrightarrow> ktv_rows pd \<subseteq> ktv_rows pd'\<close>
+  by (auto simp: ktv_rows_def)
+
+lemma pend_row_bounds:
+  assumes m: \<open>(v, POff x r) \<in> set pd\<close>
+  shows \<open>ftv r \<subseteq> ftv_pend pd\<close> \<open>frv r \<subseteq> frv_pend pd\<close> \<open>ktv r \<subseteq> ktv_rows pd\<close>
+proof -
+  have \<open>ftv_preq (POff x r) \<subseteq> ftv_pend pd\<close> \<open>frv_preq (POff x r) \<subseteq> frv_pend pd\<close>
+    \<open>ktv_req (POff x r) \<subseteq> ktv_rows pd\<close>
+    using m unfolding ftv_pend_def frv_pend_def ktv_rows_def by force+
+  then show \<open>ftv r \<subseteq> ftv_pend pd\<close> \<open>frv r \<subseteq> frv_pend pd\<close> \<open>ktv r \<subseteq> ktv_rows pd\<close> by simp_all
+qed
+
+lemma ktv_rows_sub_pend:
+  assumes kh: \<open>khyg s FK\<close> and pk: \<open>ktv_rows pd \<subseteq> FK\<close>
+  shows \<open>ktv_rows (sub_pend s pd) \<subseteq> FK\<close>
+proof -
+  have \<open>ktv_req (sub_preq s q) \<subseteq> FK\<close> if m: \<open>(v, q) \<in> set pd\<close> for v q
+  proof (cases q)
+    case (POff l r)
+    have \<open>ktv r \<subseteq> FK\<close> using pk m POff by (fastforce simp: ktv_rows_def)
+    then show ?thesis using khyg_sapp[OF kh] POff by simp
+  qed simp
+  then show ?thesis unfolding ktv_rows_def sub_pend_def by fastforce
+qed
+
+lemma off_evs_ktv_rows:
+  \<open>off_evs n \<tau>\<^sub>0 = (evs, pdo, \<tau>, n') \<Longrightarrow> ktv_rows pdo \<subseteq> ktv \<tau>\<^sub>0\<close>
+  by (induction n \<tau>\<^sub>0 arbitrary: evs pdo \<tau> n' rule: off_evs.induct)
+     (auto split: prod.split_asm)
+
 definition inwf :: \<open>tenv \<Rightarrow> krow \<Rightarrow> pend \<Rightarrow> tvar set \<Rightarrow> nat \<Rightarrow> bool\<close> where
   \<open>inwf B A pd FK n \<longleftrightarrow>
      cenv B \<and> bfree_env B \<and> ktv_env B \<subseteq> FK \<and> ftv_env B \<subseteq> {..< n} \<and> frv_env B \<subseteq> {..< n} \<and>
      frv_row A \<subseteq> {..< n} \<and> brv_row A = {} \<and>
-     ftv_pend pd \<subseteq> {..< n} \<and> frv_pend pd \<subseteq> {..< n}\<close>
+     ftv_pend pd \<subseteq> {..< n} \<and> frv_pend pd \<subseteq> {..< n} \<and> ktv_rows pd \<subseteq> FK\<close>
 
 definition outwf :: \<open>ksub \<Rightarrow> pend \<Rightarrow> tvar set \<Rightarrow> nat \<Rightarrow> bool\<close> where
   \<open>outwf s pd' FK n' \<longleftrightarrow>
      sconf s {..< n'} {..< n'} \<and> khyg s FK \<and> bfree_sub s \<and>
-     ftv_pend pd' \<subseteq> {..< n'} \<and> frv_pend pd' \<subseteq> {..< n'}\<close>
+     ftv_pend pd' \<subseteq> {..< n'} \<and> frv_pend pd' \<subseteq> {..< n'} \<and> ktv_rows pd' \<subseteq> FK\<close>
 
 lemma outwf_sid: \<open>inwf B A pd FK n \<Longrightarrow> outwf sid pd FK n\<close>
   by (auto simp: inwf_def outwf_def)
@@ -113,10 +158,6 @@ proof -
   ultimately show ?thesis using w kt by (auto simp: fresh_ok_def)
 qed
 
-lemma infer_head_APath:
-  \<open>infer_head uf B A pd (APath p) n = infer_atom uf B A pd (APath p) n\<close>
-  by simp
-
 lemma fresh_ok_sapp0:
   assumes f: \<open>fresh_ok \<tau> 0 m FK\<close> and O: \<open>outwf s pd FK n\<close> and le: \<open>m \<le> n\<close>
   shows \<open>fresh_ok (sapp s \<tau>) 0 n FK\<close>
@@ -152,12 +193,14 @@ lemma frv_pend_sub_pend:
 lemma outwf_of_uni:
   assumes sc: \<open>sconf s {..< n} {..< n}\<close> and \<open>khyg s FK\<close> \<open>bfree_sub s\<close>
     and ft: \<open>ftv_pend pd \<subseteq> {..< m}\<close> and fr: \<open>frv_pend pd \<subseteq> {..< m}\<close> and le: \<open>m \<le> n\<close>
+    and kr: \<open>ktv_rows pd \<subseteq> FK\<close>
   shows \<open>outwf s (sub_pend s pd) FK n\<close>
 proof -
   have sub: \<open>{..< m} \<subseteq> {..< n}\<close> using le by simp
   show ?thesis unfolding outwf_def
     using assms ftv_pend_sub_pend[OF sc subset_trans[OF ft sub]]
       frv_pend_sub_pend[OF sc subset_trans[OF ft sub] subset_trans[OF fr sub]]
+      ktv_rows_sub_pend[OF \<open>khyg s FK\<close> kr]
     by simp
 qed
 
@@ -223,50 +266,64 @@ lemma frv_sch_close_eq: \<open>frv_sch (close_sch as rs t) = frv t - rs\<close>
   by (simp add: close_sch_def frv_close_ty)
 
 text \<open>A generalised binder frame, what a \<open>let\<close> adds to the basis: the bound
-  values' schemes, closed over \<open>as\<close>/\<open>rs\<close>.\<close>
+  values' schemes, abstracted over the offset requests \<open>reqs\<close> and closed over
+  \<open>as\<close>/\<open>rs\<close>.\<close>
 
-definition gen_env :: \<open>ksub \<Rightarrow> tvar set \<Rightarrow> rvar set \<Rightarrow> (name \<times> kty) list \<Rightarrow> tenv\<close> where
-  \<open>gen_env s\<^sub>2 as rs \<Gamma> = map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (sapp s\<^sub>2 \<tau>)))) \<Gamma>\<close>
+definition gen_env :: \<open>ksub \<Rightarrow> tvar set \<Rightarrow> rvar set \<Rightarrow> reqs \<Rightarrow> (name \<times> kty) list \<Rightarrow> tenv\<close> where
+  \<open>gen_env s\<^sub>2 as rs reqs \<Gamma> =
+     map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>))))) \<Gamma>\<close>
 
-lemma cenv_gen_env[simp]: \<open>cenv (gen_env s\<^sub>2 as rs \<Gamma>)\<close>
+lemma cenv_gen_env[simp]: \<open>cenv (gen_env s\<^sub>2 as rs reqs \<Gamma>)\<close>
   by (induction \<Gamma>) (auto simp: gen_env_def)
 
-lemma bfree_env_gen_env[simp]: \<open>bfree_env (gen_env s\<^sub>2 as rs \<Gamma>)\<close>
+lemma bfree_env_gen_env[simp]: \<open>bfree_env (gen_env s\<^sub>2 as rs reqs \<Gamma>)\<close>
   by (induction \<Gamma>) (auto simp: gen_env_def)
 
-lemma ftv_env_gen_env: \<open>ftv_env (gen_env s\<^sub>2 as rs \<Gamma>) \<subseteq> (\<Union>(x, \<tau>)\<in>set \<Gamma>. ftv (sapp s\<^sub>2 \<tau>))\<close>
+lemma ftv_env_gen_env:
+  \<open>ftv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>)
+     \<subseteq> (\<Union>(x, \<tau>)\<in>set \<Gamma>. ftv (sapp s\<^sub>2 \<tau>)) \<union> (\<Union>(v, x, r)\<in>set reqs. ftv r)\<close>
 proof (induction \<Gamma>)
   case (Cons a \<Gamma>) obtain x \<tau> where a: \<open>a = (x, \<tau>)\<close> by fastforce
-  have \<open>ftv_env (gen_env s\<^sub>2 as rs (a # \<Gamma>))
-          = ftv_sch (close_sch as rs (sapp s\<^sub>2 \<tau>)) \<union> ftv_env (gen_env s\<^sub>2 as rs \<Gamma>)\<close>
+  have \<open>ftv_env (gen_env s\<^sub>2 as rs reqs (a # \<Gamma>))
+          = ftv_sch (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>))) \<union> ftv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>)\<close>
     by (simp add: gen_env_def a)
-  also have \<open>... \<subseteq> ftv (sapp s\<^sub>2 \<tau>) \<union> (\<Union>(x, \<tau>)\<in>set \<Gamma>. ftv (sapp s\<^sub>2 \<tau>))\<close>
-    using ftv_sch_close[of as rs \<open>sapp s\<^sub>2 \<tau>\<close>] Cons by blast
-  also have \<open>... = (\<Union>(x, \<tau>)\<in>set (a # \<Gamma>). ftv (sapp s\<^sub>2 \<tau>))\<close> by (simp add: a)
+  also have \<open>... \<subseteq> ftv (sapp s\<^sub>2 \<tau>) \<union> (\<Union>(v, x, r)\<in>set reqs. ftv r)
+                  \<union> ((\<Union>(x, \<tau>)\<in>set \<Gamma>. ftv (sapp s\<^sub>2 \<tau>)) \<union> (\<Union>(v, x, r)\<in>set reqs. ftv r))\<close>
+    using ftv_sch_close[of as rs \<open>offs reqs (sapp s\<^sub>2 \<tau>)\<close>, unfolded offs_ftv] Cons by blast
+  also have \<open>... = (\<Union>(x, \<tau>)\<in>set (a # \<Gamma>). ftv (sapp s\<^sub>2 \<tau>)) \<union> (\<Union>(v, x, r)\<in>set reqs. ftv r)\<close>
+    by (auto simp: a)
   finally show ?case .
 qed (simp add: gen_env_def)
 
-lemma frv_env_gen_env: \<open>frv_env (gen_env s\<^sub>2 as rs \<Gamma>) \<subseteq> (\<Union>(x, \<tau>)\<in>set \<Gamma>. frv (sapp s\<^sub>2 \<tau>))\<close>
+lemma frv_env_gen_env:
+  \<open>frv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>)
+     \<subseteq> (\<Union>(x, \<tau>)\<in>set \<Gamma>. frv (sapp s\<^sub>2 \<tau>)) \<union> (\<Union>(v, x, r)\<in>set reqs. frv r)\<close>
 proof (induction \<Gamma>)
   case (Cons a \<Gamma>) obtain x \<tau> where a: \<open>a = (x, \<tau>)\<close> by fastforce
-  have \<open>frv_env (gen_env s\<^sub>2 as rs (a # \<Gamma>))
-          = frv_sch (close_sch as rs (sapp s\<^sub>2 \<tau>)) \<union> frv_env (gen_env s\<^sub>2 as rs \<Gamma>)\<close>
+  have \<open>frv_env (gen_env s\<^sub>2 as rs reqs (a # \<Gamma>))
+          = frv_sch (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>))) \<union> frv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>)\<close>
     by (simp add: gen_env_def a)
-  also have \<open>... \<subseteq> frv (sapp s\<^sub>2 \<tau>) \<union> (\<Union>(x, \<tau>)\<in>set \<Gamma>. frv (sapp s\<^sub>2 \<tau>))\<close>
-    using frv_sch_close[of as rs \<open>sapp s\<^sub>2 \<tau>\<close>] Cons by blast
-  also have \<open>... = (\<Union>(x, \<tau>)\<in>set (a # \<Gamma>). frv (sapp s\<^sub>2 \<tau>))\<close> by (simp add: a)
+  also have \<open>... \<subseteq> frv (sapp s\<^sub>2 \<tau>) \<union> (\<Union>(v, x, r)\<in>set reqs. frv r)
+                  \<union> ((\<Union>(x, \<tau>)\<in>set \<Gamma>. frv (sapp s\<^sub>2 \<tau>)) \<union> (\<Union>(v, x, r)\<in>set reqs. frv r))\<close>
+    using frv_sch_close[of as rs \<open>offs reqs (sapp s\<^sub>2 \<tau>)\<close>, unfolded offs_frv] Cons by blast
+  also have \<open>... = (\<Union>(x, \<tau>)\<in>set (a # \<Gamma>). frv (sapp s\<^sub>2 \<tau>)) \<union> (\<Union>(v, x, r)\<in>set reqs. frv r)\<close>
+    by (auto simp: a)
   finally show ?case .
 qed (simp add: gen_env_def)
 
-lemma ktv_env_gen_env: \<open>ktv_env (gen_env s\<^sub>2 as rs \<Gamma>) \<subseteq> (\<Union>(x, \<tau>)\<in>set \<Gamma>. ktv (sapp s\<^sub>2 \<tau>))\<close>
+lemma ktv_env_gen_env:
+  \<open>ktv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>)
+     \<subseteq> (\<Union>(x, \<tau>)\<in>set \<Gamma>. ktv (sapp s\<^sub>2 \<tau>)) \<union> (\<Union>(v, x, r)\<in>set reqs. ktv r)\<close>
 proof (induction \<Gamma>)
   case (Cons a \<Gamma>) obtain x \<tau> where a: \<open>a = (x, \<tau>)\<close> by fastforce
-  have \<open>ktv_env (gen_env s\<^sub>2 as rs (a # \<Gamma>))
-          = ktv_sch (close_sch as rs (sapp s\<^sub>2 \<tau>)) \<union> ktv_env (gen_env s\<^sub>2 as rs \<Gamma>)\<close>
+  have \<open>ktv_env (gen_env s\<^sub>2 as rs reqs (a # \<Gamma>))
+          = ktv_sch (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>))) \<union> ktv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>)\<close>
     by (simp add: gen_env_def a)
-  also have \<open>... \<subseteq> ktv (sapp s\<^sub>2 \<tau>) \<union> (\<Union>(x, \<tau>)\<in>set \<Gamma>. ktv (sapp s\<^sub>2 \<tau>))\<close>
-    using ktv_sch_close[of as rs \<open>sapp s\<^sub>2 \<tau>\<close>] Cons by blast
-  also have \<open>... = (\<Union>(x, \<tau>)\<in>set (a # \<Gamma>). ktv (sapp s\<^sub>2 \<tau>))\<close> by (simp add: a)
+  also have \<open>... \<subseteq> ktv (sapp s\<^sub>2 \<tau>) \<union> (\<Union>(v, x, r)\<in>set reqs. ktv r)
+                  \<union> ((\<Union>(x, \<tau>)\<in>set \<Gamma>. ktv (sapp s\<^sub>2 \<tau>)) \<union> (\<Union>(v, x, r)\<in>set reqs. ktv r))\<close>
+    using ktv_sch_close[of as rs \<open>offs reqs (sapp s\<^sub>2 \<tau>)\<close>, unfolded offs_ktv] Cons by blast
+  also have \<open>... = (\<Union>(x, \<tau>)\<in>set (a # \<Gamma>). ktv (sapp s\<^sub>2 \<tau>)) \<union> (\<Union>(v, x, r)\<in>set reqs. ktv r)\<close>
+    by (auto simp: a)
   finally show ?case .
 qed (simp add: gen_env_def)
 
@@ -294,6 +351,7 @@ lemma inwf_binders:
     and bo: \<open>binds_ok \<Gamma> 0 n\<^sub>1 FK\<close>
     and af: \<open>frv_row A' \<subseteq> {..< m}\<close> and ab: \<open>brv_row A' = {}\<close>
     and pf: \<open>ftv_pend pd' \<subseteq> {..< m}\<close> and pr: \<open>frv_pend pd' \<subseteq> {..< m}\<close>
+    and pk: \<open>ktv_rows pd' \<subseteq> FK\<close>
     and le: \<open>n \<le> n\<^sub>1\<close> and le2: \<open>n\<^sub>1 \<le> m\<close>
   shows \<open>inwf (binders \<Gamma> @ sappe s B) A' pd' FK m\<close>
 proof -
@@ -314,7 +372,7 @@ proof -
   show ?thesis unfolding inwf_def
     using cenv_binders cenv_sappe[OF iC] bfree_env_binders[OF bo] bfree_env_sappe[OF bf iB]
       ktv_env_binders_ok[OF bo] ktv_env_sappe[OF kh iK]
-      fb esf rb esr af ab pf pr by simp
+      fb esf rb esr af ab pf pr pk by simp
 qed
 
 lemma fresh_ok_TFn:
@@ -328,9 +386,10 @@ lemma fresh_ok_fn_ty:
 
 lemma gen_env_bounds:
   assumes bo: \<open>binds_ok \<Gamma> 0 m FK\<close> and sc2: \<open>sconf s\<^sub>2 {..< m} {..< m}\<close> and kh2: \<open>khyg s\<^sub>2 FK\<close>
-  shows \<open>ftv_env (gen_env s\<^sub>2 as rs \<Gamma>) \<subseteq> {..< m}\<close>
-    and \<open>frv_env (gen_env s\<^sub>2 as rs \<Gamma>) \<subseteq> {..< m}\<close>
-    and \<open>ktv_env (gen_env s\<^sub>2 as rs \<Gamma>) \<subseteq> FK\<close>
+    and rk: \<open>\<And>v x r. (v, x, r) \<in> set reqs \<Longrightarrow> ftv r \<subseteq> {..< m} \<and> frv r \<subseteq> {..< m} \<and> ktv r \<subseteq> FK\<close>
+  shows \<open>ftv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>) \<subseteq> {..< m}\<close>
+    and \<open>frv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>) \<subseteq> {..< m}\<close>
+    and \<open>ktv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>) \<subseteq> FK\<close>
 proof -
   have ft: \<open>ftv \<tau> \<subseteq> {..< m}\<close> and fr: \<open>frv \<tau> \<subseteq> {..< m}\<close> and kt: \<open>ktv \<tau> \<subseteq> FK\<close>
     if \<open>(x, \<tau>) \<in> set \<Gamma>\<close> for x \<tau>
@@ -341,9 +400,16 @@ proof -
     using ft fr frv_sapp_sconf[OF sc2] by (fastforce simp: subset_iff)
   have C: \<open>(\<Union>(x, \<tau>)\<in>set \<Gamma>. ktv (sapp s\<^sub>2 \<tau>)) \<subseteq> FK\<close>
     using kt khyg_sapp[OF kh2] by (fastforce simp: subset_iff)
-  show \<open>ftv_env (gen_env s\<^sub>2 as rs \<Gamma>) \<subseteq> {..< m}\<close> using subset_trans[OF ftv_env_gen_env A] .
-  show \<open>frv_env (gen_env s\<^sub>2 as rs \<Gamma>) \<subseteq> {..< m}\<close> using subset_trans[OF frv_env_gen_env B] .
-  show \<open>ktv_env (gen_env s\<^sub>2 as rs \<Gamma>) \<subseteq> FK\<close> using subset_trans[OF ktv_env_gen_env C] .
+  have RA: \<open>(\<Union>(v, x, r)\<in>set reqs. ftv r) \<subseteq> {..< m}\<close>
+    and RB: \<open>(\<Union>(v, x, r)\<in>set reqs. frv r) \<subseteq> {..< m}\<close>
+    and RC: \<open>(\<Union>(v, x, r)\<in>set reqs. ktv r) \<subseteq> FK\<close>
+    using rk by fastforce+
+  show \<open>ftv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>) \<subseteq> {..< m}\<close>
+    using subset_trans[OF ftv_env_gen_env Un_mono[OF A RA]] by simp
+  show \<open>frv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>) \<subseteq> {..< m}\<close>
+    using subset_trans[OF frv_env_gen_env Un_mono[OF B RB]] by simp
+  show \<open>ktv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>) \<subseteq> FK\<close>
+    using subset_trans[OF ktv_env_gen_env Un_mono[OF C RC]] by simp
 qed
 
 lemma inwf_let:
@@ -353,20 +419,40 @@ lemma inwf_let:
     and bo: \<open>binds_ok \<Gamma> 0 m FK\<close>
     and af: \<open>frv_row A' \<subseteq> {..< m}\<close> and ab: \<open>brv_row A' = {}\<close>
     and pf: \<open>ftv_pend pd' \<subseteq> {..< m}\<close> and pr: \<open>frv_pend pd' \<subseteq> {..< m}\<close>
+    and pk: \<open>ktv_rows pd' \<subseteq> FK\<close>
+    and rk: \<open>\<And>v x r. (v, x, r) \<in> set reqs \<Longrightarrow> ftv r \<subseteq> {..< m} \<and> frv r \<subseteq> {..< m} \<and> ktv r \<subseteq> FK\<close>
     and le: \<open>n \<le> m\<close>
-  shows \<open>inwf (gen_env s\<^sub>2 as rs \<Gamma> @ sappe s B) A' pd' FK m\<close>
+  shows \<open>inwf (gen_env s\<^sub>2 as rs reqs \<Gamma> @ sappe s B) A' pd' FK m\<close>
 proof -
   have subn: \<open>{..< n} \<subseteq> {..< m}\<close> using le by simp
   from I have iC: \<open>cenv B\<close> and iB: \<open>bfree_env B\<close> and iK: \<open>ktv_env B \<subseteq> FK\<close>
     and iFt: \<open>ftv_env B \<subseteq> {..< n}\<close> and iFr: \<open>frv_env B \<subseteq> {..< n}\<close> by (auto simp: inwf_def)
-  note gb = gen_env_bounds[OF bo sc2 kh2]
+  note gb = gen_env_bounds[OF bo sc2 kh2 rk]
   show ?thesis unfolding inwf_def
     using cenv_gen_env cenv_sappe[OF iC] bfree_env_gen_env bfree_env_sappe[OF bfs iB]
       gb(3) ktv_env_sappe[OF khs iK]
       gb(1) ftv_sappe_sconf[OF scs subset_trans[OF iFt subn]]
       gb(2) frv_sappe_sconf[OF scs subset_trans[OF iFt subn] subset_trans[OF iFr subn]]
-      af ab pf pr by simp
+      af ab pf pr pk by simp
 qed
+
+text \<open>The rows a \<open>let\<close> abstracts over come from its pending requests, whichever
+  branch of generalisation it takes:\<close>
+
+lemma gen_choice_pend:
+  assumes \<open>(as, rs, reqs, pdr) =
+    (if c then (if d then gen_off B A pd n \<tau>
+                else (case gen_p B A pd n \<tau> of (as, rs) \<Rightarrow> (as, rs, [], pd)))
+     else ({}, {}, [], pd))\<close>
+  shows \<open>set pdr \<subseteq> set pd\<close> and \<open>\<And>v x r. (v, x, r) \<in> set reqs \<Longrightarrow> (v, POff x r) \<in> set pd\<close>
+  using assms gen_off_pend[of B A pd n \<tau> as rs reqs pdr]
+  by (auto split: if_split_asm prod.split_asm)
+
+lemma reqs_bounds:
+  assumes rq: \<open>\<And>v x r. (v, x, r) \<in> set reqs \<Longrightarrow> (v, POff x r) \<in> set pd\<close>
+    and pf: \<open>ftv_pend pd \<subseteq> {..< m}\<close> and pr: \<open>frv_pend pd \<subseteq> {..< m}\<close> and pk: \<open>ktv_rows pd \<subseteq> FK\<close>
+  shows \<open>(v, x, r) \<in> set reqs \<Longrightarrow> ftv r \<subseteq> {..< m} \<and> frv r \<subseteq> {..< m} \<and> ktv r \<subseteq> FK\<close>
+  using pend_row_bounds[OF rq] pf pr pk by blast
 
 lemma inwf_amb:
   assumes \<open>inwf B A pd FK n\<close> \<open>frv_row A' \<subseteq> {..< n}\<close> \<open>brv_row A' = {}\<close>
@@ -378,6 +464,7 @@ lemma inwf_mk:
     and sc: \<open>sconf s {..< m} {..< m}\<close> and kh: \<open>khyg s FK\<close> and bf: \<open>bfree_sub s\<close>
     and af: \<open>frv_row A' \<subseteq> {..< m}\<close> and ab: \<open>brv_row A' = {}\<close>
     and pf: \<open>ftv_pend pd' \<subseteq> {..< m}\<close> and pr: \<open>frv_pend pd' \<subseteq> {..< m}\<close>
+    and pk: \<open>ktv_rows pd' \<subseteq> FK\<close>
     and le: \<open>n \<le> m\<close>
   shows \<open>inwf (sappe s B) (sappr s A') pd' FK m\<close>
 proof -
@@ -388,7 +475,7 @@ proof -
     using cenv_sappe[OF iC] bfree_env_sappe[OF bf iB] ktv_env_sappe[OF kh iK]
       ftv_sappe_sconf[OF sc subset_trans[OF iFt sub]]
       frv_sappe_sconf[OF sc subset_trans[OF iFt sub] subset_trans[OF iFr sub]]
-      frv_sappr_sconf[OF sc af] bfree_sappr[OF bf ab] pf pr by simp
+      frv_sappr_sconf[OF sc af] bfree_sappr[OF bf ab] pf pr pk by simp
 qed
 
 lemma fresh_ty_fresh_ok:
@@ -1304,7 +1391,8 @@ proof (induction alts arbitrary: n es n')
 qed simp
 
 lemma resolve_inner_pend:
-  \<open>resolve_inner K pd = Some pd' \<Longrightarrow> ftv_pend pd' = ftv_pend pd \<and> frv_pend pd' = frv_pend pd\<close>
+  \<open>resolve_inner K pd = Some pd' \<Longrightarrow>
+    ftv_pend pd' = ftv_pend pd \<and> frv_pend pd' = frv_pend pd \<and> ktv_rows pd' = ktv_rows pd\<close>
   by (induction K pd arbitrary: pd' rule: resolve_inner_induct)
      (fastforce simp: bind_eq_Some_conv split: if_split_asm)+
 
@@ -2450,7 +2538,7 @@ proof -
     unfolding app_arg_def Let_def \<tau>\<^sub>h'_def[symmetric]
     by (auto simp: bind_eq_Some_conv)
   from I have frA: \<open>frv_row A \<subseteq> {..< n}\<close> and brA: \<open>brv_row A = {}\<close>
-    and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close> by (auto simp: inwf_def)
+    and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close> and ktp: \<open>ktv_rows pd \<subseteq> FK\<close> by (auto simp: inwf_def)
   have f2: \<open>fresh_ok (TFn \<tau>\<^sub>a A (TV n)) 0 (Suc n) FK\<close>
     by (rule fresh_ok_TFn[OF fresh_ok_mono[OF fa le_refl le_SucI[OF le_refl]]
           fresh_ok_TV[OF lessI]])
@@ -2461,7 +2549,7 @@ proof -
     and kh: \<open>khyg s FK\<close> and bf: \<open>bfree_sub s\<close>
     using unf by (simp_all add: atLeast0LessThan)
   have o: \<open>outwf s (sub_pend s pd) FK n\<^sub>2\<close>
-    by (rule outwf_of_uni[OF sc kh bf ftp frp]) (use le in simp)
+    by (rule outwf_of_uni[OF sc kh bf ftp frp _ ktp]) (use le in simp)
   have f: \<open>fresh_ok (sapp s (TV n)) 0 n\<^sub>2 FK\<close> by (rule fresh_ok_sapp0[OF fresh_ok_TV[OF lessI] o le])
   show ?thesis using le o f unfolding n' \<tau> pd' by simp
 qed
@@ -2514,7 +2602,7 @@ proof -
         split: list.split_asm option.split_asm tentry.split_asm prod.split_asm)
   let ?n\<^sub>2 = \<open>n\<^sub>1 + length ps\<close> and ?args = \<open>map TV [n\<^sub>1 ..< n\<^sub>1 + length ps]\<close>
   have kb: \<open>ktv_env B \<subseteq> FK\<close> \<open>ftv_env B \<subseteq> {..< n}\<close> \<open>frv_env B \<subseteq> {..< n}\<close> \<open>bfree_env B\<close> \<open>cenv B\<close>
-    and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close>
+    and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close> and ktp: \<open>ktv_rows pd \<subseteq> FK\<close>
     using I by (auto simp: inwf_def)
   have b: \<open>ftv_sch \<sigma> \<subseteq> {..< n}\<close> \<open>frv_sch \<sigma> \<subseteq> {..< n}\<close> \<open>ktv_sch \<sigma> \<subseteq> FK\<close> \<open>bfree_sch \<sigma>\<close>
     using ftv_env_tlookup[OF lx] frv_env_tlookup[OF lx] ktv_env_tlookup[OF lx]
@@ -2537,7 +2625,7 @@ proof -
     and kh: \<open>khyg s FK\<close> and bf: \<open>bfree_sub s\<close>
     using unf by (simp_all add: atLeast0LessThan)
   have o: \<open>outwf s (sub_pend s pd) FK (Suc n\<^sub>3)\<close>
-    by (rule outwf_of_uni[OF sconf_mono[OF sc] kh bf ftp frp]) (use le le1 in auto)
+    by (rule outwf_of_uni[OF sconf_mono[OF sc] kh bf ftp frp _ ktp]) (use le le1 in auto)
   have fs: \<open>fresh_ok (sapp s (op_inst ps ?args \<tau>\<^sub>1)) 0 (Suc n\<^sub>3) FK\<close>
     \<open>fresh_ok (sapp s (op_inst ps ?args \<tau>\<^sub>2)) 0 (Suc n\<^sub>3) FK\<close>
     by (rule fresh_ok_sapp0[OF fo(1) o], use le in simp)
@@ -2549,6 +2637,74 @@ qed
 lemma apath_wf:
   assumes I: \<open>inwf B A pd FK n\<close>
     and E: \<open>infer_atom uf B A pd (APath p) n = Some (s, a', \<tau>, pd', n')\<close>
+  shows \<open>n \<le> n' \<and> outwf s pd' FK n' \<and> fresh_ok \<tau> 0 n' FK\<close>
+proof (cases \<open>tlookup B (path_nms p)\<close>)
+  case None
+  then have \<open>infer_opn uf B pd p n = Some (s, a', \<tau>, pd', n')\<close> using E by simp
+  then show ?thesis by (rule infer_opn_wf[OF I])
+next
+  case (Some e)
+  have kb: \<open>ktv_env B \<subseteq> FK\<close> \<open>ftv_env B \<subseteq> {..< n}\<close> \<open>frv_env B \<subseteq> {..< n}\<close> \<open>bfree_env B\<close>
+    using I by (auto simp: inwf_def)
+  show ?thesis
+  proof (cases e)
+    case (TEval \<sigma>)
+    have b: \<open>ftv_sch \<sigma> \<subseteq> {..< n}\<close> \<open>frv_sch \<sigma> \<subseteq> {..< n}\<close> \<open>ktv_sch \<sigma> \<subseteq> FK\<close> \<open>bfree_sch \<sigma>\<close>
+      using ftv_env_tlookup[OF Some] frv_env_tlookup[OF Some] ktv_env_tlookup[OF Some]
+            bfree_env_tlookup[OF kb(4) Some] kb unfolding TEval by auto
+    obtain \<tau>\<^sub>0 n\<^sub>1 evs pdo where i: \<open>inst_scheme n \<sigma> = (\<tau>\<^sub>0, n\<^sub>1)\<close>
+      and o: \<open>off_evs n\<^sub>1 \<tau>\<^sub>0 = (evs, pdo, \<tau>, n')\<close> and se: \<open>s = sid\<close> \<open>pd' = pdo @ pd\<close>
+      using E Some TEval by (auto split: prod.split_asm)
+    have w: \<open>n \<le> n\<^sub>1\<close> \<open>fresh_ok \<tau>\<^sub>0 0 n\<^sub>1 FK\<close> using sch_inst_fresh[OF b i] by simp_all
+    have le1: \<open>n\<^sub>1 \<le> n'\<close> by (rule off_evs_le[OF o])
+    have le: \<open>n \<le> n'\<close> using w(1) le1 by simp
+    have sub: \<open>{..< n\<^sub>1} \<subseteq> {..< n'}\<close> using le1 by simp
+    have f: \<open>fresh_ok \<tau> 0 n' FK\<close>
+      using w(2) off_evs_ftv[OF o] off_evs_frv[OF o] off_evs_ktv[OF o] off_evs_btv[OF o] sub
+      by (auto simp: fresh_ok_def bfree_def)
+    have po: \<open>ftv_pend pdo \<subseteq> {..< n'}\<close> \<open>frv_pend pdo \<subseteq> {..< n'}\<close> \<open>ktv_rows pdo \<subseteq> FK\<close>
+      using w(2) off_evs_ftv[OF o] off_evs_frv[OF o] off_evs_ktv_rows[OF o] sub
+      by (auto simp: fresh_ok_def)
+    show ?thesis using le f po outwf_sid_mono[OF I le] se by (auto simp: outwf_def)
+  next
+    case (TEcon \<sigma> k)
+    have b: \<open>ftv_sch \<sigma> \<subseteq> {..< n}\<close> \<open>frv_sch \<sigma> \<subseteq> {..< n}\<close> \<open>ktv_sch \<sigma> \<subseteq> FK\<close> \<open>bfree_sch \<sigma>\<close>
+      using ftv_env_tlookup[OF Some] frv_env_tlookup[OF Some] ktv_env_tlookup[OF Some]
+            bfree_env_tlookup[OF kb(4) Some] kb unfolding TEcon by auto
+    obtain m where i: \<open>inst_scheme n \<sigma> = (\<tau>, m)\<close> \<open>n' = m\<close> \<open>s = sid\<close> \<open>pd' = pd\<close>
+      using E Some TEcon by (auto split: prod.split_asm)
+    show ?thesis using sch_inst_fresh[OF b i(1)] outwf_sid_mono[OF I] i by auto
+  next
+    case (TEffi sy \<sigma>)
+    have b: \<open>ftv_sch \<sigma> \<subseteq> {..< n}\<close> \<open>frv_sch \<sigma> \<subseteq> {..< n}\<close> \<open>ktv_sch \<sigma> \<subseteq> FK\<close> \<open>bfree_sch \<sigma>\<close>
+      using ftv_env_tlookup[OF Some] frv_env_tlookup[OF Some] ktv_env_tlookup[OF Some]
+            bfree_env_tlookup[OF kb(4) Some] kb unfolding TEffi by auto
+    obtain m where i: \<open>inst_scheme n \<sigma> = (\<tau>, m)\<close> \<open>n' = m\<close> \<open>s = sid\<close> \<open>pd' = pd\<close>
+      using E Some TEffi by (auto split: prod.split_asm)
+    show ?thesis using sch_inst_fresh[OF b i(1)] outwf_sid_mono[OF I] i by auto
+  next
+    case (TEop l ps \<tau>\<^sub>1 \<tau>\<^sub>2)
+    have cenvB: \<open>cenv B\<close> using I by (simp add: inwf_def)
+    have cl: \<open>ftv_ent e = {}\<close> \<open>frv_ent e = {}\<close>
+      using cenv_tlookup_nonval[OF cenvB Some[unfolded TEop]] by (simp_all add: TEop)
+    have kb2: \<open>ktv_ent e \<subseteq> FK\<close> \<open>bfree_ent e\<close>
+      using ktv_env_tlookup[OF Some] kb bfree_env_tlookup[OF kb(4) Some] by auto
+    have vals: \<open>s = sid\<close> \<open>a' = APath p\<close> \<open>\<tau> = TFn \<tau>\<^sub>1 (canon_row (RCons l (RV n))) \<tau>\<^sub>2\<close>
+      \<open>pd' = pd\<close> \<open>n' = Suc n\<close>
+      and pnil: \<open>ps = []\<close>
+      using E Some TEop by (auto split: if_split_asm)
+    have \<open>fresh_ok \<tau> 0 n' FK\<close>
+      using cl kb2 vals unfolding TEop pnil by (auto simp: fresh_ok_def bfree_def)
+    then show ?thesis using outwf_sid_mono[OF I, of n'] vals by auto
+  qed (use E Some in auto)
+qed
+
+text \<open>In head position a path is instantiated but gets no evidence (the application
+  supplies it), so the pending list is unchanged.\<close>
+
+lemma hpath_wf:
+  assumes I: \<open>inwf B A pd FK n\<close>
+    and E: \<open>infer_head uf B A pd (APath p) n = Some (s, a', \<tau>, pd', n')\<close>
   shows \<open>n \<le> n' \<and> outwf s pd' FK n' \<and> fresh_ok \<tau> 0 n' FK\<close>
 proof (cases \<open>tlookup B (path_nms p)\<close>)
   case None
@@ -2603,7 +2759,7 @@ qed
 lemma infer_args_step:
   assumes E: \<open>infer_args uf B A pd d \<tau>\<^sub>0 as n = Some (s, as', \<tau>, pd', n')\<close>
     and I: \<open>inwf B A pd FK n\<close> and F: \<open>fresh_ok \<tau>\<^sub>0 0 n FK\<close>
-    and nd: \<open>\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t\<close>
+    and nd: \<open>(\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t) \<and> (\<forall>x r t. \<tau>\<^sub>0 \<noteq> TOff x r t)\<close>
     and IH\<^sub>1: \<open>\<And>a rest s\<^sub>1 a'' \<tau>\<^sub>a pd\<^sub>1 n\<^sub>1. as = a # rest \<Longrightarrow>
         infer_atom uf B A pd a n = Some (s\<^sub>1, a'', \<tau>\<^sub>a, pd\<^sub>1, n\<^sub>1) \<Longrightarrow> inwf B A pd FK n \<Longrightarrow>
         n \<le> n\<^sub>1 \<and> outwf s\<^sub>1 pd\<^sub>1 FK n\<^sub>1 \<and> fresh_ok \<tau>\<^sub>a 0 n\<^sub>1 FK\<close>
@@ -2626,7 +2782,7 @@ next
     d2: \<open>infer_args uf (sappe (s\<^sub>2 \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) pd\<^sub>2 d \<tau>\<^sub>r rest n\<^sub>2
            = Some (s\<^sub>3, rest'', \<tau>, pd', n')\<close> and
     se: \<open>s = s\<^sub>3 \<odot> (s\<^sub>2 \<odot> s\<^sub>1)\<close>
-    using E[unfolded Cons infer_args_Cons_plain[OF nd]]
+    using E[unfolded Cons infer_args_Cons_plain[OF conjunct1[OF nd] conjunct2[OF nd]]]
     by (auto simp: bind_eq_Some_conv simp del: infer_args.simps)
   note w1 = IH\<^sub>1[OF Cons d1 I]
   have le1: \<open>n \<le> n\<^sub>1\<close> and o1: \<open>outwf s\<^sub>1 pd\<^sub>1 FK n\<^sub>1\<close> and fa: \<open>fresh_ok \<tau>\<^sub>a 0 n\<^sub>1 FK\<close>
@@ -2739,6 +2895,7 @@ proof -
         (sappr s\<^sub>2 (RV (Suc (Suc (Suc n\<^sub>1))))) pd\<^sub>2 e n\<^sub>3 = Some (s\<^sub>b, e'', \<tau>\<^sub>b, pd\<^sub>b, n\<^sub>b)\<close> and
     un: \<open>uni uf (sapp (s\<^sub>b \<odot> s\<^sub>2) (TV (Suc (Suc (Suc (Suc n\<^sub>1)))))) \<tau>\<^sub>b n\<^sub>b = Some (s\<^sub>4, n\<^sub>5)\<close> and
     esc: \<open>list_all (\<lambda>a. n\<^sub>1 \<notin> ktv (fst (s\<^sub>4 \<odot> s\<^sub>b) a)) [0 ..< n\<^sub>3]\<close> and
+    escp: \<open>n\<^sub>1 \<notin> ktv_rows (sub_pend s\<^sub>4 pd\<^sub>b)\<close> and
     se: \<open>s = sproj n\<^sub>3 (s\<^sub>4 \<odot> s\<^sub>b) \<odot> s\<^sub>2 \<odot> s\<^sub>1\<close> \<open>\<tau> = sapp (sproj n\<^sub>3 (s\<^sub>4 \<odot> s\<^sub>b)) \<tau>\<^sub>a\<close>
       \<open>pd' = sub_pend s\<^sub>4 pd\<^sub>b\<close> \<open>n' = n\<^sub>5\<close>
     by (auto simp: Let_def bind_eq_Some_conv split: prod.split_asm if_split_asm)
@@ -2762,7 +2919,7 @@ proof -
     and ktvB: \<open>ktv_env (sappe s\<^sub>2 ?B\<^sub>1) \<subseteq> FK\<close>
     and ftvB: \<open>ftv_env (sappe s\<^sub>2 ?B\<^sub>1) \<subseteq> {..< n\<^sub>3}\<close>
     and frvB: \<open>frv_env (sappe s\<^sub>2 ?B\<^sub>1) \<subseteq> {..< n\<^sub>3}\<close>
-    and ftp: \<open>ftv_pend pd\<^sub>2 \<subseteq> {..< n\<^sub>3}\<close> and frp: \<open>frv_pend pd\<^sub>2 \<subseteq> {..< n\<^sub>3}\<close>
+    and ftp: \<open>ftv_pend pd\<^sub>2 \<subseteq> {..< n\<^sub>3}\<close> and frp: \<open>frv_pend pd\<^sub>2 \<subseteq> {..< n\<^sub>3}\<close> and ktp: \<open>ktv_rows pd\<^sub>2 \<subseteq> FK\<close>
     by (auto simp: inwf_def)
   from o2 have sc2: \<open>sconf s\<^sub>2 {..< n\<^sub>3} {..< n\<^sub>3}\<close> and kh2: \<open>khyg s\<^sub>2 FK\<close>
     and bf2: \<open>bfree_sub s\<^sub>2\<close> by (auto simp: outwf_def)
@@ -2787,7 +2944,8 @@ proof -
   have iB': \<open>inwf (name_env (sappe s\<^sub>2 ?B\<^sub>1) (n_txt x) ?lt @
         (n_txt x, TEval (kmono (TEv ?lt (TK n\<^sub>1) ?ta))) # sappe s\<^sub>2 ?B\<^sub>1)
       (sappr s\<^sub>2 (RV (Suc (Suc (Suc n\<^sub>1))))) pd\<^sub>2 (insert n\<^sub>1 FK) n\<^sub>3\<close>
-    using ne cenvB bfB ktvB ftvB frvB ftp frp klt kta flt fta' rlt rta blt bta fr0 br0
+    using ne cenvB bfB ktvB ftvB frvB ftp frp subset_insertI2[OF ktp] klt kta flt fta' rlt rta blt bta
+          fr0 br0
     by (auto simp: inwf_def bfree_def)
   note wb = IH\<^sub>2[OF d1 kn nm ap ib iB']
   have le3: \<open>n\<^sub>3 \<le> n\<^sub>b\<close> and ob: \<open>outwf s\<^sub>b pd\<^sub>b (insert n\<^sub>1 FK) n\<^sub>b\<close>
@@ -2802,9 +2960,10 @@ proof -
   have le4: \<open>n\<^sub>b \<le> n\<^sub>5\<close> and sc4: \<open>sconf s\<^sub>4 {..< n\<^sub>5} {..< n\<^sub>5}\<close> and kh4: \<open>khyg s\<^sub>4 (insert n\<^sub>1 FK)\<close>
     and bf4: \<open>bfree_sub s\<^sub>4\<close> using wu by (simp_all add: atLeast0LessThan)
   from ob have opd: \<open>ftv_pend pd\<^sub>b \<subseteq> {..< n\<^sub>b}\<close> \<open>frv_pend pd\<^sub>b \<subseteq> {..< n\<^sub>b}\<close>
+    \<open>ktv_rows pd\<^sub>b \<subseteq> insert n\<^sub>1 FK\<close>
     by (auto simp: outwf_def)
   have o4: \<open>outwf s\<^sub>4 (sub_pend s\<^sub>4 pd\<^sub>b) (insert n\<^sub>1 FK) n\<^sub>5\<close>
-    by (rule outwf_of_uni[OF sc4 kh4 bf4 opd le4])
+    by (rule outwf_of_uni[OF sc4 kh4 bf4 opd(1) opd(2) le4 opd(3)])
   have o': \<open>outwf (s\<^sub>4 \<odot> s\<^sub>b) (sub_pend s\<^sub>4 pd\<^sub>b) (insert n\<^sub>1 FK) n\<^sub>5\<close>
     by (rule outwf_scomp[OF ob o4 le4])
   then have sc': \<open>sconf (s\<^sub>4 \<odot> s\<^sub>b) {..< n\<^sub>5} {..< n\<^sub>5}\<close> and kh': \<open>khyg (s\<^sub>4 \<odot> s\<^sub>b) (insert n\<^sub>1 FK)\<close>
@@ -2816,9 +2975,10 @@ proof -
     then have \<open>n\<^sub>1 \<notin> ktv (fst (s\<^sub>4 \<odot> s\<^sub>b) a)\<close> using esc by (auto simp: list_all_iff)
     then show \<open>ktv (fst (s\<^sub>4 \<odot> s\<^sub>b) a) \<subseteq> FK\<close> using kh' unfolding khyg_def by blast
   qed
+  have opk: \<open>ktv_rows (sub_pend s\<^sub>4 pd\<^sub>b) \<subseteq> FK\<close> using o' escp by (auto simp: outwf_def)
   have op: \<open>outwf (sproj n\<^sub>3 (s\<^sub>4 \<odot> s\<^sub>b)) (sub_pend s\<^sub>4 pd\<^sub>b) FK n\<^sub>5\<close>
-    unfolding outwf_def using sconf_sproj[OF sc'] khyg_sproj[OF kall] bfree_sub_sproj[OF bf'] pd'
-    by simp
+    unfolding outwf_def
+    using sconf_sproj[OF sc'] khyg_sproj[OF kall] bfree_sub_sproj[OF bf'] pd' opk by simp
   have le35: \<open>n\<^sub>3 \<le> n\<^sub>5\<close> using le3 le4 by simp
   have os2: \<open>outwf (sproj n\<^sub>3 (s\<^sub>4 \<odot> s\<^sub>b) \<odot> s\<^sub>2) (sub_pend s\<^sub>4 pd\<^sub>b) FK n\<^sub>5\<close>
     by (rule outwf_scomp[OF o2 op le35])
@@ -2838,20 +2998,25 @@ lemma infer_let_wf:
     and I: \<open>inwf B A pd FK n\<close>
     and IH\<^sub>e: \<open>\<And>s e' \<tau> pd' n' FK. infer uf B A pd e n = Some (s, e', \<tau>, pd', n') \<Longrightarrow>
         inwf B A pd FK n \<Longrightarrow> n \<le> n' \<and> outwf s pd' FK n' \<and> fresh_ok \<tau> 0 n' FK\<close>
-    and IH\<^sub>b: \<open>\<And>s\<^sub>1 e'' \<tau>\<^sub>e pd\<^sub>1 n\<^sub>1 sp p\<^sub>x \<tau>\<^sub>p \<Gamma> n\<^sub>2 s\<^sub>2 n\<^sub>3 asx rsx s\<^sub>3 b'' \<tau>\<^sub>b pd\<^sub>3 n\<^sub>4 FK.
+    and IH\<^sub>b: \<open>\<And>s\<^sub>1 e'' \<tau>\<^sub>e pd\<^sub>1 n\<^sub>1 sp p\<^sub>x \<tau>\<^sub>p \<Gamma> n\<^sub>2 s\<^sub>2 n\<^sub>3 asx rsx reqs pdr s\<^sub>3 b'' \<tau>\<^sub>b pd\<^sub>3 n\<^sub>4 FK.
         infer uf B A pd e n = Some (s\<^sub>1, e'', \<tau>\<^sub>e, pd\<^sub>1, n\<^sub>1) \<Longrightarrow>
         infer_pat uf (sappe s\<^sub>1 B) p n\<^sub>1 = Some (sp, p\<^sub>x, \<tau>\<^sub>p, \<Gamma>, n\<^sub>2) \<Longrightarrow>
         uni uf (sapp sp \<tau>\<^sub>e) \<tau>\<^sub>p n\<^sub>2 = Some (s\<^sub>2, n\<^sub>3) \<Longrightarrow>
-        (asx, rsx) = (if val_exp B e''
-          then gen_p (sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) A) (sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1) n
-            (sapp s\<^sub>2 \<tau>\<^sub>p)
-          else ({}, {})) \<Longrightarrow>
+        (asx, rsx, reqs, pdr) =
+          (if val_exp B e''
+           then (if var_pat p \<and> length \<Gamma> = 1
+                 then gen_off (sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) A)
+                        (sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1) n (sapp s\<^sub>2 \<tau>\<^sub>p)
+                 else (case gen_p (sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) A)
+                              (sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1) n (sapp s\<^sub>2 \<tau>\<^sub>p)
+                       of (as, rs) \<Rightarrow> (as, rs, [], sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1)))
+           else ({}, {}, [], sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1)) \<Longrightarrow>
         covers (sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sapp s\<^sub>2 \<tau>\<^sub>p) [p] \<and>
           btv_list (sapp s\<^sub>2 \<tau>\<^sub>p) = [] \<and> brv_list (sapp s\<^sub>2 \<tau>\<^sub>p) = [] \<Longrightarrow>
-        infer uf (gen_env s\<^sub>2 asx rsx \<Gamma> @ sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) A)
-          (sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1) b n\<^sub>3 = Some (s\<^sub>3, b'', \<tau>\<^sub>b, pd\<^sub>3, n\<^sub>4) \<Longrightarrow>
-        inwf (gen_env s\<^sub>2 asx rsx \<Gamma> @ sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) A)
-          (sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1) FK n\<^sub>3 \<Longrightarrow>
+        infer uf (gen_env s\<^sub>2 asx rsx reqs \<Gamma> @ sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) A)
+          pdr b n\<^sub>3 = Some (s\<^sub>3, b'', \<tau>\<^sub>b, pd\<^sub>3, n\<^sub>4) \<Longrightarrow>
+        inwf (gen_env s\<^sub>2 asx rsx reqs \<Gamma> @ sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) A)
+          pdr FK n\<^sub>3 \<Longrightarrow>
         n\<^sub>3 \<le> n\<^sub>4 \<and> outwf s\<^sub>3 pd\<^sub>3 FK n\<^sub>4 \<and> fresh_ok \<tau>\<^sub>b 0 n\<^sub>4 FK\<close>
   shows \<open>n \<le> n' \<and> outwf s pd' FK n' \<and> fresh_ok \<tau> 0 n' FK\<close>
 proof -
@@ -2876,18 +3041,23 @@ proof -
     case (Some r) then show ?thesis using that by (cases r) auto
   qed
   let ?s = \<open>s\<^sub>2 \<odot> sp \<odot> s\<^sub>1\<close> and ?pd = \<open>sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1\<close>
-  obtain asx rsx where asrs: \<open>(asx, rsx) =
-    (if val_exp B e'' then gen_p (sappe ?s B) (sappr ?s A) ?pd n (sapp s\<^sub>2 \<tau>\<^sub>p) else ({}, {}))\<close>
-    by (metis surj_pair)
+  obtain asx rsx reqs pdr where asrs: \<open>(asx, rsx, reqs, pdr) =
+    (if val_exp B e''
+     then (if var_pat p \<and> length \<Gamma> = 1
+           then gen_off (sappe ?s B) (sappr ?s A) ?pd n (sapp s\<^sub>2 \<tau>\<^sub>p)
+           else (case gen_p (sappe ?s B) (sappr ?s A) ?pd n (sapp s\<^sub>2 \<tau>\<^sub>p)
+                 of (as, rs) \<Rightarrow> (as, rs, [], ?pd)))
+     else ({}, {}, [], ?pd))\<close>
+    by (metis prod_cases4)
   have covb: \<open>covers (sappe ?s B) (sapp s\<^sub>2 \<tau>\<^sub>p) [p] \<and>
       btv_list (sapp s\<^sub>2 \<tau>\<^sub>p) = [] \<and> brv_list (sapp s\<^sub>2 \<tau>\<^sub>p) = []\<close>
     using E by (simp add: d1 dp u1 asrs[symmetric] Let_def
         split: if_split_asm del: sapp.simps sappe.simps sappr.simps sapps.simps)
   obtain s\<^sub>3 b'' pd\<^sub>3
-    where d3: \<open>infer uf (gen_env s\<^sub>2 asx rsx \<Gamma> @ sappe ?s B) (sappr ?s A) ?pd b n\<^sub>3
+    where d3: \<open>infer uf (gen_env s\<^sub>2 asx rsx reqs \<Gamma> @ sappe ?s B) (sappr ?s A) pdr b n\<^sub>3
         = Some (s\<^sub>3, b'', \<tau>, pd\<^sub>3, n')\<close>
       and se: \<open>s = s\<^sub>3 \<odot> ?s\<close> \<open>pd' = pd\<^sub>3\<close>
-  proof (cases \<open>infer uf (gen_env s\<^sub>2 asx rsx \<Gamma> @ sappe ?s B) (sappr ?s A) ?pd b n\<^sub>3\<close>)
+  proof (cases \<open>infer uf (gen_env s\<^sub>2 asx rsx reqs \<Gamma> @ sappe ?s B) (sappr ?s A) pdr b n\<^sub>3\<close>)
     case None then show ?thesis using E
       by (simp add: d1 dp u1 asrs[symmetric] covb gen_env_def Let_def
           del: sapp.simps sappe.simps sappr.simps sapps.simps)
@@ -2898,7 +3068,7 @@ proof -
   qed
   from I have cenvB: \<open>cenv B\<close> and bfB: \<open>bfree_env B\<close> and ktvB: \<open>ktv_env B \<subseteq> FK\<close>
     and frA: \<open>frv_row A \<subseteq> {..< n}\<close> and brA: \<open>brv_row A = {}\<close>
-    and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close>
+    and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close> and ktp: \<open>ktv_rows pd \<subseteq> FK\<close>
     by (auto simp: inwf_def)
   from d1 I have \<open>n \<le> n\<^sub>1 \<and> outwf s\<^sub>1 pd\<^sub>1 FK n\<^sub>1 \<and> fresh_ok \<tau>\<^sub>e 0 n\<^sub>1 FK\<close>
     by (rule IH\<^sub>e)
@@ -2906,7 +3076,8 @@ proof -
     and fte: \<open>fresh_ok \<tau>\<^sub>e 0 n\<^sub>1 FK\<close> by simp_all
   from o1 have sc1: \<open>sconf s\<^sub>1 {..< n\<^sub>1} {..< n\<^sub>1}\<close> and kh1: \<open>khyg s\<^sub>1 FK\<close>
     and bf1: \<open>bfree_sub s\<^sub>1\<close> and ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close>
-    and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> by (auto simp: outwf_def)
+    and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and pk1: \<open>ktv_rows pd\<^sub>1 \<subseteq> FK\<close>
+    by (auto simp: outwf_def)
   note wp = infer_pat_wf(1)[OF dp cenv_sappe[OF cenvB] bfree_env_sappe[OF bf1 bfB]
               ktv_env_sappe[OF kh1 ktvB]]
   have le2: \<open>n\<^sub>1 \<le> n\<^sub>2\<close> using wp by simp
@@ -2915,7 +3086,7 @@ proof -
     and fp: \<open>fresh_ok \<tau>\<^sub>p n\<^sub>1 n\<^sub>2 FK\<close> using wp by simp_all
   have scp: \<open>sconf sp {..< n\<^sub>2} {..< n\<^sub>2}\<close> by (rule sconf_mono[OF scp0]) auto
   have fse: \<open>fresh_ok (sapp sp \<tau>\<^sub>e) 0 n\<^sub>2 FK\<close>
-    by (rule fresh_ok_sapp0[OF fte outwf_of_uni[OF scp khp bfp ftp1 frp1 le2] le2])
+    by (rule fresh_ok_sapp0[OF fte outwf_of_uni[OF scp khp bfp ftp1 frp1 le2 pk1] le2])
   note uf1 = uni_fresh[OF u1 fse fresh_ok_weaken0[OF fp] le0]
   have le3: \<open>n\<^sub>2 \<le> n\<^sub>3\<close> using uf1 by simp
   have sc2: \<open>sconf s\<^sub>2 {..< n\<^sub>3} {..< n\<^sub>3}\<close> using uf1 by (simp add: atLeast0LessThan)
@@ -2933,6 +3104,7 @@ proof -
     using bfree_sub_scomp[OF bfree_sub_scomp[OF bf1 bfp] bf2] by (simp add: scomp_assoc)
   have sc2p: \<open>sconf (s\<^sub>2 \<odot> sp) {..< n\<^sub>3} {..< n\<^sub>3}\<close>
     by (rule sconf_scomp_mono[OF scp sc2 subn23 subn23])
+  have kh2p: \<open>khyg (s\<^sub>2 \<odot> sp) FK\<close> by (rule khyg_scomp[OF khp kh2])
   have boG0: \<open>binds_ok \<Gamma> 0 n\<^sub>3 FK\<close> by (rule binds_ok_mono[OF boG le0 le3])
   have sub13x: \<open>{..< n} \<subseteq> {..< n\<^sub>3}\<close> using le13 by simp
   have af: \<open>frv_row (sappr ?s A) \<subseteq> {..< n\<^sub>3}\<close>
@@ -2943,13 +3115,19 @@ proof -
     by (rule ftv_pend_sub_pend[OF sc2p subset_trans[OF ftp1 sub123]])
   have pr: \<open>frv_pend ?pd \<subseteq> {..< n\<^sub>3}\<close>
     by (rule frv_pend_sub_pend[OF sc2p subset_trans[OF ftp1 sub123] subset_trans[OF frp1 sub123]])
-  have i3: \<open>inwf (gen_env s\<^sub>2 asx rsx \<Gamma> @ sappe ?s B) (sappr ?s A) ?pd FK n\<^sub>3\<close>
-    by (rule inwf_let[OF I scs khs bfs sc2 kh2 boG0 af ab pf pr le13])
+  have pk: \<open>ktv_rows ?pd \<subseteq> FK\<close> by (rule ktv_rows_sub_pend[OF kh2p pk1])
+  note gc = gen_choice_pend[OF asrs]
+  have pf': \<open>ftv_pend pdr \<subseteq> {..< n\<^sub>3}\<close> using ftv_pend_mono[OF gc(1)] pf by blast
+  have pr': \<open>frv_pend pdr \<subseteq> {..< n\<^sub>3}\<close> using frv_pend_mono[OF gc(1)] pr by blast
+  have pk': \<open>ktv_rows pdr \<subseteq> FK\<close> using ktv_rows_mono[OF gc(1)] pk by blast
+  note rk = reqs_bounds[OF gc(2) pf pr pk]
+  have i3: \<open>inwf (gen_env s\<^sub>2 asx rsx reqs \<Gamma> @ sappe ?s B) (sappr ?s A) pdr FK n\<^sub>3\<close>
+    by (rule inwf_let[OF I scs khs bfs sc2 kh2 boG0 af ab pf' pr' pk' rk le13])
   have \<open>n\<^sub>3 \<le> n' \<and> outwf s\<^sub>3 pd\<^sub>3 FK n' \<and> fresh_ok \<tau> 0 n' FK\<close>
     by (rule IH\<^sub>b[OF d1 dp u1 asrs covb d3 i3])
   then have le4: \<open>n\<^sub>3 \<le> n'\<close> and o3: \<open>outwf s\<^sub>3 pd\<^sub>3 FK n'\<close>
     and fresh: \<open>fresh_ok \<tau> 0 n' FK\<close> by simp_all
-  have os: \<open>outwf ?s ?pd FK n\<^sub>3\<close> unfolding outwf_def using scs khs bfs pf pr by simp
+  have os: \<open>outwf ?s ?pd FK n\<^sub>3\<close> unfolding outwf_def using scs khs bfs pf pr pk by simp
   show ?thesis using se le13 le4 fresh outwf_scomp[OF os o3 le4] by simp
 qed
 
@@ -2962,16 +3140,17 @@ lemma infer_letfun_wf:
           = Some (s\<^sub>1, r', \<tau>', pd\<^sub>1, n\<^sub>1) \<Longrightarrow>
         inwf ((n_txt f, TEval (kmono (TV n))) # B) A pd FK' (Suc n) \<Longrightarrow>
         Suc n \<le> n\<^sub>1 \<and> outwf s\<^sub>1 pd\<^sub>1 FK' n\<^sub>1 \<and> fresh_ok \<tau>' 0 n\<^sub>1 FK'\<close>
-    and IH\<^sub>b: \<open>\<And>s\<^sub>1 r' \<tau>' pd\<^sub>1 n\<^sub>1 s\<^sub>2 n\<^sub>2 as rs s\<^sub>3 b' \<tau>\<^sub>b pd\<^sub>3 n\<^sub>3 FK'.
+    and IH\<^sub>b: \<open>\<And>s\<^sub>1 r' \<tau>' pd\<^sub>1 n\<^sub>1 s\<^sub>2 n\<^sub>2 as rs reqs pdr s\<^sub>3 b' \<tau>\<^sub>b pd\<^sub>3 n\<^sub>3 FK'.
         infer uf ((n_txt f, TEval (kmono (TV n))) # B) A pd (foldr EFnMod mbs (dfun_rhs cls)) (Suc n)
           = Some (s\<^sub>1, r', \<tau>', pd\<^sub>1, n\<^sub>1) \<Longrightarrow>
         uni uf (sapp s\<^sub>1 (TV n)) \<tau>' n\<^sub>1 = Some (s\<^sub>2, n\<^sub>2) \<Longrightarrow>
-        (as, rs) = gen_p (sappe (s\<^sub>2 \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) n (sapp s\<^sub>2 \<tau>') \<Longrightarrow>
+        (as, rs, reqs, pdr) = gen_off (sappe (s\<^sub>2 \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) n
+          (sapp s\<^sub>2 \<tau>') \<Longrightarrow>
         btv_list (sapp s\<^sub>2 \<tau>') = [] \<and> brv_list (sapp s\<^sub>2 \<tau>') = [] \<Longrightarrow>
-        infer uf ((n_txt f, TEval (close_sch as rs (sapp s\<^sub>2 \<tau>'))) # sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
-          (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) b n\<^sub>2 = Some (s\<^sub>3, b', \<tau>\<^sub>b, pd\<^sub>3, n\<^sub>3) \<Longrightarrow>
-        inwf ((n_txt f, TEval (close_sch as rs (sapp s\<^sub>2 \<tau>'))) # sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
-          (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) FK' n\<^sub>2 \<Longrightarrow>
+        infer uf ((n_txt f, TEval (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>')))) # sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
+          (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) pdr b n\<^sub>2 = Some (s\<^sub>3, b', \<tau>\<^sub>b, pd\<^sub>3, n\<^sub>3) \<Longrightarrow>
+        inwf ((n_txt f, TEval (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>')))) # sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
+          (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) pdr FK' n\<^sub>2 \<Longrightarrow>
         n\<^sub>2 \<le> n\<^sub>3 \<and> outwf s\<^sub>3 pd\<^sub>3 FK' n\<^sub>3 \<and> fresh_ok \<tau>\<^sub>b 0 n\<^sub>3 FK'\<close>
   shows \<open>n \<le> n' \<and> outwf s pd' FK n' \<and> fresh_ok \<tau> 0 n' FK\<close>
 proof -
@@ -2987,18 +3166,18 @@ proof -
   next
     case (Some r) then show ?thesis using that by (cases r) auto
   qed
-  obtain as rs where asrs: \<open>(as, rs) = gen_p (sappe (s\<^sub>2 \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> s\<^sub>1) A)
-      (sub_pend s\<^sub>2 pd\<^sub>1) n (sapp s\<^sub>2 \<tau>')\<close>
-    by (metis surj_pair)
+  obtain as rs reqs pdr where asrs: \<open>(as, rs, reqs, pdr) = gen_off (sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
+      (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) n (sapp s\<^sub>2 \<tau>')\<close>
+    by (metis prod_cases4)
   have bt: \<open>btv_list (sapp s\<^sub>2 \<tau>') = [] \<and> brv_list (sapp s\<^sub>2 \<tau>') = []\<close>
     using E by (simp add: d1 u1[simplified] asrs[symmetric] Let_def
         split: if_split_asm del: sapp.simps sappe.simps sappr.simps sapps.simps)
   obtain s\<^sub>3 b' pd\<^sub>3 where d3:
-    \<open>infer uf ((n_txt f, TEval (close_sch as rs (sapp s\<^sub>2 \<tau>'))) # sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
-       (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) b n\<^sub>2 = Some (s\<^sub>3, b', \<tau>, pd\<^sub>3, n')\<close>
+    \<open>infer uf ((n_txt f, TEval (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>')))) # sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
+       (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) pdr b n\<^sub>2 = Some (s\<^sub>3, b', \<tau>, pd\<^sub>3, n')\<close>
     and se: \<open>s = s\<^sub>3 \<odot> (s\<^sub>2 \<odot> s\<^sub>1)\<close> \<open>pd' = pd\<^sub>3\<close>
-  proof (cases \<open>infer uf ((n_txt f, TEval (close_sch as rs (sapp s\<^sub>2 \<tau>'))) # sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
-       (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) b n\<^sub>2\<close>)
+  proof (cases \<open>infer uf ((n_txt f, TEval (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>')))) # sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
+       (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) pdr b n\<^sub>2\<close>)
     case None then show ?thesis using E
       by (simp add: d1 u1[simplified] asrs[symmetric] bt Let_def split: if_split_asm
           del: sapp.simps sappe.simps sappr.simps sapps.simps)
@@ -3010,12 +3189,13 @@ proof -
   from I have cenvB: \<open>cenv B\<close> and bfB: \<open>bfree_env B\<close> and ktvB: \<open>ktv_env B \<subseteq> FK\<close>
     and ftvB: \<open>ftv_env B \<subseteq> {..< n}\<close> and frvB: \<open>frv_env B \<subseteq> {..< n}\<close>
     and frA: \<open>frv_row A \<subseteq> {..< n}\<close> and brA: \<open>brv_row A = {}\<close>
-    and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close>
+    and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close> and ktp: \<open>ktv_rows pd \<subseteq> FK\<close>
+    and pk0: \<open>ktv_rows pd \<subseteq> FK\<close>
     by (auto simp: inwf_def)
   have subn: \<open>{..< n} \<subseteq> {..< Suc n}\<close> by simp
   have i0: \<open>inwf ((n_txt f, TEval (kmono (TV n))) # B) A pd FK (Suc n)\<close>
     using cenvB bfB ktvB frA brA subset_trans[OF ftvB subn] subset_trans[OF frvB subn]
-      subset_trans[OF ftp subn] subset_trans[OF frp subn]
+      subset_trans[OF ftp subn] subset_trans[OF frp subn] pk0
     by (auto simp: inwf_def bfree_def)
   have w1: \<open>Suc n \<le> n\<^sub>1 \<and> outwf s\<^sub>1 pd\<^sub>1 FK n\<^sub>1 \<and> fresh_ok \<tau>' 0 n\<^sub>1 FK\<close> by (rule IH\<^sub>r[OF d1 i0])
   then have le1: \<open>Suc n \<le> n\<^sub>1\<close> and o1: \<open>outwf s\<^sub>1 pd\<^sub>1 FK n\<^sub>1\<close> and ft': \<open>fresh_ok \<tau>' 0 n\<^sub>1 FK\<close>
@@ -3028,7 +3208,8 @@ proof -
     and kh2: \<open>khyg s\<^sub>2 FK\<close> and bf2: \<open>bfree_sub s\<^sub>2\<close> by (simp_all add: atLeast0LessThan)
   from o1 have sc1: \<open>sconf s\<^sub>1 {..< n\<^sub>1} {..< n\<^sub>1}\<close> and kh1: \<open>khyg s\<^sub>1 FK\<close>
     and bf1: \<open>bfree_sub s\<^sub>1\<close> and ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close>
-    and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> by (auto simp: outwf_def)
+    and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and pk1: \<open>ktv_rows pd\<^sub>1 \<subseteq> FK\<close>
+    by (auto simp: outwf_def)
   have le12: \<open>n \<le> n\<^sub>2\<close> using le1 le2 by simp
   have subn12: \<open>{..< n\<^sub>1} \<subseteq> {..< n\<^sub>2}\<close> using le2 by simp
   have scs: \<open>sconf (s\<^sub>2 \<odot> s\<^sub>1) {..< n\<^sub>2} {..< n\<^sub>2}\<close>
@@ -3045,18 +3226,27 @@ proof -
     by (rule ftv_pend_sub_pend[OF sc2 subset_trans[OF ftp1 subn12]])
   have pr: \<open>frv_pend (sub_pend s\<^sub>2 pd\<^sub>1) \<subseteq> {..< n\<^sub>2}\<close>
     by (rule frv_pend_sub_pend[OF sc2 subset_trans[OF ftp1 subn12] subset_trans[OF frp1 subn12]])
-  have i3: \<open>inwf (gen_env s\<^sub>2 as rs [(n_txt f, \<tau>')] @ sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
-      (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
-    by (rule inwf_let[OF I scs khs bfs sc2 kh2 boG af ab pf pr le12])
-  then have i3': \<open>inwf ((n_txt f, TEval (close_sch as rs (sapp s\<^sub>2 \<tau>'))) # sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
-      (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
+  have pk: \<open>ktv_rows (sub_pend s\<^sub>2 pd\<^sub>1) \<subseteq> FK\<close> by (rule ktv_rows_sub_pend[OF kh2 pk1])
+  from gen_off_pend[OF asrs[symmetric]]
+  have sub: \<open>set pdr \<subseteq> set (sub_pend s\<^sub>2 pd\<^sub>1)\<close>
+    and rq: \<open>\<And>v x r. (v, x, r) \<in> set reqs \<Longrightarrow> (v, POff x r) \<in> set (sub_pend s\<^sub>2 pd\<^sub>1)\<close>
+    by blast+
+  have pf': \<open>ftv_pend pdr \<subseteq> {..< n\<^sub>2}\<close> using ftv_pend_mono[OF sub] pf by blast
+  have pr': \<open>frv_pend pdr \<subseteq> {..< n\<^sub>2}\<close> using frv_pend_mono[OF sub] pr by blast
+  have pk': \<open>ktv_rows pdr \<subseteq> FK\<close> using ktv_rows_mono[OF sub] pk by blast
+  note rk = reqs_bounds[OF rq pf pr pk]
+  have i3: \<open>inwf (gen_env s\<^sub>2 as rs reqs [(n_txt f, \<tau>')] @ sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
+      (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) pdr FK n\<^sub>2\<close>
+    by (rule inwf_let[OF I scs khs bfs sc2 kh2 boG af ab pf' pr' pk' rk le12])
+  then have i3': \<open>inwf ((n_txt f, TEval (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>')))) # sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
+      (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) pdr FK n\<^sub>2\<close>
     by (simp add: gen_env_def)
   have w3: \<open>n\<^sub>2 \<le> n' \<and> outwf s\<^sub>3 pd\<^sub>3 FK n' \<and> fresh_ok \<tau> 0 n' FK\<close>
     by (rule IH\<^sub>b[OF d1 u1 asrs bt d3 i3'])
   then have le3: \<open>n\<^sub>2 \<le> n'\<close> and o3: \<open>outwf s\<^sub>3 pd\<^sub>3 FK n'\<close> and fresh: \<open>fresh_ok \<tau> 0 n' FK\<close>
     by simp_all
   have os: \<open>outwf (s\<^sub>2 \<odot> s\<^sub>1) (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
-    unfolding outwf_def using scs khs bfs pf pr by simp
+    unfolding outwf_def using scs khs bfs pf pr pk by simp
   show ?thesis using se le12 le3 fresh outwf_scomp[OF os o3 le3] by simp
 qed
 text \<open>Confinement of the expression algorithm, one part per function of the
@@ -3142,7 +3332,7 @@ lemma infer_wf:
     from I have cenvB: \<open>cenv B\<close> and bfB: \<open>bfree_env B\<close> and ktvB: \<open>ktv_env B \<subseteq> FK\<close>
       and ftvB: \<open>ftv_env B \<subseteq> {..< n}\<close> and frvB: \<open>frv_env B \<subseteq> {..< n}\<close>
       and frA: \<open>frv_row A \<subseteq> {..< n}\<close> and brA: \<open>brv_row A = {}\<close>
-      and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close>
+      and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close> and ktp: \<open>ktv_rows pd \<subseteq> FK\<close>
       by (auto simp: inwf_def)
     note wc = infer_EOp.IH[OF dc I]
     have le1: \<open>n \<le> n\<^sub>1\<close> using wc by simp
@@ -3150,7 +3340,7 @@ lemma infer_wf:
     have fts: \<open>\<forall>\<tau> \<in> set \<tau>s. fresh_ok \<tau> 0 n\<^sub>1 FK\<close> using wc by simp
     from o1 have sc1: \<open>sconf s\<^sub>1 {..< n\<^sub>1} {..< n\<^sub>1}\<close> and kh1: \<open>khyg s\<^sub>1 FK\<close>
       and bf1: \<open>bfree_sub s\<^sub>1\<close> and ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close>
-      and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> by (auto simp: outwf_def)
+      and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and ktp1: \<open>ktv_rows pd\<^sub>1 \<subseteq> FK\<close> by (auto simp: outwf_def)
     have subn: \<open>{..< n} \<subseteq> {..< n\<^sub>1}\<close> using le1 by simp
     note wt = infer_tree_wf[OF dt cenv_sappe[OF cenvB] bfree_env_sappe[OF bf1 bfB]
                 ktv_env_sappe[OF kh1 ktvB] ftv_sappe_sconf[OF sc1 subset_trans[OF ftvB subn]]
@@ -3171,7 +3361,7 @@ lemma infer_wf:
             subset_trans[OF frp1 subn12]])
     have le: \<open>n \<le> n'\<close> using le1 le2 se by simp
     have os: \<open>outwf (s\<^sub>2 \<odot> s\<^sub>1) (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
-      unfolding outwf_def using scs khs bfs pf pr by simp
+      unfolding outwf_def using scs khs bfs pf pr ktv_rows_sub_pend[OF kh2 ktp1] by simp
     show ?case using se le f\<tau> os by simp
   next
     case (infer_EAnn uf B A pd e ty n s e' \<tau> pd' n' FK)
@@ -3188,7 +3378,7 @@ lemma infer_wf:
       and f1: \<open>fresh_ok \<tau>\<^sub>1 0 n\<^sub>1 FK\<close> using w1 by simp_all
     have cenvB: \<open>cenv B\<close> and ktvB: \<open>ktv_env B \<subseteq> FK\<close> using I by (auto simp: inwf_def)
     from o1 have kh1: \<open>khyg s\<^sub>1 FK\<close> and sc1: \<open>sconf s\<^sub>1 {..< n\<^sub>1} {..< n\<^sub>1}\<close>
-      and ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close>
+      and ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and ktp1: \<open>ktv_rows pd\<^sub>1 \<subseteq> FK\<close>
       by (auto simp: outwf_def)
     have kv1: \<open>ktv_env (sappe s\<^sub>1 B) \<subseteq> FK\<close> by (rule ktv_env_sappe[OF kh1 ktvB])
     note tw = ty_stat_wf[OF ts cenv_sappe[OF cenvB], simplified tve_ok_def, simplified]
@@ -3202,7 +3392,7 @@ lemma infer_wf:
     have kh2: \<open>khyg s\<^sub>2 FK\<close> and bf2: \<open>bfree_sub s\<^sub>2\<close> using unf by simp_all
     have le13: \<open>n\<^sub>1 \<le> n\<^sub>3\<close> using le2 le3 by simp
     have o2: \<open>outwf s\<^sub>2 (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>3\<close>
-      by (rule outwf_of_uni[OF sc2 kh2 bf2 ftp1 frp1 le13])
+      by (rule outwf_of_uni[OF sc2 kh2 bf2 ftp1 frp1 le13 ktp1])
     show ?case using se le1 le13 outwf_scomp[OF o1 o2 le13] fresh_ok_sapp0[OF f1 o2 le13]
       by auto
   next
@@ -3217,7 +3407,7 @@ lemma infer_wf:
       and te: \<open>\<tau> = TFn (sapp s\<^sub>2 (fn_ty \<tau>s)) (sappr s\<^sub>2 (RV n\<^sub>1)) \<tau>\<^sub>b\<close>
       by (auto split: Option.bind_split_asm prod.split_asm if_split_asm simp: Let_def)
     from I have cenvB: \<open>cenv B\<close> and bfB: \<open>bfree_env B\<close> and ktvB: \<open>ktv_env B \<subseteq> FK\<close>
-      and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close>
+      and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close> and ktp: \<open>ktv_rows pd \<subseteq> FK\<close>
       by (auto simp: inwf_def)
     note wp = infer_pat_wf(4)[OF d1 cenvB bfB ktvB]
     have le1: \<open>n \<le> n\<^sub>1\<close> using wp by simp
@@ -3230,15 +3420,16 @@ lemma infer_wf:
     have lsuc: \<open>{..< n\<^sub>1} \<subseteq> {..< Suc n\<^sub>1}\<close> by simp
     have ln1: \<open>{..< n} \<subseteq> {..< n\<^sub>1}\<close> using le1 by simp
     have o_sp: \<open>outwf sp (sub_pend sp pd) FK n\<^sub>1\<close>
-      by (rule outwf_of_uni[OF scp khp bfp ftp frp le1])
+      by (rule outwf_of_uni[OF scp khp bfp ftp frp le1 ktp])
     have af: \<open>frv_row (RV n\<^sub>1) \<subseteq> {..< Suc n\<^sub>1}\<close> by simp
     have pf: \<open>ftv_pend (sub_pend sp pd) \<subseteq> {..< Suc n\<^sub>1}\<close>
       by (rule subset_trans[OF ftv_pend_sub_pend[OF scp subset_trans[OF ftp ln1]] lsuc])
     have pr: \<open>frv_pend (sub_pend sp pd) \<subseteq> {..< Suc n\<^sub>1}\<close>
       by (rule subset_trans[OF frv_pend_sub_pend[OF scp subset_trans[OF ftp ln1]
             subset_trans[OF frp ln1]] lsuc])
+    have pk: \<open>ktv_rows (sub_pend sp pd) \<subseteq> FK\<close> by (rule ktv_rows_sub_pend[OF khp ktp])
     have i2: \<open>inwf (mono_env sid \<Gamma> @ sappe sp B) (RV n\<^sub>1) (sub_pend sp pd) FK (Suc n\<^sub>1)\<close>
-      using inwf_binders[OF I scp khp bfp bo0 af _ pf pr le1 le_SucI[OF le_refl]] by simp
+      using inwf_binders[OF I scp khp bfp bo0 af _ pf pr pk le1 le_SucI[OF le_refl]] by simp
     note w2 = infer_EFn.IH[OF d1 refl refl refl refl d2 i2]
     have le2: \<open>Suc n\<^sub>1 \<le> n'\<close> using w2 by simp
     have le3: \<open>n\<^sub>1 \<le> n'\<close> using le2 by simp
@@ -3268,6 +3459,7 @@ lemma infer_wf:
           (RV (n\<^sub>2)) pd e (Suc (n\<^sub>2)) = Some (s\<^sub>b, e'', \<tau>\<^sub>b, pd\<^sub>1, n\<^sub>3)\<close> and
       ri: \<open>resolve_inner K pd\<^sub>1 = Some pd''\<close> and
       esc: \<open>list_all (\<lambda>a. set K \<inter> ktv (fst s\<^sub>b a) = {}) [0 ..< Suc (n\<^sub>2)]\<close> and
+      escp: \<open>set K \<inter> ktv_rows pd'' = {}\<close> and
       rs: \<open>s = sproj (Suc (n\<^sub>2)) s\<^sub>b\<close>
         \<open>\<tau> = TDep (is_imp b) (mbind_sig b) (length T) (sappr s\<^sub>b (RV n\<^sub>2))
                (kclose K \<tau>\<^sub>b)\<close>
@@ -3277,7 +3469,7 @@ lemma infer_wf:
     let ?B' = \<open>(mbind_nm b, ?P) # B\<close>
     from I have cenvB: \<open>cenv B\<close> and bfB: \<open>bfree_env B\<close> and ktvB: \<open>ktv_env B \<subseteq> FK\<close>
       and ftvB: \<open>ftv_env B \<subseteq> {..< n}\<close> and frvB: \<open>frv_env B \<subseteq> {..< n}\<close>
-      and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close>
+      and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close> and ktp: \<open>ktv_rows pd \<subseteq> FK\<close>
       by (auto simp: inwf_def)
     note dw = dep_env_wf[OF de cenvB bfB]
     have le1: \<open>n \<le> n\<^sub>2\<close> using dw by simp
@@ -3296,8 +3488,9 @@ lemma infer_wf:
       show \<open>frv_env ?B' \<subseteq> {..< Suc (n\<^sub>2)}\<close> using pr frvB le1 by auto
       show \<open>frv_row (RV (n\<^sub>2)) \<subseteq> {..< Suc (n\<^sub>2)}\<close> by auto
       show \<open>brv_row (RV (n\<^sub>2)) = {}\<close> by simp
-      show \<open>ftv_pend pd \<subseteq> {..< Suc (n\<^sub>2)}\<close> using ftp le1 by auto
       show \<open>frv_pend pd \<subseteq> {..< Suc (n\<^sub>2)}\<close> using frp le1 by auto
+      show \<open>ktv_rows pd \<subseteq> FK \<union> set K\<close> using ktp by auto
+      show \<open>ftv_pend pd \<subseteq> {..< Suc (n\<^sub>2)}\<close> using ftp le1 by auto
     qed
     have wbody: \<open>Suc (n\<^sub>2) \<le> n\<^sub>3 \<and> outwf s\<^sub>b pd\<^sub>1 (FK \<union> set K) n\<^sub>3 \<and>
                 fresh_ok \<tau>\<^sub>b 0 n\<^sub>3 (FK \<union> set K)\<close>
@@ -3319,10 +3512,12 @@ lemma infer_wf:
       ultimately show \<open>ktv (fst s\<^sub>b a) \<subseteq> FK\<close> by auto
     qed
     have opd: \<open>ftv_pend pd'' \<subseteq> {..< n\<^sub>3}\<close> \<open>frv_pend pd'' \<subseteq> {..< n\<^sub>3}\<close>
+      \<open>ktv_rows pd'' \<subseteq> FK \<union> set K\<close>
       using resolve_inner_pend[OF ri] scb wbody by (auto simp: outwf_def)
+    have opk: \<open>ktv_rows pd'' \<subseteq> FK\<close> using opd(3) escp by auto
     have out': \<open>outwf (sproj (Suc (n\<^sub>2)) s\<^sub>b) pd'' FK n\<^sub>3\<close>
       unfolding outwf_def
-      using sconf_sproj[OF scb] khyg_sproj[OF kall] bfree_sub_sproj[OF bfb] opd by simp
+      using sconf_sproj[OF scb] khyg_sproj[OF kall] bfree_sub_sproj[OF bfb] opd opk by simp
     have ftt: \<open>ftv \<tau>\<^sub>b \<subseteq> {0 ..< n\<^sub>3}\<close> and frt: \<open>frv \<tau>\<^sub>b \<subseteq> {0 ..< n\<^sub>3}\<close>
       and ktt: \<open>ktv \<tau>\<^sub>b \<subseteq> FK \<union> set K\<close> and btt: \<open>bfree \<tau>\<^sub>b\<close>
       using ftb by (auto simp: fresh_ok_def)
@@ -3350,16 +3545,17 @@ lemma infer_wf:
       then show \<open>Suc n \<le> n\<^sub>1 \<and> outwf s\<^sub>1 pd\<^sub>1 FK' n\<^sub>1 \<and> fresh_ok \<tau>' 0 n\<^sub>1 FK'\<close>
         by (rule infer_ELetFun.IH(1)[OF refl G])
     next
-      fix s\<^sub>1 r' \<tau>' pd\<^sub>1 n\<^sub>1 s\<^sub>2 n\<^sub>2 as rs s\<^sub>3 b' \<tau>\<^sub>b pd\<^sub>3 n\<^sub>3 FK'
+      fix s\<^sub>1 r' \<tau>' pd\<^sub>1 n\<^sub>1 s\<^sub>2 n\<^sub>2 as rs reqs pdr s\<^sub>3 b' \<tau>\<^sub>b pd\<^sub>3 n\<^sub>3 FK'
       assume h: \<open>infer uf ((n_txt f, TEval (kmono (TV n))) # B) A pd (foldr EFnMod mbs (dfun_rhs cls)) (Suc n)
           = Some (s\<^sub>1, r', \<tau>', pd\<^sub>1, n\<^sub>1)\<close>
         \<open>uni uf (sapp s\<^sub>1 (TV n)) \<tau>' n\<^sub>1 = Some (s\<^sub>2, n\<^sub>2)\<close>
-        \<open>(as, rs) = gen_p (sappe (s\<^sub>2 \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) n (sapp s\<^sub>2 \<tau>')\<close>
+        \<open>(as, rs, reqs, pdr) = gen_off (sappe (s\<^sub>2 \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) n
+          (sapp s\<^sub>2 \<tau>')\<close>
         \<open>btv_list (sapp s\<^sub>2 \<tau>') = [] \<and> brv_list (sapp s\<^sub>2 \<tau>') = []\<close>
-        \<open>infer uf ((n_txt f, TEval (close_sch as rs (sapp s\<^sub>2 \<tau>'))) # sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
-          (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) b n\<^sub>2 = Some (s\<^sub>3, b', \<tau>\<^sub>b, pd\<^sub>3, n\<^sub>3)\<close>
-        \<open>inwf ((n_txt f, TEval (close_sch as rs (sapp s\<^sub>2 \<tau>'))) # sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
-          (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) FK' n\<^sub>2\<close>
+        \<open>infer uf ((n_txt f, TEval (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>')))) # sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
+          (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) pdr b n\<^sub>2 = Some (s\<^sub>3, b', \<tau>\<^sub>b, pd\<^sub>3, n\<^sub>3)\<close>
+        \<open>inwf ((n_txt f, TEval (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>')))) # sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
+          (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) pdr FK' n\<^sub>2\<close>
       show \<open>n\<^sub>2 \<le> n\<^sub>3 \<and> outwf s\<^sub>3 pd\<^sub>3 FK' n\<^sub>3 \<and> fresh_ok \<tau>\<^sub>b 0 n\<^sub>3 FK'\<close>
         by (rule infer_ELetFun.IH(2)[OF refl G]; (rule h | rule refl)+)
     qed
@@ -3379,7 +3575,7 @@ lemma infer_wf:
       by (rule IH(1))
     then have le1: \<open>n \<le> n\<^sub>1\<close> and o1: \<open>outwf s\<^sub>1 pd\<^sub>1 FK n\<^sub>1\<close>
       and \<tau>sf: \<open>\<forall>\<tau> \<in> set \<tau>s. fresh_ok \<tau> 0 n\<^sub>1 FK\<close> by simp_all
-    from o1 have ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close>
+    from o1 have ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and ktp1: \<open>ktv_rows pd\<^sub>1 \<subseteq> FK\<close>
       by (auto simp: outwf_def)
     have cb: \<open>ftv_cs (map (\<lambda>\<tau>. (\<tau>, TC bool_ty [])) \<tau>s) \<subseteq> {0 ..< n\<^sub>1}\<close>
       \<open>frv_cs (map (\<lambda>\<tau>. (\<tau>, TC bool_ty [])) \<tau>s) \<subseteq> {0 ..< n\<^sub>1}\<close>
@@ -3391,7 +3587,7 @@ lemma infer_wf:
     have sc2: \<open>sconf s\<^sub>2 {..< n\<^sub>2} {..< n\<^sub>2}\<close> using uf1 by (simp add: atLeast0LessThan)
     have kh2: \<open>khyg s\<^sub>2 FK\<close> and bf2: \<open>bfree_sub s\<^sub>2\<close> using uf1 by simp_all
     have o2': \<open>outwf s\<^sub>2 (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
-      by (rule outwf_of_uni[OF sc2 kh2 bf2 ftp1 frp1 le2])
+      by (rule outwf_of_uni[OF sc2 kh2 bf2 ftp1 frp1 le2 ktp1])
     have os: \<open>outwf (s\<^sub>2 \<odot> s\<^sub>1) (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close> by (rule outwf_scomp[OF o1 o2' le2])
     have i3: \<open>inwf (sappe (s\<^sub>2 \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
       by (rule inwf_step[OF I os le_trans[OF le1 le2]])
@@ -3426,10 +3622,10 @@ lemma infer_wf:
       note uf2 = uni_fresh[OF u2 fg fst4 le0]
       have le5: \<open>n\<^sub>4 \<le> n'\<close> using uf2 by simp
       have sc5: \<open>sconf s\<^sub>5 {..< n'} {..< n'}\<close> using uf2 by (simp add: atLeast0LessThan)
-      from o4 have ftp4: \<open>ftv_pend pd\<^sub>4 \<subseteq> {..< n\<^sub>4}\<close> and frp4: \<open>frv_pend pd\<^sub>4 \<subseteq> {..< n\<^sub>4}\<close>
+      from o4 have ftp4: \<open>ftv_pend pd\<^sub>4 \<subseteq> {..< n\<^sub>4}\<close> and frp4: \<open>frv_pend pd\<^sub>4 \<subseteq> {..< n\<^sub>4}\<close> and ktp4: \<open>ktv_rows pd\<^sub>4 \<subseteq> FK\<close>
         by (auto simp: outwf_def)
       have o5': \<open>outwf s\<^sub>5 (sub_pend s\<^sub>5 pd\<^sub>4) FK n'\<close>
-        using uf2 by (intro outwf_of_uni[OF sc5 _ _ ftp4 frp4 le5]) simp_all
+        using uf2 by (intro outwf_of_uni[OF sc5 _ _ ftp4 frp4 le5 ktp4]) simp_all
       have ost2: \<open>outwf (s\<^sub>4 \<odot> (s\<^sub>3 \<odot> (s\<^sub>2 \<odot> s\<^sub>1))) pd\<^sub>4 FK n\<^sub>4\<close>
         by (rule outwf_scomp[OF ost o4 le4])
       have ofin: \<open>outwf (s\<^sub>5 \<odot> (s\<^sub>4 \<odot> (s\<^sub>3 \<odot> (s\<^sub>2 \<odot> s\<^sub>1)))) (sub_pend s\<^sub>5 pd\<^sub>4) FK n'\<close>
@@ -3478,13 +3674,13 @@ lemma infer_wf:
       by (rule infer_EIf_Some.IH)
     then have le1: \<open>n \<le> n\<^sub>1\<close> and o1: \<open>outwf s\<^sub>1 pd\<^sub>1 FK n\<^sub>1\<close>
       and f1: \<open>fresh_ok \<tau>c 0 n\<^sub>1 FK\<close> by simp_all
-    from o1 have ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close>
+    from o1 have ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and ktp1: \<open>ktv_rows pd\<^sub>1 \<subseteq> FK\<close>
       by (auto simp: outwf_def)
     note uf1 = uni_fresh[OF u1 fresh_ok_mono[OF f1 le_refl le_refl] fresh_ok_TC_nil le0]
     have le2: \<open>n\<^sub>1 \<le> n\<^sub>2\<close> using uf1 by simp
     have sc2: \<open>sconf s\<^sub>2 {..< n\<^sub>2} {..< n\<^sub>2}\<close> using uf1 by (simp add: atLeast0LessThan)
     have o2': \<open>outwf s\<^sub>2 (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
-      using uf1 by (intro outwf_of_uni[OF sc2 _ _ ftp1 frp1 le2]) simp_all
+      using uf1 by (intro outwf_of_uni[OF sc2 _ _ ftp1 frp1 le2 ktp1]) simp_all
     have os: \<open>outwf (s\<^sub>2 \<odot> s\<^sub>1) (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close> by (rule outwf_scomp[OF o1 o2' le2])
     have i3: \<open>inwf (sappe (s\<^sub>2 \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
       by (rule inwf_step[OF I os le_trans[OF le1 le2]])
@@ -3505,10 +3701,10 @@ lemma infer_wf:
     note uf2 = uni_fresh[OF u2 fresh_ok_mono[OF fte le_refl le_refl] fst4 le0]
     have le5: \<open>n\<^sub>4 \<le> n'\<close> using uf2 by simp
     have sc5: \<open>sconf s\<^sub>5 {..< n'} {..< n'}\<close> using uf2 by (simp add: atLeast0LessThan)
-    from o4 have ftp4: \<open>ftv_pend pd\<^sub>4 \<subseteq> {..< n\<^sub>4}\<close> and frp4: \<open>frv_pend pd\<^sub>4 \<subseteq> {..< n\<^sub>4}\<close>
+    from o4 have ftp4: \<open>ftv_pend pd\<^sub>4 \<subseteq> {..< n\<^sub>4}\<close> and frp4: \<open>frv_pend pd\<^sub>4 \<subseteq> {..< n\<^sub>4}\<close> and ktp4: \<open>ktv_rows pd\<^sub>4 \<subseteq> FK\<close>
       by (auto simp: outwf_def)
     have o5': \<open>outwf s\<^sub>5 (sub_pend s\<^sub>5 pd\<^sub>4) FK n'\<close>
-      using uf2 by (intro outwf_of_uni[OF sc5 _ _ ftp4 frp4 le5]) simp_all
+      using uf2 by (intro outwf_of_uni[OF sc5 _ _ ftp4 frp4 le5 ktp4]) simp_all
     have ost2: \<open>outwf (s\<^sub>4 \<odot> (s\<^sub>3 \<odot> (s\<^sub>2 \<odot> s\<^sub>1))) pd\<^sub>4 FK n\<^sub>4\<close>
       by (rule outwf_scomp[OF ost o4 le4])
     have ofin: \<open>outwf (s\<^sub>5 \<odot> (s\<^sub>4 \<odot> (s\<^sub>3 \<odot> (s\<^sub>2 \<odot> s\<^sub>1)))) (sub_pend s\<^sub>5 pd\<^sub>4) FK n'\<close>
@@ -3535,14 +3731,14 @@ lemma infer_wf:
       by (rule infer_EIf_None.IH)
     then have le1: \<open>n \<le> n\<^sub>1\<close> and o1: \<open>outwf s\<^sub>1 pd\<^sub>1 FK n\<^sub>1\<close>
       and f1: \<open>fresh_ok \<tau>c 0 n\<^sub>1 FK\<close> by simp_all
-    from o1 have ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close>
+    from o1 have ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and ktp1: \<open>ktv_rows pd\<^sub>1 \<subseteq> FK\<close>
       by (auto simp: outwf_def)
     note uf1 = uni_fresh[OF u1 fresh_ok_mono[OF f1 le_refl le_refl] fresh_ok_TC_nil le0]
     have le2: \<open>n\<^sub>1 \<le> n\<^sub>2\<close> using uf1 by simp
     have sc2: \<open>sconf s\<^sub>2 {..< n\<^sub>2} {..< n\<^sub>2}\<close> using uf1 by (simp add: atLeast0LessThan)
     have kh2: \<open>khyg s\<^sub>2 FK\<close> and bf2: \<open>bfree_sub s\<^sub>2\<close> using uf1 by simp_all
     have o2': \<open>outwf s\<^sub>2 (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
-      by (rule outwf_of_uni[OF sc2 kh2 bf2 ftp1 frp1 le2])
+      by (rule outwf_of_uni[OF sc2 kh2 bf2 ftp1 frp1 le2 ktp1])
     have os: \<open>outwf (s\<^sub>2 \<odot> s\<^sub>1) (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
       by (rule outwf_scomp[OF o1 o2' le2])
     have i3: \<open>inwf (sappe (s\<^sub>2 \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
@@ -3552,14 +3748,14 @@ lemma infer_wf:
       by (rule infer_EIf_None.IH)
     then have le3: \<open>n\<^sub>2 \<le> n\<^sub>3\<close> and o3: \<open>outwf s\<^sub>3 pd\<^sub>3 FK n\<^sub>3\<close>
       and f3: \<open>fresh_ok \<tau>t 0 n\<^sub>3 FK\<close> by simp_all
-    from o3 have ftp3: \<open>ftv_pend pd\<^sub>3 \<subseteq> {..< n\<^sub>3}\<close> and frp3: \<open>frv_pend pd\<^sub>3 \<subseteq> {..< n\<^sub>3}\<close>
+    from o3 have ftp3: \<open>ftv_pend pd\<^sub>3 \<subseteq> {..< n\<^sub>3}\<close> and frp3: \<open>frv_pend pd\<^sub>3 \<subseteq> {..< n\<^sub>3}\<close> and ktp3: \<open>ktv_rows pd\<^sub>3 \<subseteq> FK\<close>
       by (auto simp: outwf_def)
     note uf2 = uni_fresh[OF u2 fresh_ok_mono[OF f3 le_refl le_refl] fresh_ok_unit le0]
     have le4: \<open>n\<^sub>3 \<le> n'\<close> using uf2 by simp
     have sc4: \<open>sconf s\<^sub>4 {..< n'} {..< n'}\<close> using uf2 by (simp add: atLeast0LessThan)
     have kh4: \<open>khyg s\<^sub>4 FK\<close> and bf4: \<open>bfree_sub s\<^sub>4\<close> using uf2 by simp_all
     have o4': \<open>outwf s\<^sub>4 (sub_pend s\<^sub>4 pd\<^sub>3) FK n'\<close>
-      by (rule outwf_of_uni[OF sc4 kh4 bf4 ftp3 frp3 le4])
+      by (rule outwf_of_uni[OF sc4 kh4 bf4 ftp3 frp3 le4 ktp3])
     have ost: \<open>outwf (s\<^sub>3 \<odot> (s\<^sub>2 \<odot> s\<^sub>1)) pd\<^sub>3 FK n\<^sub>3\<close>
       by (rule outwf_scomp[OF os o3 le3])
     have ofin: \<open>outwf (s\<^sub>4 \<odot> (s\<^sub>3 \<odot> (s\<^sub>2 \<odot> s\<^sub>1))) (sub_pend s\<^sub>4 pd\<^sub>3) FK n'\<close>
@@ -3668,7 +3864,7 @@ lemma infer_wf:
       se: \<open>s = s\<^sub>2 \<odot> s\<^sub>1\<close>
       by (auto split: option.split_asm tentry.split_asm Option.bind_split_asm prod.split_asm)
     from I have frA: \<open>frv_row A \<subseteq> {..< n}\<close> and brA: \<open>brv_row A = {}\<close>
-      and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close>
+      and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close> and ktp: \<open>ktv_rows pd \<subseteq> FK\<close>
       by (auto simp: inwf_def)
     have s0: \<open>{..< n} \<subseteq> {0 ..< Suc n}\<close> by (simp add: atLeast0LessThan)
     have r2f: \<open>frv_row (canon_row (RCons lbl (RV n))) \<subseteq> {0 ..< Suc n}\<close> by simp
@@ -3678,7 +3874,7 @@ lemma infer_wf:
     have sc1: \<open>sconf s\<^sub>1 {..< n\<^sub>1} {..< n\<^sub>1}\<close> using ur_f by (simp add: atLeast0LessThan)
     have kh1: \<open>khyg s\<^sub>1 FK\<close> and bf1: \<open>bfree_sub s\<^sub>1\<close> using ur_f by simp_all
     have o1: \<open>outwf s\<^sub>1 (sub_pend s\<^sub>1 pd) FK n\<^sub>1\<close>
-      by (rule outwf_of_uni[OF sc1 kh1 bf1 ftp frp le1])
+      by (rule outwf_of_uni[OF sc1 kh1 bf1 ftp frp le1 ktp])
     have le1': \<open>Suc n \<le> n\<^sub>1\<close> using ur_f by simp
     have lsub: \<open>{..< n} \<subseteq> {..< n\<^sub>1}\<close> using le1 by simp
     have afr: \<open>frv_row (RV n) \<subseteq> {..< n\<^sub>1}\<close> using le1'[unfolded Suc_le_eq] by simp
@@ -3686,18 +3882,16 @@ lemma infer_wf:
       by (rule ftv_pend_sub_pend[OF sc1 subset_trans[OF ftp lsub]])
     have pr: \<open>frv_pend (sub_pend s\<^sub>1 pd) \<subseteq> {..< n\<^sub>1}\<close>
       by (rule frv_pend_sub_pend[OF sc1 subset_trans[OF ftp lsub] subset_trans[OF frp lsub]])
+    have pk: \<open>ktv_rows (sub_pend s\<^sub>1 pd) \<subseteq> FK\<close> by (rule ktv_rows_sub_pend[OF kh1 ktp])
     have i2: \<open>inwf (sappe s\<^sub>1 B) (sappr s\<^sub>1 (RV n)) (sub_pend s\<^sub>1 pd) FK n\<^sub>1\<close>
-      by (rule inwf_mk[OF I sc1 kh1 bf1 afr _ pf pr le1]) simp
+      by (rule inwf_mk[OF I sc1 kh1 bf1 afr _ pf pr pk le1]) simp
     note w = infer_EMask.IH[OF lk refl ur refl d2 i2]
     show ?case using w se le1
       outwf_scomp[OF o1 conjunct1[OF conjunct2[OF w]] conjunct1[OF w]]
       by auto
   next
-    case (infer_head_APath uf B A pd p n s a' \<tau> pd' n' FK)
-    have I: \<open>inwf B A pd FK n\<close> by (fact infer_head_APath.prems)
-    from infer_head_APath.prems
-    have \<open>infer_atom uf B A pd (APath p) n = Some (s, a', \<tau>, pd', n')\<close> by simp
-    with I show ?case by (rule apath_wf)
+    case infer_head_APath
+    from infer_head_APath.prems show ?case by (rule hpath_wf[rotated])
   next
     case infer_atom_APath
     from infer_atom_APath.prems show ?case by (rule apath_wf[rotated])
@@ -3739,7 +3933,7 @@ lemma infer_wf:
       by (rule infer_atom_AList.IH)
     then have le1: \<open>n \<le> n\<^sub>1\<close> and o1: \<open>outwf s\<^sub>1 pd\<^sub>1 FK n\<^sub>1\<close>
       and \<tau>sf: \<open>\<forall>\<tau> \<in> set \<tau>s. fresh_ok \<tau> 0 n\<^sub>1 FK\<close> by simp_all
-    from o1 have ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close>
+    from o1 have ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and ktp1: \<open>ktv_rows pd\<^sub>1 \<subseteq> FK\<close>
       by (auto simp: outwf_def)
     note uf1 = unis_fresh[OF un cs_map_bounds[OF \<tau>sf] le0]
     have le2: \<open>Suc n\<^sub>1 \<le> n'\<close> using uf1 by simp
@@ -3747,7 +3941,7 @@ lemma infer_wf:
     have sc2: \<open>sconf s\<^sub>2 {..< n'} {..< n'}\<close> using uf1 by (simp add: atLeast0LessThan)
     have kh2: \<open>khyg s\<^sub>2 FK\<close> and bf2: \<open>bfree_sub s\<^sub>2\<close> using uf1 by simp_all
     have o2: \<open>outwf s\<^sub>2 (sub_pend s\<^sub>2 pd\<^sub>1) FK n'\<close>
-      by (rule outwf_of_uni[OF sc2 kh2 bf2 ftp1 frp1 le12])
+      by (rule outwf_of_uni[OF sc2 kh2 bf2 ftp1 frp1 le12 ktp1])
     have ftv: \<open>fresh_ok (TV n\<^sub>1) 0 (Suc n\<^sub>1) FK\<close> by (simp add: fresh_ok_def bfree_def)
     have fsl: \<open>fresh_ok (sapp s\<^sub>2 (TV n\<^sub>1)) 0 n' FK\<close>
       by (rule fresh_ok_sapp0[OF ftv o2 le2])
@@ -3764,43 +3958,50 @@ lemma infer_wf:
       case (TV x)
       show ?thesis
       proof (rule infer_args_step[OF E I F])
-        show \<open>\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t\<close> by (simp add: TV)
+        show \<open>(\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t) \<and> (\<forall>x r t. \<tau>\<^sub>0 \<noteq> TOff x r t)\<close>
+          by (simp add: TV)
       qed (rule infer_args.IH, rule TV, (assumption | rule refl)+)+
     next
       case (TB x)
       show ?thesis
       proof (rule infer_args_step[OF E I F])
-        show \<open>\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t\<close> by (simp add: TB)
+        show \<open>(\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t) \<and> (\<forall>x r t. \<tau>\<^sub>0 \<noteq> TOff x r t)\<close>
+          by (simp add: TB)
       qed (rule infer_args.IH, rule TB, (assumption | rule refl)+)+
     next
       case (TK x)
       show ?thesis
       proof (rule infer_args_step[OF E I F])
-        show \<open>\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t\<close> by (simp add: TK)
+        show \<open>(\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t) \<and> (\<forall>x r t. \<tau>\<^sub>0 \<noteq> TOff x r t)\<close>
+          by (simp add: TK)
       qed (rule infer_args.IH, rule TK, (assumption | rule refl)+)+
     next
       case (TA d j)
       show ?thesis
       proof (rule infer_args_step[OF E I F])
-        show \<open>\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t\<close> by (simp add: TA)
+        show \<open>(\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t) \<and> (\<forall>x r t. \<tau>\<^sub>0 \<noteq> TOff x r t)\<close>
+          by (simp add: TA)
       qed (rule infer_args.IH, rule TA, (assumption | rule refl)+)+
     next
       case (TC c ts)
       show ?thesis
       proof (rule infer_args_step[OF E I F])
-        show \<open>\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t\<close> by (simp add: TC)
+        show \<open>(\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t) \<and> (\<forall>x r t. \<tau>\<^sub>0 \<noteq> TOff x r t)\<close>
+          by (simp add: TC)
       qed (rule infer_args.IH, rule TC, (assumption | rule refl)+)+
     next
       case (TApp t\<^sub>1 t\<^sub>2)
       show ?thesis
       proof (rule infer_args_step[OF E I F])
-        show \<open>\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t\<close> by (simp add: TApp)
+        show \<open>(\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t) \<and> (\<forall>x r t. \<tau>\<^sub>0 \<noteq> TOff x r t)\<close>
+          by (simp add: TApp)
       qed (rule infer_args.IH, rule TApp, (assumption | rule refl)+)+
     next
       case (TFn t\<^sub>1 e t\<^sub>2)
       show ?thesis
       proof (rule infer_args_step[OF E I F])
-        show \<open>\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t\<close> by (simp add: TFn)
+        show \<open>(\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t) \<and> (\<forall>x r t. \<tau>\<^sub>0 \<noteq> TOff x r t)\<close>
+          by (simp add: TFn)
       qed (rule infer_args.IH, rule TFn, (assumption | rule refl)+)+
     next
       case (TDep i sg m e t')
@@ -3824,7 +4025,8 @@ lemma infer_wf:
         from I have cenvB: \<open>cenv B\<close> and bfB: \<open>bfree_env B\<close> and ktvB: \<open>ktv_env B \<subseteq> FK\<close>
           and ftvB: \<open>ftv_env B \<subseteq> {..< n}\<close> and frvB: \<open>frv_env B \<subseteq> {..< n}\<close>
           and frA: \<open>frv_row A \<subseteq> {..< n}\<close> and brA: \<open>brv_row A = {}\<close>
-          and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close> by (auto simp: inwf_def)
+          and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close>
+          and ktp: \<open>ktv_rows pd \<subseteq> FK\<close> by (auto simp: inwf_def)
         have fT: \<open>fresh_ok (TDep True sg m e t') 0 n FK\<close> using F TDep True by simp
         have ftt: \<open>ftv t' \<subseteq> {..< n}\<close> and frt: \<open>frv t' \<subseteq> {..< n}\<close> and fre: \<open>frv_row e \<subseteq> {..< n}\<close>
           and ktt: \<open>ktv t' \<subseteq> FK\<close> and btt: \<open>btv t' = {}\<close> and bre: \<open>brv_row e = {}\<close>
@@ -3846,7 +4048,7 @@ lemma infer_wf:
         have kh1: \<open>khyg s\<^sub>1 FK\<close> and bf1: \<open>bfree_sub s\<^sub>1\<close> using urf by simp_all
         have le03: \<open>n \<le> n\<^sub>3\<close> using le02 le23 by simp
         have o1: \<open>outwf s\<^sub>1 (sub_pend s\<^sub>1 pd) FK n\<^sub>3\<close>
-          by (rule outwf_of_uni[OF sc1 kh1 bf1 ftp frp le03])
+          by (rule outwf_of_uni[OF sc1 kh1 bf1 ftp frp le03 ktp])
         have fk: \<open>fresh_ok (kopen (tsp K ?\<phi>) t') 0 (n\<^sub>1 + m) FK\<close>
           by (rule fresh_ok_kopen_tsp[OF ftt frt ktt btt brt _ cov le02])
              (fastforce dest!: set_zip_rightD)
@@ -3893,7 +4095,7 @@ lemma infer_wf:
             frv_sappe_sconf[OF sc1 subset_trans[OF ftvB subn3]
               subset_trans[OF frvB subn3]]
             frv_sappr_sconf[OF sc1 subset_trans[OF frA subn3]]
-            bfree_sappr[OF bf1 brA] ftpp frpp
+            bfree_sappr[OF bf1 brA] ftpp frpp ktv_rows_sub_pend[OF kh1 ktp]
           by auto
         from TDep True[THEN eqTrueI] d0 de refl refl not_not[THEN iffD2, OF kd] refl refl refl
           ur refl refl refl rec irec frec
@@ -3932,7 +4134,7 @@ lemma infer_wf:
               using tle ec by (auto split: tentry.split_asm)
             from I have cenvB: \<open>cenv B\<close> and bfB: \<open>bfree_env B\<close> and ktvB: \<open>ktv_env B \<subseteq> FK\<close>
               and frA: \<open>frv_row A \<subseteq> {..< n}\<close> and brA: \<open>brv_row A = {}\<close>
-              and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close>
+              and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close> and ktp: \<open>ktv_rows pd \<subseteq> FK\<close>
               by (auto simp: inwf_def)
             have fT: \<open>fresh_ok (TDep False sg m e t') 0 n FK\<close> using F TDep False by simp
             have ftt: \<open>ftv t' \<subseteq> {..< n}\<close> and frt: \<open>frv t' \<subseteq> {..< n}\<close>
@@ -3967,7 +4169,7 @@ lemma infer_wf:
             have sc1: \<open>sconf s\<^sub>1 {..< n\<^sub>2} {..< n\<^sub>2}\<close> using urf by (simp add: atLeast0LessThan)
             have kh1: \<open>khyg s\<^sub>1 FK\<close> and bf1: \<open>bfree_sub s\<^sub>1\<close> using urf by simp_all
             have o1: \<open>outwf s\<^sub>1 (sub_pend s\<^sub>1 pd) FK n\<^sub>2\<close>
-              by (rule outwf_of_uni[OF sc1 kh1 bf1 ftp frp le02])
+              by (rule outwf_of_uni[OF sc1 kh1 bf1 ftp frp le02 ktp])
             have frec: \<open>fresh_ok (sapp s\<^sub>1 (kopen (tsp K \<phi>) t')) 0 n\<^sub>2 FK\<close>
               by (rule fresh_ok_sapp0[OF fk o1 le12])
             have irec: \<open>inwf (sappe s\<^sub>1 B) (sappr s\<^sub>1 A) (sub_pend s\<^sub>1 pd) FK n\<^sub>2\<close>
@@ -4006,26 +4208,44 @@ lemma infer_wf:
       case (TEv l w ts)
       show ?thesis
       proof (rule infer_args_step[OF E I F])
-        show \<open>\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t\<close> by (simp add: TEv)
+        show \<open>(\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t) \<and> (\<forall>x r t. \<tau>\<^sub>0 \<noteq> TOff x r t)\<close>
+          by (simp add: TEv)
       qed (rule infer_args.IH, rule TEv, (assumption | rule refl)+)+
     next
       case (TAct lt K e t)
       show ?thesis
       proof (rule infer_args_step[OF E I F])
-        show \<open>\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t\<close> by (simp add: TAct)
+        show \<open>(\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t) \<and> (\<forall>x r t. \<tau>\<^sub>0 \<noteq> TOff x r t)\<close>
+          by (simp add: TAct)
       qed (rule infer_args.IH, rule TAct, (assumption | rule refl)+)+
     next
       case TRNil
       show ?thesis
       proof (rule infer_args_step[OF E I F])
-        show \<open>\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t\<close> by (simp add: TRNil)
+        show \<open>(\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t) \<and> (\<forall>x r t. \<tau>\<^sub>0 \<noteq> TOff x r t)\<close>
+          by (simp add: TRNil)
       qed (rule infer_args.IH, rule TRNil, (assumption | rule refl)+)+
     next
       case (TRCons lb t r)
       show ?thesis
       proof (rule infer_args_step[OF E I F])
-        show \<open>\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t\<close> by (simp add: TRCons)
+        show \<open>(\<forall>i sg K e t. \<tau>\<^sub>0 \<noteq> TDep i sg K e t) \<and> (\<forall>x r t. \<tau>\<^sub>0 \<noteq> TOff x r t)\<close>
+          by (simp add: TRCons)
       qed (rule infer_args.IH, rule TRCons, (assumption | rule refl)+)+
+    next
+      case (TOff x r t')
+      from E TOff obtain as'' where
+        rec: \<open>infer_args uf B A ((imp_name n, POff x r) # pd) d t' as (Suc n)
+                = Some (s, as'', \<tau>, pd', n')\<close>
+        by (auto simp del: infer_args.simps simp: infer_args_TOff Let_def bind_eq_Some_conv)
+      have fr: \<open>ftv r \<subseteq> {..< n}\<close> \<open>frv r \<subseteq> {..< n}\<close> \<open>ktv r \<subseteq> FK\<close>
+        and ft: \<open>fresh_ok t' 0 (Suc n) FK\<close>
+        using F TOff by (auto simp: fresh_ok_def bfree_def subset_iff)
+      have I': \<open>inwf B A ((imp_name n, POff x r) # pd) FK (Suc n)\<close>
+        using I fr by (auto simp: inwf_def subset_iff)
+      have \<open>Suc n \<le> n' \<and> outwf s pd' FK n' \<and> fresh_ok \<tau> 0 n' FK\<close>
+        using TOff refl rec I' ft by (rule infer_args.IH)
+      then show ?thesis by simp
     qed
   next
     case (infer_exps_Cons uf B A pd e es n s es' \<tau>s pd' n' FK)
@@ -4129,7 +4349,7 @@ lemma infer_wf:
       se: \<open>s = s\<^sub>4 \<odot> (s\<^sub>3 \<odot> s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp))\<close>
       by (auto simp: Let_def bind_eq_Some_conv)
     from I have cenvB: \<open>cenv B\<close> and bfB: \<open>bfree_env B\<close> and ktvB: \<open>ktv_env B \<subseteq> FK\<close>
-      and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close>
+      and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close> and ktp: \<open>ktv_rows pd \<subseteq> FK\<close>
       by (auto simp: inwf_def)
     note wp = infer_pat_wf(1)[OF dp cenvB bfB ktvB]
     have le1: \<open>n \<le> n\<^sub>1\<close> using wp by simp
@@ -4138,7 +4358,7 @@ lemma infer_wf:
       and fpp: \<open>fresh_ok \<tau>\<^sub>p n n\<^sub>1 FK\<close> using wp by simp_all
     have scp: \<open>sconf sp {..< n\<^sub>1} {..< n\<^sub>1}\<close> by (rule sconf_mono[OF scp0]) auto
     have o_sp: \<open>outwf sp (sub_pend sp pd) FK n\<^sub>1\<close>
-      by (rule outwf_of_uni[OF scp khp bfp ftp frp le1])
+      by (rule outwf_of_uni[OF scp khp bfp ftp frp le1 ktp])
     have fst0: \<open>fresh_ok (sapp sp \<tau>\<^sub>0) 0 n\<^sub>1 FK\<close>
       by (rule fresh_ok_sapp0[OF F\<^sub>0 o_sp le1])
     note uf1 = uni_fresh[OF u1 fst0 fresh_ok_weaken0[OF fpp] le0]
@@ -4162,10 +4382,11 @@ lemma infer_wf:
       by (rule ftv_pend_sub_pend[OF scs subset_trans[OF ftp subn1]])
     have pr: \<open>frv_pend (sub_pend (s\<^sub>1 \<odot> sp) pd) \<subseteq> {..< n\<^sub>2}\<close>
       by (rule frv_pend_sub_pend[OF scs subset_trans[OF ftp subn1] subset_trans[OF frp subn1]])
+    have pk: \<open>ktv_rows (sub_pend (s\<^sub>1 \<odot> sp) pd) \<subseteq> FK\<close> by (rule ktv_rows_sub_pend[OF khs ktp])
     have ib: \<open>inwf (mono_env s\<^sub>1 \<Gamma> @ sappe (s\<^sub>1 \<odot> sp) B) (sappr (s\<^sub>1 \<odot> sp) A)
                (sub_pend (s\<^sub>1 \<odot> sp) pd) FK n\<^sub>2\<close>
       unfolding mono_env_binders
-      by (rule inwf_binders[OF I scs khs bfs bo1 af ab pf pr le12 order_refl])
+      by (rule inwf_binders[OF I scs khs bfs bo1 af ab pf pr pk le12 order_refl])
     from dp refl refl refl refl u1 refl refl db ib
     have wb: \<open>n\<^sub>2 \<le> n\<^sub>3 \<and> outwf s\<^sub>2 pd\<^sub>2 FK n\<^sub>3 \<and> fresh_ok \<tau>\<^sub>b 0 n\<^sub>3 FK\<close>
       by (rule infer_arms_Cons.IH)
@@ -4174,14 +4395,14 @@ lemma infer_wf:
     have ftb: \<open>fresh_ok \<tau>\<^sub>b 0 n\<^sub>3 FK\<close> using wb by simp
     from o_b have sc2: \<open>sconf s\<^sub>2 {..< n\<^sub>3} {..< n\<^sub>3}\<close> and kh2: \<open>khyg s\<^sub>2 FK\<close>
       and bf2: \<open>bfree_sub s\<^sub>2\<close> and ftp2: \<open>ftv_pend pd\<^sub>2 \<subseteq> {..< n\<^sub>3}\<close>
-      and frp2: \<open>frv_pend pd\<^sub>2 \<subseteq> {..< n\<^sub>3}\<close> by (auto simp: outwf_def)
+      and frp2: \<open>frv_pend pd\<^sub>2 \<subseteq> {..< n\<^sub>3}\<close> and ktp2: \<open>ktv_rows pd\<^sub>2 \<subseteq> FK\<close> by (auto simp: outwf_def)
     have subn23: \<open>{..< n\<^sub>2} \<subseteq> {..< n\<^sub>3}\<close> using le3 by simp
     have scs2: \<open>sconf (s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) {..< n\<^sub>3} {..< n\<^sub>3}\<close>
       by (rule sconf_scomp_mono[OF scs sc2 subn23 subn23])
     have le13x: \<open>n \<le> n\<^sub>3\<close> using le12 le3 by simp
     have fstr: \<open>fresh_ok (sapp (s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) \<tau>\<^sub>r) 0 n\<^sub>3 FK\<close>
       by (rule fresh_ok_sapp0[OF F\<^sub>r
-            outwf_of_uni[OF scs2 khyg_scomp[OF khs kh2] bfree_sub_scomp[OF bfs bf2] ftp frp le13x]
+            outwf_of_uni[OF scs2 khyg_scomp[OF khs kh2] bfree_sub_scomp[OF bfs bf2] ftp frp le13x ktp]
             le13x])
     note uf2 = uni_fresh[OF u2 ftb fstr le0]
     have le4: \<open>n\<^sub>3 \<le> n\<^sub>4\<close> using uf2 by simp
@@ -4200,6 +4421,7 @@ lemma infer_wf:
       unfolding outwf_def using scs3 khs3 bfs3
         ftv_pend_sub_pend[OF sc3 subset_trans[OF ftp2 subn34]]
         frv_pend_sub_pend[OF sc3 subset_trans[OF ftp2 subn34] subset_trans[OF frp2 subn34]]
+        ktv_rows_sub_pend[OF kh3 ktp2]
       by simp
     have iarms: \<open>inwf (sappe (s\<^sub>3 \<odot> s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) B)
                   (sappr (s\<^sub>3 \<odot> s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) A) (sub_pend s\<^sub>3 pd\<^sub>2) FK n\<^sub>4\<close>
@@ -4266,14 +4488,14 @@ lemma infer_wf:
     note cov = covk[THEN conjunct1]
     from I have cenvB: \<open>cenv B\<close> and bfB: \<open>bfree_env B\<close> and ktvB: \<open>ktv_env B \<subseteq> FK\<close>
       and frA: \<open>frv_row A \<subseteq> {..< n}\<close> and brA: \<open>brv_row A = {}\<close>
-      and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close> by (auto simp: inwf_def)
+      and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close> and ktp: \<open>ktv_rows pd \<subseteq> FK\<close> by (auto simp: inwf_def)
     note wp = infer_pat_wf(4)[OF dps cenvB bfB ktvB]
     have le1: \<open>n \<le> n\<^sub>1\<close> using wp by simp
     have scp0: \<open>sconf sp {n ..< n\<^sub>1} {n ..< n\<^sub>1}\<close> and khp: \<open>khyg sp FK\<close> and bfp: \<open>bfree_sub sp\<close>
       and boG: \<open>binds_ok \<Gamma> n n\<^sub>1 FK\<close> and \<tau>sf: \<open>\<forall>\<tau>' \<in> set \<tau>s. fresh_ok \<tau>' n n\<^sub>1 FK\<close>
       using wp by simp_all
     have scp: \<open>sconf sp {..< n\<^sub>1} {..< n\<^sub>1}\<close> by (rule sconf_mono[OF scp0]) auto
-    have o_sp: \<open>outwf sp (sub_pend sp pd) FK n\<^sub>1\<close> by (rule outwf_of_uni[OF scp khp bfp ftp frp le1])
+    have o_sp: \<open>outwf sp (sub_pend sp pd) FK n\<^sub>1\<close> by (rule outwf_of_uni[OF scp khp bfp ftp frp le1 ktp])
     have \<tau>sf0: \<open>\<forall>\<tau>' \<in> set \<tau>s. fresh_ok \<tau>' 0 n\<^sub>1 FK\<close> using \<tau>sf by (blast intro: fresh_ok_weaken0)
     have ffn: \<open>fresh_ok (fn_ty \<tau>s) 0 n\<^sub>1 FK\<close> by (rule fresh_ok_fn_ty[OF \<tau>sf0])
     have ct0: \<open>ftv \<tau>\<^sub>1\<^sub>0 = {}\<close> \<open>frv \<tau>\<^sub>1\<^sub>0 = {}\<close> \<open>ftv \<tau>\<^sub>2\<^sub>0 = {}\<close> \<open>frv \<tau>\<^sub>2\<^sub>0 = {}\<close>
@@ -4308,8 +4530,9 @@ lemma infer_wf:
       by (rule ftv_pend_sub_pend[OF scs subset_trans[OF ftp subn1]])
     have pr: \<open>frv_pend (sub_pend (s\<^sub>1 \<odot> sp) pd) \<subseteq> {..< n\<^sub>2}\<close>
       by (rule frv_pend_sub_pend[OF scs subset_trans[OF ftp subn1] subset_trans[OF frp subn1]])
+    have pk: \<open>ktv_rows (sub_pend (s\<^sub>1 \<odot> sp) pd) \<subseteq> FK\<close> by (rule ktv_rows_sub_pend[OF khs ktp])
     have o_s: \<open>outwf (s\<^sub>1 \<odot> sp) (sub_pend (s\<^sub>1 \<odot> sp) pd) FK n\<^sub>2\<close>
-      by (rule outwf_of_uni[OF scs khs bfs ftp frp le12])
+      by (rule outwf_of_uni[OF scs khs bfs ftp frp le12 ktp])
     have f\<tau>0: \<open>fresh_ok (sapp (s\<^sub>1 \<odot> sp) \<tau>\<^sub>0) 0 n\<^sub>2 FK\<close>
       by (rule fresh_ok_sapp0[OF F\<^sub>0 o_s le12])
     have f\<tau>2s: \<open>fresh_ok (sapp (s\<^sub>1 \<odot> sp) \<tau>\<^sub>2) 0 n\<^sub>2 FK\<close> by (rule fresh_ok_sapp0[OF fo2 o_s le12])
@@ -4321,7 +4544,7 @@ lemma infer_wf:
     proof (cases k)
       case None
       show ?thesis unfolding None option.case mono_env_binders
-        by (rule inwf_binders[OF I scs khs bfs bo1 afe abe pf pr le12 order_refl])
+        by (rule inwf_binders[OF I scs khs bfs bo1 afe abe pf pr pk le12 order_refl])
     next
       case (Some kn)
       define G' where \<open>G' = (n_txt kn, TFn (sapp (s\<^sub>1 \<odot> sp) \<tau>\<^sub>2) (eps (s\<^sub>1 \<odot> sp))
@@ -4332,7 +4555,7 @@ lemma infer_wf:
       have bok: \<open>binds_ok G' 0 n\<^sub>2 FK\<close>
         unfolding G'_def by (simp add: fresh_ok_TFn[OF f\<tau>2s f\<tau>0 afe abe] bo1)
       show ?thesis unfolding Some option.case beq
-        by (rule inwf_binders[OF I scs khs bfs bok afe abe pf pr le12 order_refl])
+        by (rule inwf_binders[OF I scs khs bfs bok afe abe pf pr pk le12 order_refl])
     qed
     have wb: \<open>n\<^sub>2 \<le> n\<^sub>3 \<and> outwf s\<^sub>2 pd\<^sub>2 FK n\<^sub>3 \<and> fresh_ok \<tau>\<^sub>b 0 n\<^sub>3 FK\<close>
       by (rule infer_cls_Cons_HOp.IH)
@@ -4342,7 +4565,7 @@ lemma infer_wf:
     have ftb: \<open>fresh_ok \<tau>\<^sub>b 0 n\<^sub>3 FK\<close> using wb by simp
     from o_b have sc2: \<open>sconf s\<^sub>2 {..< n\<^sub>3} {..< n\<^sub>3}\<close> and kh2: \<open>khyg s\<^sub>2 FK\<close>
       and bf2: \<open>bfree_sub s\<^sub>2\<close> and ftp2: \<open>ftv_pend pd\<^sub>2 \<subseteq> {..< n\<^sub>3}\<close>
-      and frp2: \<open>frv_pend pd\<^sub>2 \<subseteq> {..< n\<^sub>3}\<close> by (auto simp: outwf_def)
+      and frp2: \<open>frv_pend pd\<^sub>2 \<subseteq> {..< n\<^sub>3}\<close> and ktp2: \<open>ktv_rows pd\<^sub>2 \<subseteq> FK\<close> by (auto simp: outwf_def)
     have subn23: \<open>{..< n\<^sub>2} \<subseteq> {..< n\<^sub>3}\<close> using le3 by simp
     have scs2: \<open>sconf (s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) {..< n\<^sub>3} {..< n\<^sub>3}\<close>
       by (rule sconf_scomp_mono[OF scs sc2 subn23 subn23])
@@ -4372,7 +4595,8 @@ lemma infer_wf:
     have os': \<open>outwf (s\<^sub>3 \<odot> s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) (sub_pend s\<^sub>3 pd\<^sub>2) FK n\<^sub>4\<close>
       unfolding outwf_def using scs3 khs3 bfs3
         ftv_pend_sub_pend[OF sc3 subset_trans[OF ftp2 subn34]]
-        frv_pend_sub_pend[OF sc3 subset_trans[OF ftp2 subn34] subset_trans[OF frp2 subn34]] by simp
+        frv_pend_sub_pend[OF sc3 subset_trans[OF ftp2 subn34] subset_trans[OF frp2 subn34]]
+        ktv_rows_sub_pend[OF kh3 ktp2] by simp
     have ic: \<open>inwf (sappe (s\<^sub>3 \<odot> s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) B) (sappr (s\<^sub>3 \<odot> s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) A)
                 (sub_pend s\<^sub>3 pd\<^sub>2) FK n\<^sub>4\<close>
       by (rule inwf_step[OF I os' le14])
@@ -4405,14 +4629,14 @@ lemma infer_wf:
       by (rule infer_cls_Cons_HFin.IH)
     then have le1: \<open>n \<le> n\<^sub>1\<close> and o1: \<open>outwf s\<^sub>1 pd\<^sub>1 FK n\<^sub>1\<close>
       and f1: \<open>fresh_ok \<tau>\<^sub>f 0 n\<^sub>1 FK\<close> by simp_all
-    from o1 have ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close>
+    from o1 have ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and ktp1: \<open>ktv_rows pd\<^sub>1 \<subseteq> FK\<close>
       by (auto simp: outwf_def)
     note uf1 = uni_fresh[OF u1 fresh_ok_mono[OF f1 le_refl le_refl] fresh_ok_unit le0]
     have le2: \<open>n\<^sub>1 \<le> n\<^sub>2\<close> using uf1 by simp
     have sc2: \<open>sconf s\<^sub>2 {..< n\<^sub>2} {..< n\<^sub>2}\<close> using uf1 by (simp add: atLeast0LessThan)
     have kh2: \<open>khyg s\<^sub>2 FK\<close> and bf2: \<open>bfree_sub s\<^sub>2\<close> using uf1 by simp_all
     have o2': \<open>outwf s\<^sub>2 (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
-      by (rule outwf_of_uni[OF sc2 kh2 bf2 ftp1 frp1 le2])
+      by (rule outwf_of_uni[OF sc2 kh2 bf2 ftp1 frp1 le2 ktp1])
     have os: \<open>outwf (s\<^sub>2 \<odot> s\<^sub>1) (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
       by (rule outwf_scomp[OF o1 o2' le2])
     have le12: \<open>n \<le> n\<^sub>2\<close> using le1 le2 by simp
@@ -4454,13 +4678,13 @@ lemma infer_wf:
     note cov = covn[THEN conjunct1]
     from I have cenvB: \<open>cenv B\<close> and bfB: \<open>bfree_env B\<close> and ktvB: \<open>ktv_env B \<subseteq> FK\<close>
       and frA: \<open>frv_row A \<subseteq> {..< n}\<close> and brA: \<open>brv_row A = {}\<close>
-      and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close> by (auto simp: inwf_def)
+      and ftp: \<open>ftv_pend pd \<subseteq> {..< n}\<close> and frp: \<open>frv_pend pd \<subseteq> {..< n}\<close> and ktp: \<open>ktv_rows pd \<subseteq> FK\<close> by (auto simp: inwf_def)
     note wp = infer_pat_wf(1)[OF dp cenvB bfB ktvB]
     have le1: \<open>n \<le> n\<^sub>1\<close> using wp by simp
     have scp0: \<open>sconf sp {n ..< n\<^sub>1} {n ..< n\<^sub>1}\<close> and khp: \<open>khyg sp FK\<close> and bfp: \<open>bfree_sub sp\<close>
       and boG: \<open>binds_ok \<Gamma> n n\<^sub>1 FK\<close> and fpp: \<open>fresh_ok \<tau>\<^sub>p n n\<^sub>1 FK\<close> using wp by simp_all
     have scp: \<open>sconf sp {..< n\<^sub>1} {..< n\<^sub>1}\<close> by (rule sconf_mono[OF scp0]) auto
-    have o_sp: \<open>outwf sp (sub_pend sp pd) FK n\<^sub>1\<close> by (rule outwf_of_uni[OF scp khp bfp ftp frp le1])
+    have o_sp: \<open>outwf sp (sub_pend sp pd) FK n\<^sub>1\<close> by (rule outwf_of_uni[OF scp khp bfp ftp frp le1 ktp])
     have fst0: \<open>fresh_ok (sapp sp \<tau>\<^sub>0) 0 n\<^sub>1 FK\<close> by (rule fresh_ok_sapp0[OF F\<^sub>0 o_sp le1])
     note uf1 = uni_fresh[OF u1 fst0 fresh_ok_weaken0[OF fpp] le0]
     have le2: \<open>n\<^sub>1 \<le> n\<^sub>2\<close> using uf1 by simp
@@ -4484,10 +4708,11 @@ lemma infer_wf:
       by (rule ftv_pend_sub_pend[OF scs subset_trans[OF ftp subn1]])
     have pr: \<open>frv_pend (sub_pend (s\<^sub>1 \<odot> sp) pd) \<subseteq> {..< n\<^sub>2}\<close>
       by (rule frv_pend_sub_pend[OF scs subset_trans[OF ftp subn1] subset_trans[OF frp subn1]])
+    have pk: \<open>ktv_rows (sub_pend (s\<^sub>1 \<odot> sp) pd) \<subseteq> FK\<close> by (rule ktv_rows_sub_pend[OF khs ktp])
     have ib: \<open>inwf (mono_env s\<^sub>1 \<Gamma> @ sappe (s\<^sub>1 \<odot> sp) B)
                (eps (s\<^sub>1 \<odot> sp)) (sub_pend (s\<^sub>1 \<odot> sp) pd) FK n\<^sub>2\<close>
       unfolding mono_env_binders
-      by (rule inwf_binders[OF I scs khs bfs bo1 af ab pf pr le12 order_refl])
+      by (rule inwf_binders[OF I scs khs bfs bo1 af ab pf pr pk le12 order_refl])
     from dp refl refl refl refl u1 refl refl refl eps_def covn db ib
     have wb: \<open>n\<^sub>2 \<le> n\<^sub>3 \<and> outwf s\<^sub>2 pd\<^sub>2 FK n\<^sub>3 \<and> fresh_ok \<tau>' 0 n\<^sub>3 FK\<close>
       by (rule infer_cls_Cons_HRet.IH)
@@ -4500,7 +4725,7 @@ lemma infer_wf:
       by (rule sconf_scomp_mono[OF scs sc2 subn23 subn23])
     have le13: \<open>n \<le> n\<^sub>3\<close> using le12 le3 by simp
     have o_s: \<open>outwf (s\<^sub>1 \<odot> sp) (sub_pend (s\<^sub>1 \<odot> sp) pd) FK n\<^sub>2\<close>
-      by (rule outwf_of_uni[OF scs khs bfs ftp frp le12])
+      by (rule outwf_of_uni[OF scs khs bfs ftp frp le12 ktp])
     have os: \<open>outwf (s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) pd\<^sub>2 FK n\<^sub>3\<close> by (rule outwf_scomp[OF o_s o_b le3])
     have ic: \<open>inwf (sappe (s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) B) (sappr (s\<^sub>2 \<odot> (s\<^sub>1 \<odot> sp)) A) pd\<^sub>2 FK n\<^sub>3\<close>
       by (rule inwf_step[OF I os le13])
@@ -4559,7 +4784,7 @@ lemma infer_wf:
       by (rule infer_atom_ADot.IH)
     then have le1: \<open>n \<le> n\<^sub>1\<close> and o1: \<open>outwf s\<^sub>1 pd\<^sub>1 FK n\<^sub>1\<close> and fa: \<open>fresh_ok \<tau>\<^sub>a 0 n\<^sub>1 FK\<close>
       by simp_all
-    from o1 have ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close>
+    from o1 have ftp1: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp1: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and ktp1: \<open>ktv_rows pd\<^sub>1 \<subseteq> FK\<close>
       by (auto simp: outwf_def)
     have fa2: \<open>fresh_ok \<tau>\<^sub>a 0 (n\<^sub>1 + 2) FK\<close> by (rule fresh_ok_mono[OF fa order_refl]) simp
     have ft2: \<open>fresh_ok (TRCons (n_txt x) (TV n\<^sub>1) (TV (Suc n\<^sub>1))) 0 (n\<^sub>1 + 2) FK\<close>
@@ -4570,7 +4795,7 @@ lemma infer_wf:
     have sc2: \<open>sconf s\<^sub>2 {..< n\<^sub>2} {..< n\<^sub>2}\<close> using uf1 by (simp add: atLeast0LessThan)
     have kh2: \<open>khyg s\<^sub>2 FK\<close> and bf2: \<open>bfree_sub s\<^sub>2\<close> using uf1 by simp_all
     have o2: \<open>outwf s\<^sub>2 (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close>
-      by (rule outwf_of_uni[OF sc2 kh2 bf2 ftp1 frp1 le12])
+      by (rule outwf_of_uni[OF sc2 kh2 bf2 ftp1 frp1 le12 ktp1])
     have os: \<open>outwf (s\<^sub>2 \<odot> s\<^sub>1) (sub_pend s\<^sub>2 pd\<^sub>1) FK n\<^sub>2\<close> by (rule outwf_scomp[OF o1 o2 le12])
     have fpo: \<open>fresh_ok (sapp s\<^sub>2 (TRCons (n_txt x) (TV n\<^sub>1) (TV (Suc n\<^sub>1)))) 0 n\<^sub>2 FK\<close>
       by (rule fresh_ok_sapp0[OF ft2 o2 le2])

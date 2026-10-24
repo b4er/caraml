@@ -43,6 +43,8 @@ datatype tentry =
   | TEffi name scheme                   \<comment> \<open>foreign value: symbol, declared type\<close>
   | TEeff name \<open>name list\<close> nat
       \<comment> \<open>effect: its label prefix, the names of its operations, its arity\<close>
+  | TEoff name kty                     \<comment> \<open>evidence variable: the offset of the label in the
+                                         record type, received by the enclosing binding\<close>
 
 type_synonym tenv = \<open>(name \<times> tentry) list\<close>
 type_synonym sigsem = \<open>nat list \<times> tenv\<close>
@@ -74,6 +76,7 @@ fun sub_scheme :: \<open>(tvar \<Rightarrow> kty) \<Rightarrow> (rvar \<Rightarr
 
 fun sub_ent :: \<open>(tvar \<Rightarrow> kty) \<Rightarrow> (rvar \<Rightarrow> krow) \<Rightarrow> tentry \<Rightarrow> tentry\<close> where
   \<open>sub_ent \<theta> \<rho> (TEval \<sigma>) = TEval (sub_scheme \<theta> \<rho> \<sigma>)\<close>
+| \<open>sub_ent \<theta> \<rho> (TEoff x r) = TEoff x (tsubst \<theta> \<rho> r)\<close>
 | \<open>sub_ent \<theta> \<rho> e = e\<close>
 
 definition sub_env :: \<open>(tvar \<Rightarrow> kty) \<Rightarrow> (rvar \<Rightarrow> krow) \<Rightarrow> tenv \<Rightarrow> tenv\<close> where
@@ -97,6 +100,7 @@ fun ftv_ent :: \<open>tentry \<Rightarrow> tvar set\<close> and ftv_env :: \<ope
 | \<open>ftv_ent (TEop l ps t\<^sub>1 t\<^sub>2) = ftv t\<^sub>1 \<union> ftv t\<^sub>2\<close>
 | \<open>ftv_ent (TEffi s \<sigma>) = ftv_sch \<sigma>\<close>
 | \<open>ftv_ent (TEeff l ls ar) = {}\<close>
+| \<open>ftv_ent (TEoff x r) = ftv r\<close>
 | \<open>ftv_env [] = {}\<close>
 | \<open>ftv_env ((x, e) # ex) = ftv_ent e \<union> ftv_env ex\<close>
 
@@ -112,6 +116,7 @@ fun frv_ent :: \<open>tentry \<Rightarrow> rvar set\<close> and frv_env :: \<ope
 | \<open>frv_ent (TEop l ps t\<^sub>1 t\<^sub>2) = frv t\<^sub>1 \<union> frv t\<^sub>2\<close>
 | \<open>frv_ent (TEffi s \<sigma>) = frv_sch \<sigma>\<close>
 | \<open>frv_ent (TEeff l ls ar) = {}\<close>
+| \<open>frv_ent (TEoff x r) = frv r\<close>
 | \<open>frv_env [] = {}\<close>
 | \<open>frv_env ((x, e) # ex) = frv_ent e \<union> frv_env ex\<close>
 
@@ -138,6 +143,7 @@ fun ktv_ent :: \<open>tentry \<Rightarrow> tvar set\<close> and ktv_env :: \<ope
 | \<open>ktv_ent (TEop l ps t\<^sub>1 t\<^sub>2) = ktv t\<^sub>1 \<union> ktv t\<^sub>2\<close>
 | \<open>ktv_ent (TEffi s \<sigma>) = ktv_sch \<sigma>\<close>
 | \<open>ktv_ent (TEeff l ls ar) = {}\<close>
+| \<open>ktv_ent (TEoff x r) = ktv r\<close>
 | \<open>ktv_env [] = {}\<close>
 | \<open>ktv_env ((x, e) # ex) = ktv_ent e \<union> ktv_env ex\<close>
 
@@ -161,6 +167,7 @@ fun kent :: \<open>(tvar \<Rightarrow> kty) \<Rightarrow> tentry \<Rightarrow> t
 | \<open>kent \<phi> (TEop l ps t\<^sub>1 t\<^sub>2) = TEop l ps (ksubst \<phi> t\<^sub>1) (ksubst \<phi> t\<^sub>2)\<close>
 | \<open>kent \<phi> (TEffi s \<sigma>) = TEffi s (ksch \<phi> \<sigma>)\<close>
 | \<open>kent \<phi> (TEeff l ls ar) = TEeff l ls ar\<close>
+| \<open>kent \<phi> (TEoff x r) = TEoff x (ksubst \<phi> r)\<close>
 | \<open>kenv \<phi> [] = []\<close>
 | \<open>kenv \<phi> ((x, e) # ex) = (x, kent \<phi> e) # kenv \<phi> ex\<close>
 
@@ -186,6 +193,7 @@ fun bsubstl :: \<open>(tvar \<Rightarrow> kty) \<Rightarrow> (rvar \<Rightarrow>
 | \<open>bsubstl \<theta> \<rho> (TApp t\<^sub>1 t\<^sub>2) = TApp (bsubstl \<theta> \<rho> t\<^sub>1) (bsubstl \<theta> \<rho> t\<^sub>2)\<close>
 | \<open>bsubstl \<theta> \<rho> (TFn t\<^sub>1 e t\<^sub>2) = TFn (bsubstl \<theta> \<rho> t\<^sub>1) (brsubst \<rho> e) (bsubstl \<theta> \<rho> t\<^sub>2)\<close>
 | \<open>bsubstl \<theta> \<rho> (TDep i sg K e t) = TDep i sg K (brsubst \<rho> e) (bsubstl (tlift \<circ> \<theta>) \<rho> t)\<close>
+| \<open>bsubstl \<theta> \<rho> (TOff x r t) = TOff x (bsubstl \<theta> \<rho> r) (bsubstl \<theta> \<rho> t)\<close>
 | \<open>bsubstl \<theta> \<rho> (TEv l s t) = TEv (bsubstl \<theta> \<rho> l) (bsubstl \<theta> \<rho> s) (bsubstl \<theta> \<rho> t)\<close>
 | \<open>bsubstl \<theta> \<rho> (TAct l K e t) = TAct (bsubstl \<theta> \<rho> l) K (brsubst \<rho> e) (bsubstl \<theta> \<rho> t)\<close>
 | \<open>bsubstl \<theta> \<rho> TRNil = TRNil\<close>
@@ -206,6 +214,9 @@ next
 next
   case (TApp t\<^sub>1 t\<^sub>2)
   show ?case using TApp.IH[of \<theta> \<theta>'] TApp.prems by simp
+next
+  case (TOff x r t)
+  show ?case using TOff.IH[of \<theta> \<theta>'] TOff.prems by simp
 next
   case (TFn t\<^sub>1 e t\<^sub>2)
   show ?case using TFn.IH[of \<theta> \<theta>'] TFn.prems by simp
@@ -308,6 +319,7 @@ fun treal :: \<open>realisation \<Rightarrow> kty \<Rightarrow> kty\<close> wher
 | \<open>treal \<phi> (TApp t\<^sub>1 t\<^sub>2) = TApp (treal \<phi> t\<^sub>1) (treal \<phi> t\<^sub>2)\<close>
 | \<open>treal \<phi> (TFn t\<^sub>1 e t\<^sub>2) = TFn (treal \<phi> t\<^sub>1) e (treal \<phi> t\<^sub>2)\<close>
 | \<open>treal \<phi> (TDep i sg T e t) = TDep i sg T e (treal \<phi> t)\<close>
+| \<open>treal \<phi> (TOff x r t) = TOff x (treal \<phi> r) (treal \<phi> t)\<close>
 | \<open>treal \<phi> (TEv l s t) = TEv (treal \<phi> l) (treal \<phi> s) (treal \<phi> t)\<close>
 | \<open>treal \<phi> (TAct l K e t) = TAct (treal \<phi> l) K e (treal \<phi> t)\<close>
 | \<open>treal \<phi> TRNil = TRNil\<close>
@@ -345,6 +357,7 @@ and real_env :: \<open>realisation \<Rightarrow> tenv \<Rightarrow> tenv\<close>
 | \<open>real_ent \<phi> (TEinst ex) = TEinst (real_env \<phi> ex)\<close>
 | \<open>real_ent \<phi> (TEop l ps t\<^sub>1 t\<^sub>2) = TEop l ps (treal \<phi> t\<^sub>1) (treal \<phi> t\<^sub>2)\<close>
 | \<open>real_ent \<phi> (TEffi s \<sigma>) = TEffi s (real_scheme \<phi> \<sigma>)\<close>
+| \<open>real_ent \<phi> (TEoff x r) = TEoff x (treal \<phi> r)\<close>
 | \<open>real_ent \<phi> (TEeff l ls ar) = TEeff l ls ar\<close>
 | \<open>real_env \<phi> [] = []\<close>
 | \<open>real_env \<phi> ((x, e) # ex) = (x, real_ent \<phi> e) # real_env \<phi> ex\<close>
@@ -398,6 +411,7 @@ fun stamps :: \<open>kty \<Rightarrow> nat set\<close> where
 | \<open>stamps (TApp t\<^sub>1 t\<^sub>2) = stamps t\<^sub>1 \<union> stamps t\<^sub>2\<close>
 | \<open>stamps (TFn t\<^sub>1 e t\<^sub>2) = stamps t\<^sub>1 \<union> stamps t\<^sub>2\<close>
 | \<open>stamps (TDep i sg K e t) = stamps t\<close>
+| \<open>stamps (TOff x r t) = stamps r \<union> stamps t\<close>
 | \<open>stamps (TEv l s t) = stamps l \<union> stamps s \<union> stamps t\<close>
 | \<open>stamps (TAct l K e t) = stamps l \<union> stamps t\<close>
 | \<open>stamps TRNil = {}\<close>
@@ -423,6 +437,7 @@ fun stamps_ent :: \<open>tentry \<Rightarrow> nat set\<close> and stamps_env :: 
 | \<open>stamps_ent (TEinst ex) = stamps_env ex\<close>
 | \<open>stamps_ent (TEop l ps t\<^sub>1 t\<^sub>2) = stamps t\<^sub>1 \<union> stamps t\<^sub>2\<close>
 | \<open>stamps_ent (TEffi s \<sigma>) = stamps_sch \<sigma>\<close>
+| \<open>stamps_ent (TEoff x r) = stamps r\<close>
 | \<open>stamps_ent (TEeff l ls ar) = {}\<close>
 | \<open>stamps_env [] = {}\<close>
 | \<open>stamps_env ((x, e) # ex) = stamps_ent e \<union> stamps_env ex\<close>
@@ -434,6 +449,7 @@ fun tn :: \<open>kty \<Rightarrow> tyname set\<close> where
 | \<open>tn (TApp t\<^sub>1 t\<^sub>2) = tn t\<^sub>1 \<union> tn t\<^sub>2\<close>
 | \<open>tn (TFn t\<^sub>1 e t\<^sub>2) = tn t\<^sub>1 \<union> tn t\<^sub>2\<close>
 | \<open>tn (TDep i sg K e t) = tn t\<close>
+| \<open>tn (TOff x r t) = tn r \<union> tn t\<close>
 | \<open>tn (TEv l s t) = tn l \<union> tn s \<union> tn t\<close>
 | \<open>tn (TAct l K e t) = tn l \<union> tn t\<close>
 | \<open>tn (TRCons l t r) = tn t \<union> tn r\<close>
@@ -458,6 +474,7 @@ fun tn_ent :: \<open>tentry \<Rightarrow> tyname set\<close> and tn_env :: \<ope
 | \<open>tn_ent (TEinst ex) = tn_env ex\<close>
 | \<open>tn_ent (TEop l ps t\<^sub>1 t\<^sub>2) = tn t\<^sub>1 \<union> tn t\<^sub>2\<close>
 | \<open>tn_ent (TEffi s \<sigma>) = tn_sch \<sigma>\<close>
+| \<open>tn_ent (TEoff x r) = tn r\<close>
 | \<open>tn_ent (TEeff l ls ar) = {}\<close>
 | \<open>tn_env [] = {}\<close>
 | \<open>tn_env ((x, e) # E) = tn_ent e \<union> tn_env E\<close>

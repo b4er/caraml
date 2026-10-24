@@ -110,6 +110,8 @@ datatype kty =
                                  \<comment> \<open>module-dependent arrow binding the parameter's abstract
                                      types, as many as the second field says;
                                      \<open>True\<close> for an implicit binder\<close>
+  | TOff name kty kty            \<comment> \<open>evidence binder: given the offset of the label in the
+                                     record type, the type; only at the top of a scheme body\<close>
   | TEv kty kty kty              \<comment> \<open>handler name: the effect (\<open>eff_ty l\<close>, or a variable while
                                      unknown), its scope, the effect's parameters as a tuple\<close>
   | TAct kty \<open>tvar list\<close> krow kty
@@ -256,6 +258,7 @@ fun wf_kty :: \<open>kty \<Rightarrow> bool\<close> where
 | \<open>wf_kty (TApp f x) \<longleftrightarrow> var_headed f \<and> wf_kty f \<and> wf_kty x\<close>
 | \<open>wf_kty (TFn a _ b) \<longleftrightarrow> wf_kty a \<and> wf_kty b\<close>
 | \<open>wf_kty (TDep _ _ _ _ b) = wf_kty b\<close>
+| \<open>wf_kty (TOff _ r b) \<longleftrightarrow> wf_kty r \<and> wf_kty b\<close>
 | \<open>wf_kty (TEv l s t) \<longleftrightarrow> wf_kty l \<and> wf_kty s \<and> wf_kty t\<close>
 | \<open>wf_kty (TAct l _ _ b) \<longleftrightarrow> wf_kty l \<and> wf_kty b\<close>
 | \<open>wf_kty TRNil = True\<close>
@@ -376,6 +379,7 @@ fun tsubst :: \<open>(tvar \<Rightarrow> kty) \<Rightarrow> (rvar \<Rightarrow> 
 | \<open>tsubst \<theta> \<rho> (TApp t\<^sub>1 t\<^sub>2) = TApp (tsubst \<theta> \<rho> t\<^sub>1) (tsubst \<theta> \<rho> t\<^sub>2)\<close>
 | \<open>tsubst \<theta> \<rho> (TFn t\<^sub>1 e t\<^sub>2) = TFn (tsubst \<theta> \<rho> t\<^sub>1) (rsubst \<rho> e) (tsubst \<theta> \<rho> t\<^sub>2)\<close>
 | \<open>tsubst \<theta> \<rho> (TDep i sg T e t) = TDep i sg T (rsubst \<rho> e) (tsubst \<theta> \<rho> t)\<close>
+| \<open>tsubst \<theta> \<rho> (TOff x r t) = TOff x (tsubst \<theta> \<rho> r) (tsubst \<theta> \<rho> t)\<close>
 | \<open>tsubst \<theta> \<rho> (TEv l s t) = TEv (tsubst \<theta> \<rho> l) (tsubst \<theta> \<rho> s) (tsubst \<theta> \<rho> t)\<close>
 | \<open>tsubst \<theta> \<rho> (TAct l K e t) = TAct (tsubst \<theta> \<rho> l) K (rsubst \<rho> e) (tsubst \<theta> \<rho> t)\<close>
 | \<open>tsubst \<theta> \<rho> TRNil = TRNil\<close>
@@ -396,6 +400,7 @@ fun ftv :: \<open>kty \<Rightarrow> tvar set\<close> where
 | \<open>ftv (TApp t\<^sub>1 t\<^sub>2) = ftv t\<^sub>1 \<union> ftv t\<^sub>2\<close>
 | \<open>ftv (TFn t\<^sub>1 e t\<^sub>2) = ftv t\<^sub>1 \<union> ftv t\<^sub>2\<close>
 | \<open>ftv (TDep i sg K e t) = ftv t\<close>
+| \<open>ftv (TOff x r t) = ftv r \<union> ftv t\<close>
 | \<open>ftv (TEv l s t) = ftv l \<union> ftv s \<union> ftv t\<close>
 | \<open>ftv (TAct l K e t) = ftv l \<union> ftv t\<close>
 | \<open>ftv TRNil = {}\<close>
@@ -416,6 +421,7 @@ fun frv :: \<open>kty \<Rightarrow> rvar set\<close> where
 | \<open>frv (TApp t\<^sub>1 t\<^sub>2) = frv t\<^sub>1 \<union> frv t\<^sub>2\<close>
 | \<open>frv (TFn t\<^sub>1 e t\<^sub>2) = frv t\<^sub>1 \<union> frv_row e \<union> frv t\<^sub>2\<close>
 | \<open>frv (TDep i sg T e t) = frv_row e \<union> frv t\<close>
+| \<open>frv (TOff x r t) = frv r \<union> frv t\<close>
 | \<open>frv (TEv l s t) = frv l \<union> frv s \<union> frv t\<close>
 | \<open>frv (TAct l K e t) = frv l \<union> frv_row e \<union> frv t\<close>
 | \<open>frv TRNil = {}\<close>
@@ -489,6 +495,8 @@ and tys_eq :: \<open>kty list \<Rightarrow> kty list \<Rightarrow> bool\<close> 
      (case u of TFn u\<^sub>1 g u\<^sub>2 \<Rightarrow> t\<^sub>1 \<simeq> u\<^sub>1 \<and> e \<approx> g \<and> t\<^sub>2 \<simeq> u\<^sub>2 | _ \<Rightarrow> False)\<close>
 | ty_eq_TDep_case: \<open>TDep i sg T e t \<simeq> u \<longleftrightarrow>
      (case u of TDep i' sg' T' g u' \<Rightarrow> i = i' \<and> sg = sg' \<and> T = T' \<and> e \<approx> g \<and> t \<simeq> u' | _ \<Rightarrow> False)\<close>
+| ty_eq_TOff_case: \<open>TOff x r t \<simeq> u \<longleftrightarrow>
+     (case u of TOff x' r' u' \<Rightarrow> x = x' \<and> r \<simeq> r' \<and> t \<simeq> u' | _ \<Rightarrow> False)\<close>
 | ty_eq_TEv_case: \<open>TEv l s t \<simeq> u \<longleftrightarrow> (case u of TEv l' s' u' \<Rightarrow> l \<simeq> l' \<and> s \<simeq> s' \<and> t \<simeq> u' | _ \<Rightarrow> False)\<close>
 | ty_eq_TAct_case: \<open>TAct l K e t \<simeq> u \<longleftrightarrow>
      (case u of TAct l' K' g u' \<Rightarrow> l \<simeq> l' \<and> K = K' \<and> e \<approx> g \<and> t \<simeq> u' | _ \<Rightarrow> False)\<close>
@@ -513,6 +521,10 @@ lemma ty_eq_TDep[simp]:
   \<open>TDep i sg T e t \<simeq> u \<longleftrightarrow> (\<exists>g u'. u = TDep i sg T g u' \<and> e \<approx> g \<and> t \<simeq> u')\<close>
   by (cases u) auto
 
+lemma ty_eq_TOff[simp]:
+  \<open>TOff x r t \<simeq> u \<longleftrightarrow> (\<exists>r' u'. u = TOff x r' u' \<and> r \<simeq> r' \<and> t \<simeq> u')\<close>
+  by (cases u) auto
+
 lemma ty_eq_TEv[simp]:
   \<open>TEv l s t \<simeq> u \<longleftrightarrow> (\<exists>l' s' u'. u = TEv l' s' u' \<and> l \<simeq> l' \<and> s \<simeq> s' \<and> t \<simeq> u')\<close>
   by (cases u) auto
@@ -531,6 +543,7 @@ text \<open>The equations above are the simp set; the defining equations, by cas
 
 declare ty_eq_TC_case[simp del] ty_eq_TApp_case[simp del] ty_eq_TFn_case[simp del]
   ty_eq_TDep_case[simp del] ty_eq_TEv_case[simp del] ty_eq_TAct_case[simp del]
+  ty_eq_TOff_case[simp del]
   ty_eq_TRCons_case[simp del]
 
 lemma tys_eq_conv: \<open>([\<simeq>]) = list_all2 (\<simeq>)\<close>
@@ -656,6 +669,7 @@ fun bsubst :: \<open>(tvar \<Rightarrow> kty) \<Rightarrow> (rvar \<Rightarrow> 
 | \<open>bsubst \<theta> \<rho> (TApp t\<^sub>1 t\<^sub>2) = TApp (bsubst \<theta> \<rho> t\<^sub>1) (bsubst \<theta> \<rho> t\<^sub>2)\<close>
 | \<open>bsubst \<theta> \<rho> (TFn t\<^sub>1 e t\<^sub>2) = TFn (bsubst \<theta> \<rho> t\<^sub>1) (brsubst \<rho> e) (bsubst \<theta> \<rho> t\<^sub>2)\<close>
 | \<open>bsubst \<theta> \<rho> (TDep i sg K e t) = TDep i sg K (brsubst \<rho> e) (bsubst \<theta> \<rho> t)\<close>
+| \<open>bsubst \<theta> \<rho> (TOff x r t) = TOff x (bsubst \<theta> \<rho> r) (bsubst \<theta> \<rho> t)\<close>
 | \<open>bsubst \<theta> \<rho> (TEv l s t) = TEv (bsubst \<theta> \<rho> l) (bsubst \<theta> \<rho> s) (bsubst \<theta> \<rho> t)\<close>
 | \<open>bsubst \<theta> \<rho> (TAct l K e t) = TAct (bsubst \<theta> \<rho> l) K (brsubst \<rho> e) (bsubst \<theta> \<rho> t)\<close>
 | \<open>bsubst \<theta> \<rho> TRNil = TRNil\<close>
@@ -672,6 +686,7 @@ fun btv :: \<open>kty \<Rightarrow> tvar set\<close> where
 | \<open>btv (TApp t\<^sub>1 t\<^sub>2) = btv t\<^sub>1 \<union> btv t\<^sub>2\<close>
 | \<open>btv (TFn t\<^sub>1 e t\<^sub>2) = btv t\<^sub>1 \<union> btv t\<^sub>2\<close>
 | \<open>btv (TDep i sg K e t) = btv t\<close>
+| \<open>btv (TOff x r t) = btv r \<union> btv t\<close>
 | \<open>btv (TEv l s t) = btv l \<union> btv s \<union> btv t\<close>
 | \<open>btv (TAct l K e t) = btv l \<union> btv t\<close>
 | \<open>btv TRNil = {}\<close>
@@ -692,6 +707,7 @@ fun brv :: \<open>kty \<Rightarrow> rvar set\<close> where
 | \<open>brv (TApp t\<^sub>1 t\<^sub>2) = brv t\<^sub>1 \<union> brv t\<^sub>2\<close>
 | \<open>brv (TFn t\<^sub>1 e t\<^sub>2) = brv t\<^sub>1 \<union> brv_row e \<union> brv t\<^sub>2\<close>
 | \<open>brv (TDep i sg K e t) = brv_row e \<union> brv t\<close>
+| \<open>brv (TOff x r t) = brv r \<union> brv t\<close>
 | \<open>brv (TEv l s t) = brv l \<union> brv s \<union> brv t\<close>
 | \<open>brv (TAct l K e t) = brv l \<union> brv_row e \<union> brv t\<close>
 | \<open>brv TRNil = {}\<close>
@@ -714,6 +730,7 @@ fun ktv :: \<open>kty \<Rightarrow> tvar set\<close> where
 | \<open>ktv (TApp t\<^sub>1 t\<^sub>2) = ktv t\<^sub>1 \<union> ktv t\<^sub>2\<close>
 | \<open>ktv (TFn t\<^sub>1 e t\<^sub>2) = ktv t\<^sub>1 \<union> ktv t\<^sub>2\<close>
 | \<open>ktv (TDep i sg K e t) = ktv t\<close>
+| \<open>ktv (TOff x r t) = ktv r \<union> ktv t\<close>
 | \<open>ktv (TEv l s t) = ktv l \<union> ktv s \<union> ktv t\<close>
 | \<open>ktv (TAct l K e t) = ktv l \<union> ktv t\<close>
 | \<open>ktv TRNil = {}\<close>
@@ -730,6 +747,7 @@ fun name_free :: \<open>kty \<Rightarrow> bool\<close> where
 | \<open>name_free (TApp t\<^sub>1 t\<^sub>2) \<longleftrightarrow> name_free t\<^sub>1 \<and> name_free t\<^sub>2\<close>
 | \<open>name_free (TFn t\<^sub>1 e t\<^sub>2) \<longleftrightarrow> name_free t\<^sub>1 \<and> name_free t\<^sub>2\<close>
 | \<open>name_free (TDep i sg K e t) = name_free t\<close>
+| \<open>name_free (TOff x r t) \<longleftrightarrow> name_free r \<and> name_free t\<close>
 | \<open>name_free (TEv l s t) = False\<close>
 | \<open>name_free (TAct l K e t) = False\<close>
 | \<open>name_free (TRCons l t r) \<longleftrightarrow> name_free t \<and> name_free r\<close>
@@ -752,6 +770,7 @@ fun ksubst :: \<open>(tvar \<Rightarrow> kty) \<Rightarrow> kty \<Rightarrow> kt
 | \<open>ksubst \<phi> (TApp t\<^sub>1 t\<^sub>2) = TApp (ksubst \<phi> t\<^sub>1) (ksubst \<phi> t\<^sub>2)\<close>
 | \<open>ksubst \<phi> (TFn t\<^sub>1 e t\<^sub>2) = TFn (ksubst \<phi> t\<^sub>1) e (ksubst \<phi> t\<^sub>2)\<close>
 | \<open>ksubst \<phi> (TDep i sg K e t) = TDep i sg K e (ksubst \<phi> t)\<close>
+| \<open>ksubst \<phi> (TOff x r t) = TOff x (ksubst \<phi> r) (ksubst \<phi> t)\<close>
 | \<open>ksubst \<phi> (TEv l s t) = TEv (ksubst \<phi> l) (ksubst \<phi> s) (ksubst \<phi> t)\<close>
 | \<open>ksubst \<phi> (TAct l K e t) = TAct (ksubst \<phi> l) K e (ksubst \<phi> t)\<close>
 | \<open>ksubst \<phi> TRNil = TRNil\<close>
@@ -791,6 +810,12 @@ next
   then show ?case by simp
 next
   case (TDep i sg K e t)
+  then show ?case by simp
+next
+  case (TOff x r t)
+  have \<open>tsubst \<theta> \<rho> (ksubst \<phi> u) = ksubst (\<lambda>a. tsubst \<theta> \<rho> (\<phi> a)) (tsubst \<theta> \<rho> u)\<close>
+    if \<open>u \<in> {r, t}\<close> for u
+    using that TOff.IH TOff.prems by fastforce
   then show ?case by simp
 next
   case (TEv l s t)
@@ -844,6 +869,7 @@ fun kclose_at :: \<open>nat \<Rightarrow> tvar list \<Rightarrow> kty \<Rightarr
 | \<open>kclose_at d K (TApp t\<^sub>1 t\<^sub>2) = TApp (kclose_at d K t\<^sub>1) (kclose_at d K t\<^sub>2)\<close>
 | \<open>kclose_at d K (TFn t\<^sub>1 e t\<^sub>2) = TFn (kclose_at d K t\<^sub>1) e (kclose_at d K t\<^sub>2)\<close>
 | \<open>kclose_at d K (TDep i sg m e t) = TDep i sg m e (kclose_at (Suc d) K t)\<close>
+| \<open>kclose_at d K (TOff x r t) = TOff x (kclose_at d K r) (kclose_at d K t)\<close>
 | \<open>kclose_at d K (TEv l s t) = TEv (kclose_at d K l) (kclose_at d K s) (kclose_at d K t)\<close>
 | \<open>kclose_at d K (TAct l K' e t) = TAct (kclose_at d K l) K' e (kclose_at d K t)\<close>
 | \<open>kclose_at d K TRNil = TRNil\<close>
@@ -861,6 +887,7 @@ fun kopen_at :: \<open>nat \<Rightarrow> (nat \<Rightarrow> kty) \<Rightarrow> k
 | \<open>kopen_at d \<phi> (TApp t\<^sub>1 t\<^sub>2) = TApp (kopen_at d \<phi> t\<^sub>1) (kopen_at d \<phi> t\<^sub>2)\<close>
 | \<open>kopen_at d \<phi> (TFn t\<^sub>1 e t\<^sub>2) = TFn (kopen_at d \<phi> t\<^sub>1) e (kopen_at d \<phi> t\<^sub>2)\<close>
 | \<open>kopen_at d \<phi> (TDep i sg m e t) = TDep i sg m e (kopen_at (Suc d) \<phi> t)\<close>
+| \<open>kopen_at d \<phi> (TOff x r t) = TOff x (kopen_at d \<phi> r) (kopen_at d \<phi> t)\<close>
 | \<open>kopen_at d \<phi> (TEv l s t) = TEv (kopen_at d \<phi> l) (kopen_at d \<phi> s) (kopen_at d \<phi> t)\<close>
 | \<open>kopen_at d \<phi> (TAct l K e t) = TAct (kopen_at d \<phi> l) K e (kopen_at d \<phi> t)\<close>
 | \<open>kopen_at d \<phi> TRNil = TRNil\<close>
@@ -881,6 +908,7 @@ fun taok :: \<open>nat \<Rightarrow> kty \<Rightarrow> bool\<close> where
 | \<open>taok d (TApp t\<^sub>1 t\<^sub>2) \<longleftrightarrow> taok d t\<^sub>1 \<and> taok d t\<^sub>2\<close>
 | \<open>taok d (TFn t\<^sub>1 e t\<^sub>2) \<longleftrightarrow> taok d t\<^sub>1 \<and> taok d t\<^sub>2\<close>
 | \<open>taok d (TDep i sg m e t) = taok (Suc d) t\<close>
+| \<open>taok d (TOff x r t) \<longleftrightarrow> taok d r \<and> taok d t\<close>
 | \<open>taok d (TEv l s t) \<longleftrightarrow> taok d l \<and> taok d s \<and> taok d t\<close>
 | \<open>taok d (TAct l K e t) \<longleftrightarrow> taok d l \<and> taok d t\<close>
 | \<open>taok d TRNil = True\<close>
