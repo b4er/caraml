@@ -452,6 +452,22 @@ text \<open>The variables a pattern binds, as monomorphic entries under a substi
 definition mono_env :: \<open>ksub \<Rightarrow> (name \<times> kty) list \<Rightarrow> tenv\<close> where
   \<open>mono_env s \<Gamma> = map (\<lambda>(x, \<tau>). (x, TEval (kmono (sapp s \<tau>)))) \<Gamma>\<close>
 
+text \<open>The scrutinee of a \<open>match\<close> whose arms have open record patterns over the
+  labels \<open>ls\<close>: its type is unified with a record of fresh field types over a fresh
+  tail, one pending projection per label gives the evidence, and the arms are
+  matched against the tuple of the fields and the record.\<close>
+
+definition open_scrut ::
+  \<open>nat \<Rightarrow> kty \<Rightarrow> pend \<Rightarrow> name list \<Rightarrow> nat \<Rightarrow> (ksub \<times> matom list \<times> kty \<times> pend \<times> nat) option\<close>
+where
+  \<open>open_scrut uf \<tau>\<^sub>0 pd ls n =
+     (let k = length ls; fs = map TV [n ..< n + k]; row = rec_of (zip ls fs) (TV (n + k))
+      in uni uf \<tau>\<^sub>0 row (Suc (n + k)) \<bind> (\<lambda>(s, n\<^sub>1).
+           Some (s, map (off_var \<circ> imp_name) [n\<^sub>1 ..< n\<^sub>1 + k],
+                 tuple (map (sapp s) fs @ [sapp s \<tau>\<^sub>0]),
+                 map (\<lambda>(v, l). (imp_name v, POff l (sapp s row))) (zip [n\<^sub>1 ..< n\<^sub>1 + k] ls) @
+                   sub_pend s pd,
+                 n\<^sub>1 + k)))\<close>
 text \<open>The local function groups in a term, counted: the termination measure of the
   inference leads with it, since a group is inferred through its lowering, which is
   larger than its clauses.\<close>
@@ -505,7 +521,18 @@ lemma size_fields:
   \<open>2 * size_list (size \<circ> snd) fs < Suc (Suc (2 * size_list (size_prod (\<lambda>_. 0) size) fs))\<close>
   using size_list_snd_le[of size fs \<open>\<lambda>_. 0\<close>] by simp
 
-text \<open>The alternatives of a guarded term.\<close>
+text \<open>The arms of a \<open>match\<close> rewritten for its open record patterns are measured
+  as the arms themselves: patterns do not count.\<close>
+
+lemma nlf_open_arms [simp]:
+  \<open>sum_list (map (nlf \<circ> snd) (open_arms ls arms)) = sum_list (map (nlf \<circ> snd) arms)\<close>
+  by (induction arms) (auto simp: open_arms_def)
+
+lemma size_open_arms [simp]:
+  \<open>size_list (size_prod (\<lambda>_. 0) size) (open_arms ls arms) =
+     size_list (size_prod (\<lambda>_. 0) size) arms\<close>
+  by (induction arms) (auto simp: open_arms_def)
+
 text \<open>The alternatives of a guarded term.\<close>
 
 fun guards_of :: \<open>expr \<Rightarrow> (expr list \<times> expr) list\<close> where
@@ -545,13 +572,28 @@ where
          uni uf \<tau> (ann_ty (sappe s\<^sub>1 B) \<tau> \<tau>\<^sub>a) n\<^sub>2 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>3).
            Some (s\<^sub>2 \<odot> s\<^sub>1, EAnn e' ty, sapp s\<^sub>2 \<tau>, sub_pend s\<^sub>2 pd\<^sub>1, n\<^sub>3))))\<close>
 | \<open>infer uf B A pd (EFn ps b) n =
-     infer_pats uf B ps n \<bind> (\<lambda>(sp, ps', \<tau>s, \<Gamma>, n\<^sub>1).
-       infer uf (mono_env sid \<Gamma> @ sappe sp B) (RV n\<^sub>1) (sub_pend sp pd) b (Suc n\<^sub>1) \<bind>
-         (\<lambda>(s\<^sub>2, b', \<tau>\<^sub>b, pd\<^sub>2, n\<^sub>2).
-           (let s = s\<^sub>2 \<odot> sp; \<tau>\<^sub>a = sapp s\<^sub>2 (fn_ty \<tau>s)
-            in (if covers (sappe s B) \<tau>\<^sub>a [fn_pat ps]
-                then Some (s, EFn ps' b', TFn \<tau>\<^sub>a (sappr s\<^sub>2 (RV n\<^sub>1)) \<tau>\<^sub>b, pd\<^sub>2, n\<^sub>2)
-                else None))))\<close>
+     (case open_labels [fn_pat ps] of
+        None \<Rightarrow> None
+      | Some [] \<Rightarrow>
+          infer_pats uf B ps n \<bind> (\<lambda>(sp, ps', \<tau>s, \<Gamma>, n\<^sub>1).
+            infer uf (mono_env sid \<Gamma> @ sappe sp B) (RV n\<^sub>1) (sub_pend sp pd) b (Suc n\<^sub>1) \<bind>
+              (\<lambda>(s\<^sub>2, b', \<tau>\<^sub>b, pd\<^sub>2, n\<^sub>2).
+                (let s = s\<^sub>2 \<odot> sp; \<tau>\<^sub>a = sapp s\<^sub>2 (fn_ty \<tau>s)
+                 in (if covers (sappe s B) \<tau>\<^sub>a [fn_pat ps]
+                     then Some (s, EFn ps' b', TFn \<tau>\<^sub>a (sappr s\<^sub>2 (RV n\<^sub>1)) \<tau>\<^sub>b, pd\<^sub>2, n\<^sub>2)
+                     else None))))
+      | Some ls \<Rightarrow>
+          open_scrut uf (TV n) pd ls (Suc n) \<bind> (\<lambda>(so, evs, \<tau>\<^sub>t, pdo, n\<^sub>1).
+            infer_pat uf (sappe so B) (open_arm ls (fn_pat ps)) n\<^sub>1 \<bind> (\<lambda>(sp, p', \<tau>\<^sub>p, \<Gamma>, n\<^sub>2).
+              uni uf (sapp sp \<tau>\<^sub>t) \<tau>\<^sub>p n\<^sub>2 \<bind> (\<lambda>(s\<^sub>1, n\<^sub>3).
+                (let s = s\<^sub>1 \<odot> sp \<odot> so in
+                 infer uf (mono_env s\<^sub>1 \<Gamma> @ sappe s B) (RV n\<^sub>3) (sub_pend (s\<^sub>1 \<odot> sp) pdo) b (Suc n\<^sub>3)
+                   \<bind> (\<lambda>(s\<^sub>2, b', \<tau>\<^sub>b, pd\<^sub>2, n\<^sub>4).
+                     (let s' = s\<^sub>2 \<odot> s
+                      in (if covers (sappe s' B) (sapp (s\<^sub>2 \<odot> s\<^sub>1) \<tau>\<^sub>p) [open_arm ls (fn_pat ps)]
+                          then Some (s', open_fn evs p' b',
+                                     TFn (sapp s' (TV n)) (sappr s\<^sub>2 (RV n\<^sub>3)) \<tau>\<^sub>b, pd\<^sub>2, n\<^sub>4)
+                          else None))))))))\<close>
 | \<open>infer uf B A pd (EFnMod b e) n =
      sig_stat B n (mbind_sig b) \<bind> (\<lambda>((T, E), _).
        dep_env B n (mbind_sig b) (length T) \<bind> (\<lambda>(K, E\<^sub>K, n\<^sub>2).
@@ -570,20 +612,35 @@ where
               else None)))))\<close>
 | \<open>infer uf B A pd (ELet p e b) n =
      infer uf B A pd e n \<bind> (\<lambda>(s\<^sub>1, e', \<tau>\<^sub>e, pd\<^sub>1, n\<^sub>1).
-       infer_pat uf (sappe s\<^sub>1 B) p n\<^sub>1 \<bind> (\<lambda>(sp, p', \<tau>\<^sub>p, \<Gamma>, n\<^sub>2).
-         uni uf (sapp sp \<tau>\<^sub>e) \<tau>\<^sub>p n\<^sub>2 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>3).
-           (let s = s\<^sub>2 \<odot> sp \<odot> s\<^sub>1; B' = sappe s B; A' = sappr s A; pd' = sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1;
-                \<tau>\<^sub>e' = sapp s\<^sub>2 \<tau>\<^sub>p;
-                (as, rs, reqs, pdr) =
-                  (if val_exp B e'
-                   then (if var_pat p \<and> length \<Gamma> = 1 then gen_off B' A' pd' n \<tau>\<^sub>e'
-                         else (case gen_p B' A' pd' n \<tau>\<^sub>e' of (as, rs) \<Rightarrow> (as, rs, [], pd')))
-                   else ({}, {}, [], pd'));
-                \<Gamma>' = map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>))))) \<Gamma>
-            in (if covers B' \<tau>\<^sub>e' [p] \<and> btv_list \<tau>\<^sub>e' = [] \<and> brv_list \<tau>\<^sub>e' = []
-                then infer uf (\<Gamma>' @ B') A' pdr b n\<^sub>3 \<bind> (\<lambda>(s\<^sub>3, b', \<tau>, pd\<^sub>3, n\<^sub>4).
-                       Some (s\<^sub>3 \<odot> s, ELet p' (ev_wrap reqs e') b', \<tau>, pd\<^sub>3, n\<^sub>4))
-                else None)))))\<close>
+       (case open_labels [p] of
+          None \<Rightarrow> None
+        | Some [] \<Rightarrow>
+            infer_pat uf (sappe s\<^sub>1 B) p n\<^sub>1 \<bind> (\<lambda>(sp, p', \<tau>\<^sub>p, \<Gamma>, n\<^sub>2).
+              uni uf (sapp sp \<tau>\<^sub>e) \<tau>\<^sub>p n\<^sub>2 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>3).
+                (let s = s\<^sub>2 \<odot> sp \<odot> s\<^sub>1; B' = sappe s B; A' = sappr s A;
+                     pd' = sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1; \<tau>\<^sub>e' = sapp s\<^sub>2 \<tau>\<^sub>p;
+                     (as, rs, reqs, pdr) =
+                       (if val_exp B e'
+                        then (if var_pat p \<and> length \<Gamma> = 1 then gen_off B' A' pd' n \<tau>\<^sub>e'
+                              else (case gen_p B' A' pd' n \<tau>\<^sub>e' of (as, rs) \<Rightarrow> (as, rs, [], pd')))
+                        else ({}, {}, [], pd'));
+                     \<Gamma>' = map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>))))) \<Gamma>
+                 in (if covers B' \<tau>\<^sub>e' [p] \<and> btv_list \<tau>\<^sub>e' = [] \<and> brv_list \<tau>\<^sub>e' = []
+                     then infer uf (\<Gamma>' @ B') A' pdr b n\<^sub>3 \<bind> (\<lambda>(s\<^sub>3, b', \<tau>, pd\<^sub>3, n\<^sub>4).
+                            Some (s\<^sub>3 \<odot> s, ELet p' (ev_wrap reqs e') b', \<tau>, pd\<^sub>3, n\<^sub>4))
+                     else None))))
+        | Some ls \<Rightarrow>
+            open_scrut uf \<tau>\<^sub>e pd\<^sub>1 ls n\<^sub>1 \<bind> (\<lambda>(so, evs, \<tau>\<^sub>t, pdo, n\<^sub>2).
+              infer_pat uf (sappe (so \<odot> s\<^sub>1) B) (open_arm ls p) n\<^sub>2 \<bind> (\<lambda>(sp, p', \<tau>\<^sub>p, \<Gamma>, n\<^sub>3).
+                uni uf (sapp sp \<tau>\<^sub>t) \<tau>\<^sub>p n\<^sub>3 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>4).
+                  (let s = s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1; B' = sappe s B; A' = sappr s A;
+                       pd' = sub_pend (s\<^sub>2 \<odot> sp) pdo; \<tau>\<^sub>t' = sapp s\<^sub>2 \<tau>\<^sub>p;
+                       (as, rs) = (if val_exp B e' then gen_p B' A' pd' n \<tau>\<^sub>t' else ({}, {}));
+                       \<Gamma>' = map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (sapp s\<^sub>2 \<tau>)))) \<Gamma>
+                   in (if covers B' \<tau>\<^sub>t' [open_arm ls p] \<and> btv_list \<tau>\<^sub>t' = [] \<and> brv_list \<tau>\<^sub>t' = []
+                       then infer uf (\<Gamma>' @ B') A' pd' b n\<^sub>4 \<bind> (\<lambda>(s\<^sub>3, b', \<tau>, pd\<^sub>3, n\<^sub>5).
+                              Some (s\<^sub>3 \<odot> s, open_let p' e' evs b', \<tau>, pd\<^sub>3, n\<^sub>5))
+                       else None)))))))\<close>
 | \<open>infer uf B A pd (ESeq e\<^sub>1 e\<^sub>2) n =
      infer uf B A pd e\<^sub>1 n \<bind> (\<lambda>(s\<^sub>1, e\<^sub>1', \<tau>\<^sub>1, pd\<^sub>1, n\<^sub>1).
        infer uf (sappe s\<^sub>1 B) (sappr s\<^sub>1 A) pd\<^sub>1 e\<^sub>2 n\<^sub>1 \<bind> (\<lambda>(s\<^sub>2, e\<^sub>2', \<tau>, pd\<^sub>2, n\<^sub>2).
@@ -607,11 +664,22 @@ where
               Some (s\<^sub>4 \<odot> s\<^sub>3 \<odot> s, EIf c' t' None, unit_ty, sub_pend s\<^sub>4 pd\<^sub>3, n\<^sub>4))))))\<close>
 | \<open>infer uf B A pd (EMatch e arms) n =
      infer uf B A pd e n \<bind> (\<lambda>(s\<^sub>1, e', \<tau>\<^sub>0, pd\<^sub>1, n\<^sub>1).
-       infer_arms uf (sappe s\<^sub>1 B) (sappr s\<^sub>1 A) pd\<^sub>1 \<tau>\<^sub>0 (TV n\<^sub>1) arms (Suc n\<^sub>1) \<bind>
-         (\<lambda>(s\<^sub>2, arms', pd\<^sub>2, n\<^sub>2).
-           (if covers (sappe (s\<^sub>2 \<odot> s\<^sub>1) B) (sapp s\<^sub>2 \<tau>\<^sub>0) (map fst arms)
-            then Some (s\<^sub>2 \<odot> s\<^sub>1, EMatch e' arms', sapp s\<^sub>2 (TV n\<^sub>1), pd\<^sub>2, n\<^sub>2)
-            else None)))\<close>
+       (case open_labels (map fst arms) of
+          None \<Rightarrow> None
+        | Some [] \<Rightarrow>
+            infer_arms uf (sappe s\<^sub>1 B) (sappr s\<^sub>1 A) pd\<^sub>1 \<tau>\<^sub>0 (TV n\<^sub>1) arms (Suc n\<^sub>1) \<bind>
+              (\<lambda>(s\<^sub>2, arms', pd\<^sub>2, n\<^sub>2).
+                (if covers (sappe (s\<^sub>2 \<odot> s\<^sub>1) B) (sapp s\<^sub>2 \<tau>\<^sub>0) (map fst arms)
+                 then Some (s\<^sub>2 \<odot> s\<^sub>1, EMatch e' arms', sapp s\<^sub>2 (TV n\<^sub>1), pd\<^sub>2, n\<^sub>2)
+                 else None))
+        | Some ls \<Rightarrow>
+            open_scrut uf \<tau>\<^sub>0 pd\<^sub>1 ls n\<^sub>1 \<bind> (\<lambda>(so, evs, \<tau>\<^sub>t, pdo, n\<^sub>2).
+              (let s = so \<odot> s\<^sub>1 in
+               infer_arms uf (sappe s B) (sappr s A) pdo \<tau>\<^sub>t (TV n\<^sub>2) (open_arms ls arms) (Suc n\<^sub>2) \<bind>
+                 (\<lambda>(s\<^sub>2, arms', pd\<^sub>2, n\<^sub>3).
+                   (if covers (sappe (s\<^sub>2 \<odot> s) B) (sapp s\<^sub>2 \<tau>\<^sub>t) (map fst (open_arms ls arms))
+                    then Some (s\<^sub>2 \<odot> s, open_match e' evs arms', sapp s\<^sub>2 (TV n\<^sub>2), pd\<^sub>2, n\<^sub>3)
+                    else None))))))\<close>
 | \<open>infer uf B A pd (EHandle e cls) n =
      (if list_all (plain_eff B) (hlabels B cls) then
         infer uf B (canon_row (rext (hlabels B cls) A)) pd e n \<bind> (\<lambda>(s\<^sub>1, e', \<tau>\<^sub>0, pd\<^sub>1, n\<^sub>1).

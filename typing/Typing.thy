@@ -164,23 +164,63 @@ fun enrich :: \<open>tenv \<Rightarrow> tenv \<Rightarrow> bool\<close> where
      ((case map_of E x of Some (TEstr E\<^sub>2) \<Rightarrow> enrich E\<^sub>2 E\<^sub>1 | _ \<Rightarrow> False) \<and> enrich E r)\<close>
 | \<open>enrich E (_ # r) = False\<close>
 
-text \<open>The sealed environment: the signature's entries, with the structure's
-  labels and fixities.\<close>
+text \<open>Hidden predicates \<^cite>\<open>\<open>Sect. 8\<close> in leijen2005\<close>: a signature never mentions
+  evidence, so sealing compares a value against its specification modulo the
+  \<^const>\<open>TOff\<close> prefix of its scheme and transports the prefix onto the sealed
+  scheme, whose instantiations then apply the evidence the structure's value
+  expects. Matching the prefix-free body against the realised specification
+  instantiates the bound variables of the prefix. A functor parameter or an
+  implicit instance is compared strictly, by \<^const>\<open>enrich\<close> alone, since its body
+  is elaborated against the signature, without evidence.\<close>
 
-fun seal_env :: \<open>tenv \<Rightarrow> tenv \<Rightarrow> tenv\<close> where
-  \<open>seal_env E [] = []\<close>
-| \<open>seal_env E ((x, TEval \<sigma>) # r) =
-     (x, case map_of E x of Some (TEffi s _) \<Rightarrow> TEffi s \<sigma> | _ \<Rightarrow> TEval \<sigma>) # seal_env E r\<close>
-| \<open>seal_env E ((x, TEop l ps t\<^sub>1 t\<^sub>2) # r) =
-     (x, TEop (case map_of E x of Some (TEop l' _ _ _) \<Rightarrow> l' | _ \<Rightarrow> l) ps t\<^sub>1 t\<^sub>2) # seal_env E r\<close>
-| \<open>seal_env E ((x, TEeff l ls ar) # r) =
+fun offs_of :: \<open>kty \<Rightarrow> (name \<times> kty) list \<times> kty\<close> where
+  \<open>offs_of (TOff x r t) = (case offs_of t of (rs, u) \<Rightarrow> ((x, r) # rs, u))\<close>
+| \<open>offs_of t = ([], t)\<close>
+
+fun sch_map :: \<open>(kty \<Rightarrow> kty) \<Rightarrow> scheme \<Rightarrow> scheme\<close> where
+  \<open>sch_map f (Sch t) = Sch (f t)\<close>
+| \<open>sch_map f (Mono t) = Mono (f t)\<close>
+
+fun strip_env :: \<open>tenv \<Rightarrow> tenv\<close> where
+  \<open>strip_env [] = []\<close>
+| \<open>strip_env ((x, TEval \<sigma>) # r) = (x, TEval (sch_map (snd \<circ> offs_of) \<sigma>)) # strip_env r\<close>
+| \<open>strip_env ((x, TEstr E) # r) = (x, TEstr (strip_env E)) # strip_env r\<close>
+| \<open>strip_env (e # r) = e # strip_env r\<close>
+
+definition transport :: \<open>scheme \<Rightarrow> scheme \<Rightarrow> scheme \<Rightarrow> scheme\<close> where
+  \<open>transport \<sigma>' \<sigma>\<^sub>\<phi> \<sigma> =
+     (case offs_of (sch_body \<sigma>') of (rs, t') \<Rightarrow>
+        (case tmatch t' (sch_body \<sigma>\<^sub>\<phi>) (Map.empty, Map.empty) of
+           Some (\<theta>, \<rho>) \<Rightarrow>
+             (let \<theta>' = (\<lambda>a. case \<theta> a of Some u \<Rightarrow> u | None \<Rightarrow> TB a);
+                  \<rho>' = (\<lambda>v. case \<rho> v of Some w \<Rightarrow> w | None \<Rightarrow> RB v)
+              in sch_map (\<lambda>t. foldr (\<lambda>(x, r). TOff x (bsubst \<theta>' \<rho>' r)) rs t) \<sigma>)
+         | None \<Rightarrow> \<sigma>))\<close>
+
+text \<open>The sealed environment: the signature's, with the structure's foreign symbols,
+  effect labels and fixities, and its evidence prefixes transported.\<close>
+
+fun seal_env :: \<open>tenv \<Rightarrow> tenv \<Rightarrow> tenv \<Rightarrow> tenv\<close> where
+  \<open>seal_env E E\<^sub>\<phi> [] = []\<close>
+| \<open>seal_env E E\<^sub>\<phi> ((x, TEval \<sigma>) # r) =
+     (x, case (map_of E x, map_of E\<^sub>\<phi> x) of
+           (Some (TEffi s _), _) \<Rightarrow> TEffi s \<sigma>
+         | (Some (TEval \<sigma>'), Some (TEval \<sigma>\<^sub>\<phi>)) \<Rightarrow> TEval (transport \<sigma>' \<sigma>\<^sub>\<phi> \<sigma>)
+         | _ \<Rightarrow> TEval \<sigma>) # seal_env E E\<^sub>\<phi> r\<close>
+| \<open>seal_env E E\<^sub>\<phi> ((x, TEop l ps t\<^sub>1 t\<^sub>2) # r) =
+     (x, TEop (case map_of E x of Some (TEop l' _ _ _) \<Rightarrow> l' | _ \<Rightarrow> l) ps t\<^sub>1 t\<^sub>2) #
+     seal_env E E\<^sub>\<phi> r\<close>
+| \<open>seal_env E E\<^sub>\<phi> ((x, TEeff l ls ar) # r) =
      (x, case map_of E x of Some (TEeff l' ls' _) \<Rightarrow> TEeff l' ls' ar | _ \<Rightarrow> TEeff l ls ar)
-     # seal_env E r\<close>
-| \<open>seal_env E ((x, TEfix f p) # r) =
-     (x, case map_of E x of Some (TEfix f' p') \<Rightarrow> TEfix f' p' | _ \<Rightarrow> TEfix f p) # seal_env E r\<close>
-| \<open>seal_env E ((x, TEstr E\<^sub>1) # r) =
-     (x, TEstr (case map_of E x of Some (TEstr E\<^sub>2) \<Rightarrow> seal_env E\<^sub>2 E\<^sub>1 | _ \<Rightarrow> E\<^sub>1)) # seal_env E r\<close>
-| \<open>seal_env E (e # r) = e # seal_env E r\<close>
+     # seal_env E E\<^sub>\<phi> r\<close>
+| \<open>seal_env E E\<^sub>\<phi> ((x, TEfix f p) # r) =
+     (x, case map_of E x of Some (TEfix f' p') \<Rightarrow> TEfix f' p' | _ \<Rightarrow> TEfix f p) #
+     seal_env E E\<^sub>\<phi> r\<close>
+| \<open>seal_env E E\<^sub>\<phi> ((x, TEstr E\<^sub>1) # r) =
+     (x, TEstr (case (map_of E x, map_of E\<^sub>\<phi> x) of
+                  (Some (TEstr E\<^sub>2), Some (TEstr E\<^sub>3)) \<Rightarrow> seal_env E\<^sub>2 E\<^sub>3 E\<^sub>1 | _ \<Rightarrow> E\<^sub>1)) #
+     seal_env E E\<^sub>\<phi> r\<close>
+| \<open>seal_env E E\<^sub>\<phi> (e # r) = e # seal_env E E\<^sub>\<phi> r\<close>
 
 text \<open>A module parameter exports its values and structures to the body,
   constructors demoted to values; neither operations nor fixities travel
@@ -740,9 +780,9 @@ definition seal_stat :: \<open>tenv \<Rightarrow> nat \<Rightarrow> msig \<Right
   \<open>seal_stat B n sg E =
      sig_stat B n sg \<bind> (\<lambda>((T, E\<^sub>1), n\<^sub>1).
        match_sig E T E\<^sub>1 \<bind> (\<lambda>\<phi>.
-         (let K = [n\<^sub>1 ..< n\<^sub>1 + length T]
-          in if enrich E (real_env \<phi> E\<^sub>1) \<and> sig_ok_seal T K E\<^sub>1
-             then (let E' = seal_env E (real_env (rename_stamps E\<^sub>1 T K) E\<^sub>1)
+         (let K = [n\<^sub>1 ..< n\<^sub>1 + length T]; E\<^sub>\<phi> = real_env \<phi> E\<^sub>1
+          in if enrich (strip_env E) E\<^sub>\<phi> \<and> sig_ok_seal T K E\<^sub>1
+             then (let E' = seal_env E E\<^sub>\<phi> (real_env (rename_stamps E\<^sub>1 T K) E\<^sub>1)
                    in Some (E' @ hidden_effs E E', n\<^sub>1 + length T))
              else None)))\<close>
 
@@ -1020,8 +1060,11 @@ text \<open>A closed record pattern elaborates to the one listing its fields in 
 definition rec_pat :: \<open>(nm \<times> mpat) list \<Rightarrow> mpatom\<close> where
   \<open>rec_pat fs = PRec (sort_key (n_txt \<circ> fst) fs) False\<close>
 
+definition sel_path :: matom where
+  \<open>sel_path = APath (MkPath [mk_nm (str ''%sel'')])\<close>
+
 definition sel_atom :: \<open>matom \<Rightarrow> matom \<Rightarrow> matom\<close> where
-  \<open>sel_atom a ev = AParen [ESpine [APath (MkPath [mk_nm (str ''%sel'')]), a, ev]]\<close>
+  \<open>sel_atom a ev = AParen [ESpine [sel_path, a, ev]]\<close>
 
 definition off_var :: \<open>name \<Rightarrow> matom\<close> where
   \<open>off_var v = APath (MkPath [mk_nm v])\<close>
@@ -1036,6 +1079,14 @@ text \<open>The evidence arguments of an instantiation: the scheme body's prefix
 inductive wt_evs :: \<open>tenv \<Rightarrow> kty \<Rightarrow> matom list \<Rightarrow> kty \<Rightarrow> bool\<close> where
   Evs_nil: \<open>\<forall>x r t. \<tau> \<noteq> TOff x r t \<Longrightarrow> wt_evs B \<tau> [] \<tau>\<close>
 | Evs_cons: \<open>wt_ev B x r ev \<Longrightarrow> wt_evs B \<tau> evs \<tau>' \<Longrightarrow> wt_evs B (TOff x r \<tau>) (ev # evs) \<tau>'\<close>
+
+text \<open>The evidence of an open pattern's labels in a scrutinee of type \<open>r\<close>, with the
+  fields' types.\<close>
+
+inductive wt_offs :: \<open>tenv \<Rightarrow> name list \<Rightarrow> kty \<Rightarrow> matom list \<Rightarrow> kty list \<Rightarrow> bool\<close> where
+  Offs_nil: \<open>wt_offs B [] r [] []\<close>
+| Offs_cons: \<open>fpull l r = Some (\<tau>, r') \<Longrightarrow> wt_ev B l r ev \<Longrightarrow> wt_offs B ls r evs \<tau>s \<Longrightarrow>
+             wt_offs B (l # ls) r (ev # evs) (\<tau> # \<tau>s)\<close>
 
 text \<open>The requests a binding abstracts: each an evidence variable, a label and a
   record type. They prefix the binding's scheme, are in scope while its right-hand
@@ -1065,6 +1116,62 @@ definition ev_bind :: \<open>nm \<Rightarrow> reqs \<Rightarrow> expr \<Rightarr
 fun var_pat :: \<open>mpat \<Rightarrow> bool\<close> where
   \<open>var_pat (PatApp [PQid (MkPath [x])]) = True\<close>
 | \<open>var_pat p = False\<close>
+
+text \<open>An open record pattern at the top of a \<open>match\<close> arm, a \<open>let\<close> or a \<open>fn\<close> needs
+  its record closed at the binding, and a pattern carries no evidence. So the
+  \<open>match\<close> is elaborated once, over the union \<open>ls\<close> of the labels its open patterns
+  name: the scrutinee is bound to \<open>%r\<close> and matched as the tuple of its selected
+  fields and itself, \<open>(%sel %r ev\<^sub>1, \<dots>, %sel %r ev\<^sub>n, %r)\<close>, one evidence per
+  label. An open pattern becomes the tuple pattern with its sub-patterns at their
+  labels' positions, wildcards elsewhere and its \<open>as\<close> name, if any, on the last
+  component; every other arm pattern becomes \<open>(_, \<dots>, _, p)\<close>. A \<open>let\<close> or a
+  \<open>fn\<close> is the one-arm case. An open pattern below a constructor, tuple or list
+  pattern has no rule.\<close>
+
+fun open_top :: \<open>mpat \<Rightarrow> ((nm \<times> mpat) list \<times> nm option) option\<close> where
+  \<open>open_top (PatApp [PRec fs True]) = Some (fs, None)\<close>
+| \<open>open_top (PatAs (PatApp [PRec fs True]) x) = Some (fs, Some x)\<close>
+| \<open>open_top p = None\<close>
+
+definition open_labels :: \<open>mpat list \<Rightarrow> name list option\<close> where
+  \<open>open_labels ps =
+     (let fss = map (\<lambda>p. case open_top p of Some (fs, _) \<Rightarrow> map (n_txt \<circ> fst) fs | None \<Rightarrow> []) ps
+      in if list_all distinct fss then Some (remdups (sort (concat fss))) else None)\<close>
+
+definition pvar :: \<open>name \<Rightarrow> mpat\<close> where
+  \<open>pvar v = PatApp [PQid (MkPath [mk_nm v])]\<close>
+
+definition wild_pat :: mpat where
+  \<open>wild_pat = PatApp [PWild (mk_nm (str ''_''))]\<close>
+
+definition open_arm :: \<open>name list \<Rightarrow> mpat \<Rightarrow> mpat\<close> where
+  \<open>open_arm ls p =
+     (case open_top p of
+        Some (fs, x) \<Rightarrow>
+          PatApp [PParen (map (\<lambda>l. case find (\<lambda>(y, _). n_txt y = l) fs of
+                                   Some (_, q) \<Rightarrow> q | None \<Rightarrow> wild_pat) ls @
+                          [case x of None \<Rightarrow> wild_pat | Some y \<Rightarrow> PatApp [PQid (MkPath [y])]])]
+      | None \<Rightarrow> PatApp [PParen (replicate (length ls) wild_pat @ [p])])\<close>
+
+definition open_arms :: \<open>name list \<Rightarrow> (mpat \<times> expr) list \<Rightarrow> (mpat \<times> expr) list\<close> where
+  \<open>open_arms ls arms = map (\<lambda>(p, b). (open_arm ls p, b)) arms\<close>
+
+definition rec_var :: name where
+  \<open>rec_var = str ''%r''\<close>
+
+definition sel_tuple :: \<open>matom list \<Rightarrow> expr\<close> where
+  \<open>sel_tuple evs =
+     ESpine [AParen (map (\<lambda>ev. ESpine [sel_path, off_var rec_var, ev]) evs @
+                     [ESpine [off_var rec_var]])]\<close>
+
+definition open_match :: \<open>expr \<Rightarrow> matom list \<Rightarrow> (mpat \<times> expr) list \<Rightarrow> expr\<close> where
+  \<open>open_match e evs arms = ELet (pvar rec_var) e (EMatch (sel_tuple evs) arms)\<close>
+
+definition open_let :: \<open>mpat \<Rightarrow> expr \<Rightarrow> matom list \<Rightarrow> expr \<Rightarrow> expr\<close> where
+  \<open>open_let p e evs b = ELet (pvar rec_var) e (ELet p (sel_tuple evs) b)\<close>
+
+definition open_fn :: \<open>matom list \<Rightarrow> mpat \<Rightarrow> expr \<Rightarrow> expr\<close> where
+  \<open>open_fn evs p b = EFn [pvar rec_var] (ELet p (sel_tuple evs) b)\<close>
 
 inductive wtp :: \<open>tenv \<Rightarrow> mpat \<Rightarrow> mpat \<Rightarrow> kty \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
   wtpa :: \<open>tenv \<Rightarrow> mpatom \<Rightarrow> mpatom \<Rightarrow> kty \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
@@ -1292,22 +1399,36 @@ where
 | W_ann:   \<open>B,\<epsilon> \<turnstile> e \<leadsto> e' : \<tau> \<Longrightarrow> ty_stat B True ([], []) n ty = Some (\<tau>\<^sub>a, ve, n') \<Longrightarrow>
             close_sch (set [n ..< n']) (set [n ..< n']) (ann_ty B \<tau> \<tau>\<^sub>a) \<succeq> \<tau>' \<Longrightarrow> \<tau>' \<simeq> \<tau> \<Longrightarrow>
             B,\<epsilon> \<turnstile> EAnn e ty \<leadsto> EAnn e' ty : \<tau>\<close>
-| W_fn:    \<open>wtps B ps ps' \<tau>s \<Gamma> \<Longrightarrow> covers B (fn_ty \<tau>s) [fn_pat ps] \<Longrightarrow>
+| W_fn:    \<open>open_labels [fn_pat ps] = Some [] \<Longrightarrow> wtps B ps ps' \<tau>s \<Gamma> \<Longrightarrow>
+            covers B (fn_ty \<tau>s) [fn_pat ps] \<Longrightarrow>
             (binders \<Gamma> @ B),\<epsilon>' \<turnstile> b \<leadsto> b' : \<tau>\<^sub>b \<Longrightarrow>
             B,\<epsilon> \<turnstile> EFn ps b \<leadsto> EFn ps' b' : TFn (fn_ty \<tau>s) \<epsilon>' \<tau>\<^sub>b\<close>
+| W_fnrec: \<open>open_labels [fn_pat ps] = Some ls \<Longrightarrow> ls \<noteq> [] \<Longrightarrow> wt_offs B ls \<tau>\<^sub>a evs \<tau>s \<Longrightarrow>
+            wtp B (open_arm ls (fn_pat ps)) p' \<tau>\<^sub>p \<Gamma> \<Longrightarrow> \<tau>\<^sub>p \<simeq> tuple (\<tau>s @ [\<tau>\<^sub>a]) \<Longrightarrow>
+            covers B \<tau>\<^sub>p [open_arm ls (fn_pat ps)] \<Longrightarrow>
+            (binders \<Gamma> @ B),\<epsilon>' \<turnstile> b \<leadsto> b' : \<tau>\<^sub>b \<Longrightarrow>
+            B,\<epsilon> \<turnstile> EFn ps b \<leadsto> open_fn evs p' b' : TFn \<tau>\<^sub>a \<epsilon>' \<tau>\<^sub>b\<close>
 | W_fnmod: \<open>dep_env B n (mbind_sig b) m = Some (K, E, n') \<Longrightarrow>
             set K \<inter> ktv_env B = {} \<Longrightarrow> E\<^sub>K = param_env E \<Longrightarrow>
             ((mbind_nm b, if is_imp b then TEinst E\<^sub>K else TEstr E\<^sub>K) # B),\<epsilon>' \<turnstile> e \<leadsto> e' : \<tau> \<Longrightarrow>
             named_sig (mbind_sig b) \<Longrightarrow> nm_ok (mbind_nm b) \<Longrightarrow>
             B,\<epsilon> \<turnstile> EFnMod b e \<leadsto> EFnMod b e' : TDep (is_imp b) (mbind_sig b) m \<epsilon>' (kclose K \<tau>)\<close>
-| W_let:   \<open>(ev_env reqs @ B),\<epsilon> \<turnstile> e \<leadsto> e' : \<tau>\<^sub>e \<Longrightarrow> wtp B p p' \<tau>\<^sub>p \<Gamma> \<Longrightarrow> \<tau>\<^sub>p \<simeq> \<tau>\<^sub>e \<Longrightarrow>
-            covers B \<tau>\<^sub>e [p] \<Longrightarrow>
+| W_let:   \<open>(ev_env reqs @ B),\<epsilon> \<turnstile> e \<leadsto> e' : \<tau>\<^sub>e \<Longrightarrow> open_labels [p] = Some [] \<Longrightarrow>
+            wtp B p p' \<tau>\<^sub>p \<Gamma> \<Longrightarrow> \<tau>\<^sub>p \<simeq> \<tau>\<^sub>e \<Longrightarrow> covers B \<tau>\<^sub>e [p] \<Longrightarrow>
             as \<inter> ftv_env B = {} \<Longrightarrow> rs \<inter> frv_env B = {} \<Longrightarrow> rs \<inter> frv_row \<epsilon> = {} \<Longrightarrow>
             (as = {} \<and> rs = {}) \<or> val_exp B e' \<Longrightarrow>
             reqs = [] \<or> (val_exp B e' \<and> var_pat p \<and> length \<Gamma> = 1) \<Longrightarrow> distinct (map fst reqs) \<Longrightarrow>
             (map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (offs reqs \<tau>)))) \<Gamma> @ B),\<epsilon> \<turnstile> b \<leadsto> b' : \<tau> \<Longrightarrow>
             btv \<tau>\<^sub>p = {} \<Longrightarrow> brv \<tau>\<^sub>p = {} \<Longrightarrow>
             B,\<epsilon> \<turnstile> ELet p e b \<leadsto> ELet p' (ev_wrap reqs e') b' : \<tau>\<close>
+| W_letrec: \<open>B,\<epsilon> \<turnstile> e \<leadsto> e' : \<tau>\<^sub>e \<Longrightarrow> open_labels [p] = Some ls \<Longrightarrow> ls \<noteq> [] \<Longrightarrow>
+            wt_offs B ls \<tau>\<^sub>e evs \<tau>s \<Longrightarrow> wtp B (open_arm ls p) p' \<tau>\<^sub>p \<Gamma> \<Longrightarrow>
+            \<tau>\<^sub>p \<simeq> tuple (\<tau>s @ [\<tau>\<^sub>e]) \<Longrightarrow> covers B \<tau>\<^sub>p [open_arm ls p] \<Longrightarrow>
+            as \<inter> ftv_env B = {} \<Longrightarrow> rs \<inter> frv_env B = {} \<Longrightarrow> rs \<inter> frv_row \<epsilon> = {} \<Longrightarrow>
+            (as = {} \<and> rs = {}) \<or> val_exp B e' \<Longrightarrow>
+            (map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs \<tau>))) \<Gamma> @ B),\<epsilon> \<turnstile> b \<leadsto> b' : \<tau> \<Longrightarrow>
+            btv \<tau>\<^sub>p = {} \<Longrightarrow> brv \<tau>\<^sub>p = {} \<Longrightarrow>
+            B,\<epsilon> \<turnstile> ELet p e b \<leadsto> open_let p' e' evs b' : \<tau>\<close>
 | W_letfun: \<open>cls \<noteq> [] \<Longrightarrow> r = foldr EFnMod mbs (dfun_rhs cls) \<Longrightarrow> is_fn r \<Longrightarrow>
             (ev_env reqs @ (n_txt f, TEval (kmono \<tau>)) # B),\<epsilon> \<turnstile> r \<leadsto> r' : \<tau>' \<Longrightarrow> \<tau>' \<simeq> \<tau> \<Longrightarrow>
             as \<inter> ftv_env B = {} \<Longrightarrow> rs \<inter> frv_env B = {} \<Longrightarrow> rs \<inter> frv_row \<epsilon> = {} \<Longrightarrow>
@@ -1322,9 +1443,14 @@ where
 | W_if1:   \<open>B,\<epsilon> \<turnstile> c \<leadsto> c' : \<tau>\<^sub>c \<Longrightarrow> \<tau>\<^sub>c \<simeq> TC bool_ty [] \<Longrightarrow>
             B,\<epsilon> \<turnstile> t \<leadsto> t' : \<tau> \<Longrightarrow> \<tau> \<simeq> unit_ty \<Longrightarrow>
             B,\<epsilon> \<turnstile> EIf c t None \<leadsto> EIf c' t' None : unit_ty\<close>
-| W_match: \<open>B,\<epsilon> \<turnstile> e \<leadsto> e' : \<tau>\<^sub>0 \<Longrightarrow> wt_arms B \<epsilon> \<tau>\<^sub>0 arms arms' \<tau> \<Longrightarrow>
-            covers B \<tau>\<^sub>0 (map fst arms) \<Longrightarrow>
+| W_match: \<open>B,\<epsilon> \<turnstile> e \<leadsto> e' : \<tau>\<^sub>0 \<Longrightarrow> open_labels (map fst arms) = Some [] \<Longrightarrow>
+            wt_arms B \<epsilon> \<tau>\<^sub>0 arms arms' \<tau> \<Longrightarrow> covers B \<tau>\<^sub>0 (map fst arms) \<Longrightarrow>
             B,\<epsilon> \<turnstile> EMatch e arms \<leadsto> EMatch e' arms' : \<tau>\<close>
+| W_matchrec: \<open>B,\<epsilon> \<turnstile> e \<leadsto> e' : \<tau>\<^sub>0 \<Longrightarrow> open_labels (map fst arms) = Some ls \<Longrightarrow> ls \<noteq> [] \<Longrightarrow>
+            wt_offs B ls \<tau>\<^sub>0 evs \<tau>s \<Longrightarrow>
+            wt_arms B \<epsilon> (tuple (\<tau>s @ [\<tau>\<^sub>0])) (open_arms ls arms) arms' \<tau> \<Longrightarrow>
+            covers B (tuple (\<tau>s @ [\<tau>\<^sub>0])) (map fst (open_arms ls arms)) \<Longrightarrow>
+            B,\<epsilon> \<turnstile> EMatch e arms \<leadsto> open_match e' evs arms' : \<tau>\<close>
 | W_guards: \<open>alts \<noteq> [] \<Longrightarrow> wt_alts B \<epsilon> alts alts' \<tau> \<Longrightarrow>
             B,\<epsilon> \<turnstile> EGuards alts \<leadsto> EGuards alts' : \<tau>\<close>
 | W_handle: \<open>\<epsilon>\<^sub>0 \<approx> rext (hlabels B cls) \<epsilon> \<Longrightarrow> \<forall>lbl \<in> set (hlabels B cls). plain_eff B lbl \<Longrightarrow>
