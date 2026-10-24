@@ -1,14 +1,17 @@
 import { ChildProcess, execFile, spawn } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
 // find the caraml executable, set it up when it is missing.
 //
-// release CI publishes under the tag `v<version>` of the extension version
-//   caraml-<version>-<platform>-<arch>.tar.gz   (pre-built, `caraml` or `caraml.exe` inside)
-//   caraml-<version>.tar.gz                     (`cabal sdist` of haskell/)
+// the latest compiler release carries, independent of the extension version,
+//   caraml-<platform>-<arch>.tar.gz   (pre-built, `caraml` or `caraml.exe` inside)
+//   caraml-src.tar.gz                 (`cabal sdist` of haskell/)
 // with <platform>-<arch> as Node names them: linux-x64, darwin-arm64, win32-x64, ...
+//
+// downloads and builds install into $XDG_BIN_HOME, else ~/.local/bin (on Windows too)
 
 const repo = 'b4er/caraml';
 const exe = process.platform === 'win32' ? 'caraml.exe' : 'caraml';
@@ -26,7 +29,27 @@ interface Release {
 
 export function findServer(): string | undefined {
   const c = vscode.workspace.getConfiguration('caraml');
-  return c.get<string>('server.path') || process.env.CARAML_SERVER || onPath(exe);
+  return c.get<string>('server.path') || process.env.CARAML_SERVER || onPath(exe) || installed();
+}
+
+function binDir(): string {
+  return process.env.XDG_BIN_HOME || path.join(os.homedir(), '.local', 'bin');
+}
+
+// the binary a download or build installed, when it is not on PATH
+function installed(): string | undefined {
+  const file = path.join(binDir(), exe);
+  try {
+    fs.accessSync(file, fs.constants.X_OK);
+    return file;
+  } catch {
+    return undefined;
+  }
+}
+
+function onPathDir(dir: string): boolean {
+  const norm = (d: string) => path.resolve(d).toLowerCase();
+  return (process.env.PATH ?? '').split(path.delimiter).some((d) => d && norm(d) === norm(dir));
 }
 
 function onPath(name: string): string | undefined {
@@ -67,12 +90,20 @@ export async function setupServer(context: vscode.ExtensionContext, explicit = f
         return;
       }
     }
-    const file = await wizard(context);
-    if (file) {
+    const file = await wizard();
+    if (!file) {
+      return;
+    }
+    if (path.dirname(file) !== binDir()) {
       await vscode.workspace.getConfiguration('caraml')
         .update('server.path', file, vscode.ConfigurationTarget.Global);
       vscode.window.showInformationMessage(`CaraML: using ${file}.`);
+      return;
     }
+    await vscode.commands.executeCommand('caraml.restartServer');
+    vscode.window.showInformationMessage(onPathDir(binDir())
+      ? `CaraML: installed ${file}.`
+      : `CaraML: installed ${file}. Add ${binDir()} to PATH to run caraml from a shell.`);
   } catch (e) {
     if (e instanceof Error && e.name === 'AbortError') {
       return;
@@ -88,27 +119,25 @@ interface Choice extends vscode.QuickPickItem {
   missing?: { reason: string; help?: string };
 }
 
-async function wizard(context: vscode.ExtensionContext): Promise<string | undefined> {
-  const version: string = context.extension.packageJSON.version;
+async function wizard(): Promise<string | undefined> {
   const target = `${process.platform}-${process.arch}`;
 
   const [release, cabal, ghc] = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Window, title: 'CaraML: looking for a server' },
-    () => Promise.all([findRelease(version), toolVersion('cabal'), toolVersion('ghc')]),
+    () => Promise.all([findRelease(), toolVersion('cabal'), toolVersion('ghc')]),
   );
 
-  const binary = release?.assets.find((a) => a.name === `caraml-${version}-${target}.tar.gz`);
-  const sdist = release?.assets.find((a) => a.name === `caraml-${version}.tar.gz`);
-  const dir = path.join(context.globalStorageUri.fsPath, 'server', version);
+  const binary = release?.assets.find((a) => a.name === `caraml-${target}.tar.gz`);
+  const sdist = release?.assets.find((a) => a.name === 'caraml-src.tar.gz');
 
   const download: Choice = {
     label: '$(cloud-download) Download a pre-built server',
     description: binary ? `(caraml ${release!.tag_name} for ${target})` : undefined,
-    run: binary && (() => fetchBinary(binary, dir)),
+    run: binary && (() => fetchBinary(binary)),
     missing: binary ? undefined : {
       reason: release
         ? `Release ${release.tag_name} has no pre-built server for ${target}.`
-        : `No release of caraml ${version} could be reached.`,
+        : 'No release of caraml could be reached.',
       help: `https://github.com/${repo}/releases`,
     },
   };
@@ -117,9 +146,9 @@ async function wizard(context: vscode.ExtensionContext): Promise<string | undefi
   const build: Choice = {
     label: '$(tools) Build from source',
     description: cabalOk && ghc ? `(cabal ${cabal}, ghc ${ghc}; takes several minutes)` : undefined,
-    run: sdist && cabalOk && ghc ? () => buildSdist(sdist, dir) : undefined,
+    run: sdist && cabalOk && ghc ? () => buildSdist(sdist) : undefined,
     missing: !sdist ? {
-      reason: `No source release of caraml ${version} could be reached.`,
+      reason: release ? `Release ${release.tag_name} has no source archive.` : 'No release of caraml could be reached.',
       help: `https://github.com/${repo}/releases`,
     } : !cabalOk ? {
       reason: cabal ? `Building needs cabal 3 or later, found cabal ${cabal}.` : 'Building needs cabal 3 or later on PATH.',
@@ -159,21 +188,17 @@ async function wizard(context: vscode.ExtensionContext): Promise<string | undefi
   return undefined;
 }
 
-async function findRelease(version: string): Promise<Release | undefined> {
-  for (const which of [`tags/v${version}`, 'latest']) {
-    try {
-      const res = await fetch(`https://api.github.com/repos/${repo}/releases/${which}`, {
-        headers: { Accept: 'application/vnd.github+json' },
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (res.ok) {
-        return await res.json() as Release;
-      }
-    } catch {
-      // offline or rate limited
-    }
+async function findRelease(): Promise<Release | undefined> {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+      headers: { Accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    return res.ok ? await res.json() as Release : undefined;
+  } catch {
+    // offline or rate limited
+    return undefined;
   }
-  return undefined;
 }
 
 function toolVersion(tool: string): Promise<string | undefined> {
@@ -182,34 +207,48 @@ function toolVersion(tool: string): Promise<string | undefined> {
       resolve(err ? undefined : stdout.trim())));
 }
 
-async function unpack(asset: Asset, dir: string, signal?: AbortSignal): Promise<string> {
+// download and unpack into a fresh temporary directory, which the caller removes
+async function unpack(asset: Asset, signal?: AbortSignal): Promise<string> {
   const res = await fetch(asset.browser_download_url, { signal });
   if (!res.ok) {
     throw new Error(`downloading ${asset.name}: HTTP ${res.status}`);
   }
-  const out = path.join(dir, asset.name.replace(/\.tar\.gz$/, ''));
-  await fs.promises.rm(out, { recursive: true, force: true });
-  await fs.promises.mkdir(out, { recursive: true });
-  const archive = path.join(dir, asset.name);
+  const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'caraml-'));
+  const out = path.join(tmp, 'out');
+  await fs.promises.mkdir(out);
+  const archive = path.join(tmp, asset.name);
   await fs.promises.writeFile(archive, Buffer.from(await res.arrayBuffer()));
   await run('tar', ['-xzf', archive, '-C', out]);
-  await fs.promises.rm(archive, { force: true });
   return out;
 }
 
-async function fetchBinary(asset: Asset, dir: string): Promise<string | undefined> {
+async function removeTmp(out: string): Promise<void> {
+  await fs.promises.rm(path.dirname(out), { recursive: true, force: true });
+}
+
+async function fetchBinary(asset: Asset): Promise<string | undefined> {
   return vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: `CaraML: downloading ${asset.name}`, cancellable: true },
     async (_, token) => {
       const abort = new AbortController();
       token.onCancellationRequested(() => abort.abort());
-      const out = await unpack(asset, dir, abort.signal);
-      const file = await findFile(out, exe);
-      if (!file) {
-        throw new Error(`${asset.name} contains no ${exe}`);
+      const out = await unpack(asset, abort.signal);
+      try {
+        const file = await findFile(out, exe);
+        if (!file) {
+          throw new Error(`${asset.name} contains no ${exe}`);
+        }
+        // copy next to the target, then rename: the temporary directory may be on another
+        // file system, and a running server keeps its old binary
+        const dest = path.join(binDir(), exe);
+        await fs.promises.mkdir(binDir(), { recursive: true });
+        await fs.promises.copyFile(file, `${dest}.new`);
+        await fs.promises.chmod(`${dest}.new`, 0o755);
+        await fs.promises.rename(`${dest}.new`, dest);
+        return dest;
+      } finally {
+        await removeTmp(out);
       }
-      await fs.promises.chmod(file, 0o755);
-      return file;
     },
   );
 }
@@ -230,25 +269,31 @@ async function findFile(dir: string, name: string): Promise<string | undefined> 
 
 let log: vscode.OutputChannel | undefined;
 
-async function buildSdist(asset: Asset, dir: string): Promise<string | undefined> {
+async function buildSdist(asset: Asset): Promise<string | undefined> {
   log ??= vscode.window.createOutputChannel('CaraML Setup');
   log.show(true);
-  const bin = path.join(dir, 'bin');
+  const bin = binDir();
   return vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'CaraML: building caraml with cabal', cancellable: true },
     async (progress, token) => {
       const abort = new AbortController();
       token.onCancellationRequested(() => abort.abort());
       progress.report({ message: `downloading ${asset.name}` });
-      const out = await unpack(asset, dir, abort.signal);
-      // a cabal sdist unpacks to <package>-<version>/
-      const src = path.join(out, asset.name.replace(/\.tar\.gz$/, ''));
-      progress.report({ message: 'cabal install (see the CaraML Setup output)' });
-      await run('cabal', [
-        'install', 'exe:caraml',
-        `--installdir=${bin}`, '--install-method=copy', '--overwrite-policy=always',
-      ], { cwd: fs.existsSync(src) ? src : out, log, signal: abort.signal });
-      return path.join(bin, exe);
+      const out = await unpack(asset, abort.signal);
+      try {
+        // a cabal sdist unpacks to caraml-<version>/
+        const top = (await fs.promises.readdir(out)).find((e) => e.startsWith('caraml-'));
+        const src = top ? path.join(out, top) : out;
+        progress.report({ message: 'cabal install (see the CaraML Setup output)' });
+        await fs.promises.mkdir(bin, { recursive: true });
+        await run('cabal', [
+          'install', 'exe:caraml',
+          `--installdir=${bin}`, '--install-method=copy', '--overwrite-policy=always',
+        ], { cwd: src, log, signal: abort.signal });
+        return path.join(bin, exe);
+      } finally {
+        await removeTmp(out);
+      }
     },
   );
 }

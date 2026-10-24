@@ -2,7 +2,7 @@
 
 ;; Author: b4er
 ;; SPDX-License-Identifier: BSD-3-Clause
-;; Version: 0.0.0
+;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: languages
 
@@ -54,7 +54,7 @@
 
 (defcustom caraml-server-path nil
   "Path to the caraml executable; Eglot runs it as `caraml lsp'.
-Nil looks in $CARAML_SERVER, then PATH, then `caraml-setup-directory'."
+Nil looks in $CARAML_SERVER, then PATH, then `caraml-install-directory'."
   :type '(choice (const :tag "Look it up" nil) file))
 
 (defcustom caraml-server-args nil

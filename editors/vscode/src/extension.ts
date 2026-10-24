@@ -68,7 +68,8 @@ export function activate(context: vscode.ExtensionContext): void {
   registerAbbreviations(context);
   registerSymbols(context);
 
-  // without a server, offer to set one up; that writes `caraml.server.path`, which restarts
+  // without a server, offer to set one up; an install restarts, a located binary sets
+  // `caraml.server.path`, which restarts
   const start = async (explicit = false) => {
     const command = findServer();
     if (!command) {

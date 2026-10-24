@@ -2,7 +2,7 @@
   "name": "caraml",
   "displayName": "CaraML",
   "description": "Language support for CaraML backed by the language server.",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "publisher": "b4er",
   "license": "BSD-3-Clause",
   "icon": "images/caraml-logo.png",
@@ -48,7 +48,7 @@
         "caraml.server.path": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Path to the caraml executable (empty: `$CARAML_SERVER`, else `caraml` on PATH). When none is found, `CaraML: Set Up Language Server` offers to download or build one and sets this."
+          "markdownDescription": "Path to the caraml executable (empty: `$CARAML_SERVER`, else `caraml` on PATH, else in `$XDG_BIN_HOME` or `~/.local/bin`). When none is found, `CaraML: Set Up Language Server` offers to download or build one into `~/.local/bin`, or to locate one, which sets this."
         },
         "caraml.server.args": {
           "type": "array",

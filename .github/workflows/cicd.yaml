@@ -174,11 +174,9 @@ jobs:
       - name: Unpack sources
         id: unpack
         run: |
-          sdist=$(echo caraml-*.tar.gz)
-          version=${sdist#caraml-}; version=${version%.tar.gz}
-          echo "binary=caraml-$version-${{matrix.target}}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "binary=caraml-${{matrix.target}}.tar.gz" >> "$GITHUB_OUTPUT"
           mkdir pkg
-          tar -xzf "$sdist" -C pkg --strip-components=1
+          tar -xzf caraml-*.tar.gz -C pkg --strip-components=1
           cp haskell/cabal.project pkg/
 
       - id: hs
@@ -278,7 +276,7 @@ jobs:
         env:
           VERSION: vscode-v${{steps.versions.outputs.vscode}}
         run: |
-          npx --yes "@vscode/vsce@$VSCE" publish --azure-credential --packagePath caraml.vsix --skip-duplicate
+          # npx --yes "@vscode/vsce@$VSCE" publish --azure-credential --packagePath caraml.vsix --skip-duplicate
           # npx --yes "ovsx@$OVSX" publish caraml.vsix --skip-duplicate
 
           git tag "$VERSION" && git push origin "$VERSION"
@@ -305,7 +303,7 @@ jobs:
         run: |
           new() { git ls-remote --exit-code --tags origin "refs/tags/$1" > /dev/null && echo false || echo true; }
           v=$(sed -n 's/^version: *//p' haskell/caraml.cabal)
-          { echo "tag=v$v"; echo "new=$(new "v$v")"; } >> "$GITHUB_OUTPUT"
+          { echo "version=$v"; echo "tag=v$v"; echo "new=$(new "v$v")"; } >> "$GITHUB_OUTPUT"
 
       - if: steps.version.outputs.new == 'true'
         uses: actions/download-artifact@v8
@@ -313,6 +311,12 @@ jobs:
           path: dist
           merge-multiple: true
           pattern: "{sdist,caraml-*}"
+
+      - name: Name the source asset
+        if: steps.version.outputs.new == 'true'
+        env:
+          VERSION: ${{steps.version.outputs.version}}
+        run: mv dist/caraml-{"$VERSION",src}.tar.gz
 
       - name: Create release
         if: steps.version.outputs.new == 'true'

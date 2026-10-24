@@ -7,10 +7,12 @@
 
 ;; find the caraml executable, set it up when it is missing.
 ;;
-;; release CI publishes under the tag `v<version>` of the extension version
-;;   caraml-<version>-<platform>-<arch>.tar.gz   (pre-built, `caraml` or `caraml.exe` inside)
-;;   caraml-<version>.tar.gz                     (`cabal sdist` of haskell/)
+;; the latest compiler release carries, independent of the package version,
+;;   caraml-<platform>-<arch>.tar.gz   (pre-built, `caraml` or `caraml.exe` inside)
+;;   caraml-src.tar.gz                 (`cabal sdist` of haskell/)
 ;; with <platform>-<arch> as Node names them: linux-x64, darwin-arm64, win32-x64, ...
+;;
+;; downloads and builds install into `caraml-install-directory'.
 
 ;;; Code:
 
@@ -23,9 +25,6 @@
 (defvar url-http-response-status)
 (defvar url-http-end-of-headers)
 
-(defconst caraml-version "0.1.0"
-  "Version of the server this mode expects; keep in sync with the package.")
-
 (defconst caraml--repo "b4er/caraml")
 
 (defconst caraml--exe (if (eq system-type 'windows-nt) "caraml.exe" "caraml"))
@@ -35,19 +34,21 @@
   :type 'boolean
   :group 'caraml)
 
-(defcustom caraml-setup-directory (locate-user-emacs-file "caraml/")
-  "Directory for downloaded and built servers."
+(defcustom caraml-install-directory
+  (or (getenv "XDG_BIN_HOME")
+      (expand-file-name ".local/bin"
+                        (if (eq system-type 'windows-nt) (getenv "USERPROFILE") "~")))
+  "Directory the setup installs `caraml' into."
   :type 'directory
   :group 'caraml)
 
 (defun caraml--installed ()
-  "The server under `caraml-setup-directory' for `caraml-version'."
-  (expand-file-name (concat "server/" caraml-version "/bin/" caraml--exe)
-                    caraml-setup-directory))
+  "The server in `caraml-install-directory'."
+  (expand-file-name caraml--exe caraml-install-directory))
 
 (defun caraml-server ()
   "The caraml executable: `caraml-server-path', $CARAML_SERVER, PATH,
-then `caraml-setup-directory'.  Nil when there is none."
+then `caraml-install-directory'.  Nil when there is none."
   (or caraml-server-path
       (getenv "CARAML_SERVER")
       (executable-find "caraml")
@@ -80,21 +81,18 @@ Use it in `caraml-mode-hook' in place of `eglot-ensure'."
             (arch arch))))
 
 (defun caraml--find-release ()
-  "The GitHub release for `caraml-version', else the latest, else nil."
-  (cl-loop
-   for which in (list (concat "tags/v" caraml-version) "latest")
-   thereis
-   (ignore-errors
-     (let ((url-request-extra-headers '(("Accept" . "application/vnd.github+json")))
-           (buf (url-retrieve-synchronously
-                 (format "https://api.github.com/repos/%s/releases/%s" caraml--repo which)
-                 t nil 10)))
-       (unwind-protect
-           (with-current-buffer buf
-             (when (eq url-http-response-status 200)
-               (goto-char url-http-end-of-headers)
-               (json-parse-buffer :object-type 'alist :array-type 'list)))
-         (kill-buffer buf))))))
+  "The latest GitHub release, or nil."
+  (ignore-errors
+    (let ((url-request-extra-headers '(("Accept" . "application/vnd.github+json")))
+          (buf (url-retrieve-synchronously
+                (format "https://api.github.com/repos/%s/releases/latest" caraml--repo)
+                t nil 10)))
+      (unwind-protect
+          (with-current-buffer buf
+            (when (eq url-http-response-status 200)
+              (goto-char url-http-end-of-headers)
+              (json-parse-buffer :object-type 'alist :array-type 'list)))
+        (kill-buffer buf)))))
 
 (defun caraml--asset (release name)
   "Download URL of the asset NAME in RELEASE, or nil."
@@ -119,8 +117,8 @@ postpone or stop asking."
          (cabal (caraml--tool-version "cabal"))
          (ghc (caraml--tool-version "ghc"))
          (cabal-ok (and cabal (>= (string-to-number cabal) 3)))
-         (binary (caraml--asset release (format "caraml-%s-%s.tar.gz" caraml-version target)))
-         (sdist (caraml--asset release (format "caraml-%s.tar.gz" caraml-version)))
+         (binary (caraml--asset release (format "caraml-%s.tar.gz" target)))
+         (sdist (caraml--asset release "caraml-src.tar.gz"))
          (releases (format "https://github.com/%s/releases" caraml--repo))
          (ghcup "https://www.haskell.org/ghcup/")
          ;; (label run-or-nil reason help)
@@ -129,12 +127,13 @@ postpone or stop asking."
              ,(and binary (lambda () (caraml--fetch-binary binary)))
              ,(if release
                   (format "release %s has no pre-built server for %s" tag target)
-                (format "no release of caraml %s could be reached" caraml-version))
+                "no release of caraml could be reached")
              ,releases)
             ("Build from source"
              ,(and sdist cabal-ok ghc (lambda () (caraml--build sdist)))
              ,(cond ((not sdist)
-                     (format "no source release of caraml %s could be reached" caraml-version))
+                     (if release (format "release %s has no source archive" tag)
+                       "no release of caraml could be reached"))
                     ((not cabal-ok)
                      (if cabal (format "building needs cabal 3 or later, found cabal %s" cabal)
                        "building needs cabal 3 or later on PATH"))
@@ -186,12 +185,12 @@ postpone or stop asking."
         (eglot-ensure)))))
 
 (defun caraml--unpack (url)
-  "Download the .tar.gz at URL and unpack it into a fresh directory; return it."
-  (let* ((dir (expand-file-name (concat "server/" caraml-version "/") caraml-setup-directory))
+  "Download the .tar.gz at URL and unpack it into a fresh temporary directory.
+Return the directory; the caller deletes its parent."
+  (let* ((tmp (make-temp-file "caraml-" t))
          (name (file-name-nondirectory url))
-         (out (expand-file-name (string-remove-suffix ".tar.gz" name) dir))
-         (archive (expand-file-name name dir)))
-    (delete-directory out t)
+         (out (expand-file-name (string-remove-suffix ".tar.gz" name) tmp))
+         (archive (expand-file-name name tmp)))
     (make-directory out t)
     (message "CaraML: downloading %s..." name)
     (url-copy-file url archive t)
@@ -201,26 +200,42 @@ postpone or stop asking."
       (delete-file archive))
     out))
 
+(defun caraml--installed-message ()
+  "Report the install, and say so when it is not on PATH."
+  (message (if (member (file-name-as-directory (expand-file-name caraml-install-directory))
+                       (mapcar (lambda (d) (file-name-as-directory (expand-file-name d)))
+                               exec-path))
+               "CaraML: installed %s"
+             (format "CaraML: installed %%s; add %s to PATH to run caraml from a shell"
+                     caraml-install-directory))
+           (caraml--installed)))
+
 (defun caraml--fetch-binary (url)
   (let* ((out (caraml--unpack url))
-         (file (car (directory-files-recursively out (concat "\\`" (regexp-quote caraml--exe) "\\'"))))
          (dest (caraml--installed)))
-    (unless file
-      (error "%s contains no %s" (file-name-nondirectory url) caraml--exe))
-    (make-directory (file-name-directory dest) t)
-    (rename-file file dest t)
-    (set-file-modes dest #o755)
-    (delete-directory out t)
+    (unwind-protect
+        (let ((file (car (directory-files-recursively
+                          out (concat "\\`" (regexp-quote caraml--exe) "\\'")))))
+          (unless file
+            (error "%s contains no %s" (file-name-nondirectory url) caraml--exe))
+          (make-directory caraml-install-directory t)
+          ;; copy next to the target, then rename: the temporary directory may be on
+          ;; another file system, and a running server keeps its old binary
+          (copy-file file (concat dest ".new") t)
+          (set-file-modes (concat dest ".new") #o755)
+          (rename-file (concat dest ".new") dest t))
+      (delete-directory (file-name-directory (directory-file-name out)) t))
     (caraml--connect)
-    (message "CaraML: installed %s" dest)))
+    (caraml--installed-message)))
 
 (defun caraml--build (url)
   (let* ((out (caraml--unpack url))
-         ;; a cabal sdist unpacks to <package>-<version>/
-         (src (expand-file-name (file-name-nondirectory out) out))
-         (default-directory (file-name-as-directory (if (file-directory-p src) src out)))
-         (bin (file-name-directory (caraml--installed)))
+         ;; a cabal sdist unpacks to caraml-<version>/
+         (src (car (directory-files out t "\\`caraml-")))
+         (default-directory (file-name-as-directory (or src out)))
+         (tmp (file-name-directory (directory-file-name out)))
          (buf (get-buffer-create "*caraml-setup*")))
+    (make-directory caraml-install-directory t)
     (with-current-buffer buf
       (erase-buffer)
       (special-mode))
@@ -229,7 +244,8 @@ postpone or stop asking."
      :name "caraml-setup"
      :buffer buf
      :command (list "cabal" "install" "exe:caraml"
-                    (concat "--installdir=" bin) "--install-method=copy"
+                    (concat "--installdir=" (expand-file-name caraml-install-directory))
+                    "--install-method=copy"
                     "--overwrite-policy=always")
      :filter (lambda (proc s)
                (with-current-buffer (process-buffer proc)
@@ -238,9 +254,10 @@ postpone or stop asking."
                    (insert s))))
      :sentinel (lambda (proc _)
                  (when (memq (process-status proc) '(exit signal))
+                   (delete-directory tmp t)
                    (if (eq 0 (process-exit-status proc))
                        (progn (caraml--connect)
-                              (message "CaraML: built %s" (caraml--installed)))
+                              (caraml--installed-message))
                      (message "CaraML: cabal install failed, see *caraml-setup*")))))
     (message "CaraML: building with cabal, see *caraml-setup*")))
 
