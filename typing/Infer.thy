@@ -421,7 +421,7 @@ where
 | \<open>infer uf B A pd (EAnn e ty) n =
      infer uf B A pd e n \<bind> (\<lambda>(s\<^sub>1, e', \<tau>, pd\<^sub>1, n\<^sub>1).
        ty_stat (sappe s\<^sub>1 B) True ([], []) n\<^sub>1 ty \<bind> (\<lambda>(\<tau>\<^sub>a, _, n\<^sub>2).
-         uni uf \<tau> \<tau>\<^sub>a n\<^sub>2 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>3).
+         uni uf \<tau> (ann_ty (sappe s\<^sub>1 B) \<tau> \<tau>\<^sub>a) n\<^sub>2 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>3).
            Some (s\<^sub>2 \<odot> s\<^sub>1, EAnn e' ty, sapp s\<^sub>2 \<tau>, sub_pend s\<^sub>2 pd\<^sub>1, n\<^sub>3))))\<close>
 | \<open>infer uf B A pd (EFn ps b) n =
      infer_pats uf B ps n \<bind> (\<lambda>(sp, \<tau>s, \<Gamma>, n\<^sub>1).
@@ -944,9 +944,10 @@ where
        ty_stat B True ([], []) n ty \<bind> (\<lambda>(\<tau>, _, n').
          (case \<tau> of
             TFn _ _ _ \<Rightarrow>
-              Some (DExtern x ty sy,
-                    [(n_txt x, TEffi (n_txt sy) (close_sch (set [n ..< n']) (set [n ..< n']) \<tau>))],
-                    [(n_txt sy, close_sch (set [n ..< n']) (set [n ..< n']) \<tau>)], n')
+              (let \<sigma> = close_sch (set [n ..< n']) (set [n ..< n']) \<tau>
+               in (if name_free \<tau>
+                   then Some (DExtern x ty sy, [(n_txt x, TEffi (n_txt sy) \<sigma>)], [(n_txt sy, \<sigma>)], n')
+                   else None))
           | _ \<Rightarrow> None)) else None)\<close>
 | \<open>infer_decl uf B pre (DType t as ty) n =
      (let ps = [n ..< n + length as]

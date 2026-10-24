@@ -1272,6 +1272,34 @@ proof (cases \<tau>\<^sub>h)
   qed (use assms TFn in simp_all)
 qed (use assms in simp_all)
 
+text \<open>The renaming of an annotation's action binders introduces no signature names.\<close>
+
+lemma tsigs_act_rename_ann:
+  assumes \<open>tsigs \<tau>\<^sub>a \<subseteq> X\<close>
+  shows \<open>tsigs (act_rename B \<tau> \<tau>\<^sub>a) \<subseteq> X\<close>
+proof (cases \<tau>)
+  case (TAct lt K \<epsilon>\<^sub>0 \<tau>\<^sub>0)
+  show ?thesis
+  proof (cases \<tau>\<^sub>a)
+    case (TAct lt' K' \<epsilon>\<^sub>0' \<tau>\<^sub>0')
+    then show ?thesis using assms \<open>\<tau> = TAct lt K \<epsilon>\<^sub>0 \<tau>\<^sub>0\<close> tsigs_ksubst_TK[of K' K \<tau>\<^sub>0']
+      by (auto simp: act_rename_def)
+  qed (use assms \<open>\<tau> = TAct lt K \<epsilon>\<^sub>0 \<tau>\<^sub>0\<close> in \<open>simp_all add: act_rename_def\<close>)
+qed (use assms in \<open>simp_all add: act_rename_def\<close>)
+
+lemma tsigs_ann_ty:
+  assumes \<open>tsigs \<tau>\<^sub>a \<subseteq> X\<close>
+  shows \<open>tsigs (ann_ty B \<tau> \<tau>\<^sub>a) \<subseteq> X\<close>
+proof (cases \<tau>)
+  case (TFn t\<^sub>1 \<epsilon> t\<^sub>2)
+  show ?thesis
+  proof (cases \<tau>\<^sub>a)
+    case (TFn t\<^sub>1' \<epsilon>' t\<^sub>2')
+    then show ?thesis using assms \<open>\<tau> = TFn t\<^sub>1 \<epsilon> t\<^sub>2\<close> tsigs_act_rename_ann[of t\<^sub>1' X B t\<^sub>1]
+      by (auto simp: ann_ty_def)
+  qed (use assms \<open>\<tau> = TFn t\<^sub>1 \<epsilon> t\<^sub>2\<close> in \<open>simp_all add: ann_ty_def act_rename_def\<close>)
+qed (use assms tsigs_act_rename_ann[OF assms, of B \<tau>] in \<open>simp_all add: ann_ty_def act_rename_def\<close>)
+
 text \<open>Applying a function type to one argument:\<close>
 
 lemma app_arg_sigs:
@@ -1493,12 +1521,12 @@ next
   from infer_EAnn.prems obtain s\<^sub>1 e'' \<tau>\<^sub>1 pd\<^sub>1 n\<^sub>1 \<tau>\<^sub>a ve n\<^sub>2 s\<^sub>2 n\<^sub>3 where
     d1: \<open>infer uf B A pd e n = Some (s\<^sub>1, e'', \<tau>\<^sub>1, pd\<^sub>1, n\<^sub>1)\<close> and
     ts: \<open>ty_stat (sappe s\<^sub>1 B) True ([], []) n\<^sub>1 ty = Some (\<tau>\<^sub>a, ve, n\<^sub>2)\<close> and
-    un: \<open>uni uf \<tau>\<^sub>1 \<tau>\<^sub>a n\<^sub>2 = Some (s\<^sub>2, n\<^sub>3)\<close> and
+    un: \<open>uni uf \<tau>\<^sub>1 (ann_ty (sappe s\<^sub>1 B) \<tau>\<^sub>1 \<tau>\<^sub>a) n\<^sub>2 = Some (s\<^sub>2, n\<^sub>3)\<close> and
     se: \<open>s = s\<^sub>2 \<odot> s\<^sub>1\<close> \<open>\<tau> = sapp s\<^sub>2 \<tau>\<^sub>1\<close> \<open>pd' = sub_pend s\<^sub>2 pd\<^sub>1\<close>
     by (auto split: Option.bind_split_asm prod.split_asm)
   have i1: \<open>shyg s\<^sub>1 X \<and> tsigs \<tau>\<^sub>1 \<subseteq> X \<and> tsigs_pend pd\<^sub>1 \<subseteq> X\<close> by (rule infer_EAnn.IH[OF d1 B P])
   have ta: \<open>tsigs \<tau>\<^sub>a \<subseteq> X\<close> using ty_stat_sigs(1)[OF ts sigs_in_sappe[OF _ B]] i1 by simp
-  have s2: \<open>shyg s\<^sub>2 X\<close> by (rule uni_shyg[OF un _ ta]) (use i1 in simp)
+  have s2: \<open>shyg s\<^sub>2 X\<close> by (rule uni_shyg[OF un _ tsigs_ann_ty[OF ta]]) (use i1 in simp)
   show ?case using shyg_scomp[OF _ s2] tsigs_sapp[OF s2] tsigs_sub_pend[OF s2] i1 se by simp
 next
   case (infer_EFn uf B A pd ps b n s e' \<tau> pd' n')

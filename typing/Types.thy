@@ -572,6 +572,18 @@ fun ktv :: \<open>kty \<Rightarrow> tvar set\<close> where
 | \<open>ktv (TEv l s t) = ktv l \<union> ktv s \<union> ktv t\<close>
 | \<open>ktv (TAct l K e t) = ktv l \<union> ktv t\<close>
 
+text \<open>A type is name-free when no handler name and no action occurs in it: the
+  types a foreign value may have, since a name cannot cross the foreign boundary.\<close>
+
+fun name_free :: \<open>kty \<Rightarrow> bool\<close> where
+  \<open>name_free (TC c ts) \<longleftrightarrow> (\<forall>t \<in> set ts. name_free t)\<close>
+| \<open>name_free (TApp t\<^sub>1 t\<^sub>2) \<longleftrightarrow> name_free t\<^sub>1 \<and> name_free t\<^sub>2\<close>
+| \<open>name_free (TFn t\<^sub>1 e t\<^sub>2) \<longleftrightarrow> name_free t\<^sub>1 \<and> name_free t\<^sub>2\<close>
+| \<open>name_free (TDep i sg K e t) = name_free t\<close>
+| \<open>name_free (TEv l s t) = False\<close>
+| \<open>name_free (TAct l K e t) = False\<close>
+| \<open>name_free t = True\<close>
+
 lemma brsubst_id: \<open>brv_row r = {} \<Longrightarrow> brsubst \<rho> r = r\<close>
   by (induction r) auto
 

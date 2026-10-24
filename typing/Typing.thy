@@ -277,8 +277,11 @@ definition name_at :: \<open>tenv \<Rightarrow> mpath \<Rightarrow> (name \<time
         [x] \<Rightarrow> (case map_of B (nkey x) of Some (TEeff l ls ar) \<Rightarrow> Some (l, ls) | _ \<Rightarrow> None)
       | _ \<Rightarrow> None)\<close>
 
-text \<open>The effect a name's type is for, when it is declared; and the entry a binder
-  of a name whose effect is declared adds, so that annotations under it may name it.\<close>
+text \<open>The effect a name's type is for, when it is declared; and the entry a binder of
+  a name adds under the reserved key. When the effect is declared, annotations under
+  the binder may name the name; when it is not, a closed placeholder (a fixity, which
+  nothing reads under this key) shadows an outer name of the same spelling, so that a
+  row entry never resolves past its binder.\<close>
 
 definition eff_of_ty :: \<open>tenv \<Rightarrow> kty \<Rightarrow> (name \<times> name list \<times> nat) option\<close> where
   \<open>eff_of_ty B t =
@@ -288,11 +291,11 @@ definition eff_of_ty :: \<open>tenv \<Rightarrow> kty \<Rightarrow> (name \<time
 
 definition name_env :: \<open>tenv \<Rightarrow> name \<Rightarrow> kty \<Rightarrow> tenv\<close> where
   \<open>name_env B x t =
-     (case eff_of_ty B t of Some (l, ls, ar) \<Rightarrow> [(nkey x, TEeff l ls ar)] | None \<Rightarrow> [])\<close>
+     [(nkey x, case eff_of_ty B t of Some (l, ls, ar) \<Rightarrow> TEeff l ls ar | None \<Rightarrow> TEfix FixN 0)]\<close>
 
 lemma name_env_cases:
-  obtains (none) \<open>name_env B x t = []\<close>
-    | (eff) l ls ar where \<open>name_env B x t = [(nkey x, TEeff l ls ar)]\<close>
+  obtains (eff) l ls ar where \<open>name_env B x t = [(nkey x, TEeff l ls ar)]\<close>
+    | (shadow) \<open>name_env B x t = [(nkey x, TEfix FixN 0)]\<close>
   by (cases \<open>eff_of_ty B t\<close>) (auto simp: name_env_def)
 
 fun label_stat :: \<open>tenv \<Rightarrow> ty \<Rightarrow> name list option\<close> where
@@ -346,10 +349,10 @@ definition rext :: \<open>name list \<Rightarrow> krow \<Rightarrow> krow\<close
 
 text \<open>A name type \<open>[E as]\<close> is the type of a handler name for the effect \<open>E\<close> at the
   arguments \<open>as\<close>. Its scope is a fresh variable, which the handler installing the
-  name fixes (rule \<open>W_with\<close>); only an open annotation can mint it, so a closed one
-  has no name types. A datatype cannot store a name either: a stored name would
-  need its scope as a parameter of the datatype, and a name type has no syntax
-  for its scope.
+  name fixes (rule \<open>W_with\<close>); only an open annotation can mint it. A closed one has
+  no name types, by decision: a constructor argument or an operation's type cannot
+  store a handler name, because a name's scope is bound by the \<open>with\<close> that creates
+  it, and a closed annotation has nothing to bind it to.
 
   A handler type \<open>handler [E as] a \<rightarrow> [\<rho>] b\<close> is the type rule \<open>W_handlern\<close> gives a
   named handler: a function with latent row \<open>\<rho>\<close> from an action for \<open>E\<close> to \<open>b\<close>, where
@@ -1161,6 +1164,26 @@ fun is_fn :: \<open>expr \<Rightarrow> bool\<close> where
 | \<open>is_fn (EFnMod _ _) = True\<close>
 | \<open>is_fn _ = False\<close>
 
+text \<open>An annotation's action binders are renamed to the inferred type's before the
+  two are compared (rule \<open>W_ann\<close>): a binder list is an action's own, so two action
+  types, or two handler types, that differ in it alone are the same type. The side
+  conditions are those of an application (\<open>G_app\<close>); an annotation's binders are
+  fresh, so they hold by construction.\<close>
+
+definition act_rename :: \<open>tenv \<Rightarrow> kty \<Rightarrow> kty \<Rightarrow> kty\<close> where
+  \<open>act_rename B \<tau> \<tau>\<^sub>a =
+     (case (\<tau>, \<tau>\<^sub>a) of
+        (TAct lt K \<epsilon>\<^sub>0 \<tau>\<^sub>0, TAct lt' K' \<epsilon>\<^sub>0' \<tau>\<^sub>0') \<Rightarrow>
+          (if length K' = length K \<and> set K' \<inter> ktv_env B = {} \<and> set K' \<inter> ktv \<tau>\<^sub>0' = {}
+           then TAct lt' K \<epsilon>\<^sub>0' (ksubst (tsl (zip K' (map TK K))) \<tau>\<^sub>0') else \<tau>\<^sub>a)
+      | _ \<Rightarrow> \<tau>\<^sub>a)\<close>
+
+definition ann_ty :: \<open>tenv \<Rightarrow> kty \<Rightarrow> kty \<Rightarrow> kty\<close> where
+  \<open>ann_ty B \<tau> \<tau>\<^sub>a =
+     (case (\<tau>, \<tau>\<^sub>a) of
+        (TFn t\<^sub>1 \<epsilon> t\<^sub>2, TFn t\<^sub>1' \<epsilon>' t\<^sub>2') \<Rightarrow> TFn (act_rename B t\<^sub>1 t\<^sub>1') \<epsilon>' t\<^sub>2'
+      | _ \<Rightarrow> act_rename B \<tau> \<tau>\<^sub>a)\<close>
+
 inductive
   wt :: \<open>tenv \<Rightarrow> krow \<Rightarrow> expr \<Rightarrow> expr \<Rightarrow> kty \<Rightarrow> bool\<close>
     (\<open>_,_ \<turnstile> _ \<leadsto> _ : _\<close> [51, 51, 51, 51, 51] 50) and
@@ -1179,7 +1202,7 @@ where
             chain_tree B oprs = Some tree \<Longrightarrow> wt_tree B \<epsilon> \<tau>s tree \<tau> \<Longrightarrow>
             B,\<epsilon> \<turnstile> EOp as opr e \<leadsto> EOp as' opr e' : \<tau>\<close>
 | W_ann:   \<open>B,\<epsilon> \<turnstile> e \<leadsto> e' : \<tau> \<Longrightarrow> ty_stat B True ([], []) n ty = Some (\<tau>\<^sub>a, ve, n') \<Longrightarrow>
-            close_sch (set [n ..< n']) (set [n ..< n']) \<tau>\<^sub>a \<succeq> \<tau>' \<Longrightarrow> \<tau>' \<simeq> \<tau> \<Longrightarrow>
+            close_sch (set [n ..< n']) (set [n ..< n']) (ann_ty B \<tau> \<tau>\<^sub>a) \<succeq> \<tau>' \<Longrightarrow> \<tau>' \<simeq> \<tau> \<Longrightarrow>
             B,\<epsilon> \<turnstile> EAnn e ty \<leadsto> EAnn e' ty : \<tau>\<close>
 | W_fn:    \<open>wtps B ps \<tau>s \<Gamma> \<Longrightarrow> covers B (fn_ty \<tau>s) [fn_pat ps] \<Longrightarrow>
             (binders \<Gamma> @ B),\<epsilon>' \<turnstile> b \<leadsto> b' : \<tau>\<^sub>b \<Longrightarrow>
@@ -1654,7 +1677,7 @@ where
 | D_fun:   \<open>cls \<noteq> [] \<Longrightarrow> wtd B pre (dsg_decl (DFun f mbs cls)) d' E F j j' \<Longrightarrow>
             wtd B pre (DFun f mbs cls) d' E F j j'\<close>
 | D_extern: \<open>ty_stat B True ([], []) n ty = Some (\<tau>, ve, n') \<Longrightarrow> (\<exists>t\<^sub>1 e t\<^sub>2. \<tau> = TFn t\<^sub>1 e t\<^sub>2) \<Longrightarrow>
-            take (length functor_pre) pre \<noteq> functor_pre \<Longrightarrow> j \<le> j' \<Longrightarrow>
+            name_free \<tau> \<Longrightarrow> take (length functor_pre) pre \<noteq> functor_pre \<Longrightarrow> j \<le> j' \<Longrightarrow>
             wtd B pre (DExtern x ty sy) (DExtern x ty sy)
                 [(n_txt x, TEffi (n_txt sy) (close_sch (set [n ..< n']) (set [n ..< n']) \<tau>))]
                 [(n_txt sy, close_sch (set [n ..< n']) (set [n ..< n']) \<tau>)] j j'\<close>

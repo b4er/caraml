@@ -2337,6 +2337,39 @@ proof -
   then show ?thesis using f by (simp add: fresh_ok_def bfree_def)
 qed
 
+text \<open>The renaming of an annotation's action binders keeps the type fresh.\<close>
+
+lemma fresh_ok_act_rename:
+  assumes \<open>fresh_ok \<tau>\<^sub>a 0 n FK\<close>
+  shows \<open>fresh_ok (act_rename B \<tau> \<tau>\<^sub>a) 0 n FK\<close>
+proof (cases \<tau>)
+  case (TAct lt K \<epsilon>\<^sub>0 \<tau>\<^sub>0)
+  show ?thesis
+  proof (cases \<tau>\<^sub>a)
+    case (TAct lt' K' \<epsilon>\<^sub>0' \<tau>\<^sub>0')
+    then show ?thesis
+      using assms \<open>\<tau> = TAct lt K \<epsilon>\<^sub>0 \<tau>\<^sub>0\<close> fresh_ok_ksubst_rename[of lt' K' \<epsilon>\<^sub>0' \<tau>\<^sub>0' n FK K]
+      by (auto simp: act_rename_def)
+  qed (use assms \<open>\<tau> = TAct lt K \<epsilon>\<^sub>0 \<tau>\<^sub>0\<close> in \<open>simp_all add: act_rename_def\<close>)
+qed (use assms in \<open>simp_all add: act_rename_def\<close>)
+
+lemma fresh_ok_ann_ty:
+  assumes \<open>fresh_ok \<tau>\<^sub>a 0 n FK\<close>
+  shows \<open>fresh_ok (ann_ty B \<tau> \<tau>\<^sub>a) 0 n FK\<close>
+proof (cases \<tau>)
+  case (TFn t\<^sub>1 \<epsilon> t\<^sub>2)
+  show ?thesis
+  proof (cases \<tau>\<^sub>a)
+    case (TFn t\<^sub>1' \<epsilon>' t\<^sub>2')
+    have f\<^sub>1: \<open>fresh_ok t\<^sub>1' 0 n FK\<close> and f\<^sub>2: \<open>fresh_ok t\<^sub>2' 0 n FK\<close>
+      and r\<^sub>1: \<open>frv_row \<epsilon>' \<subseteq> {..< n}\<close> and r\<^sub>2: \<open>brv_row \<epsilon>' = {}\<close>
+      using assms unfolding TFn by (auto simp: fresh_ok_def bfree_def)
+    show ?thesis
+      using fresh_ok_TFn[OF fresh_ok_act_rename[OF f\<^sub>1] f\<^sub>2 r\<^sub>1 r\<^sub>2]
+      by (simp add: ann_ty_def \<open>\<tau> = TFn t\<^sub>1 \<epsilon> t\<^sub>2\<close> TFn)
+  qed (use assms \<open>\<tau> = TFn t\<^sub>1 \<epsilon> t\<^sub>2\<close> in \<open>simp_all add: ann_ty_def fresh_ok_act_rename\<close>)
+qed (use assms in \<open>simp_all add: ann_ty_def fresh_ok_act_rename\<close>)
+
 text \<open>One application step: \<^const>\<open>app_arg\<close> unifies the head type with an
   arrow from the argument type to a fresh variable (after renaming the head's
   action binders to the argument's). The output is well formed and the result
@@ -3109,7 +3142,7 @@ lemma infer_wf:
     from E obtain s\<^sub>1 e'' \<tau>\<^sub>1 pd\<^sub>1 n\<^sub>1 \<tau>\<^sub>a ve n\<^sub>2 s\<^sub>2 n\<^sub>3 where
       d1: \<open>infer uf B A pd e n = Some (s\<^sub>1, e'', \<tau>\<^sub>1, pd\<^sub>1, n\<^sub>1)\<close> and
       ts: \<open>ty_stat (sappe s\<^sub>1 B) True ([], []) n\<^sub>1 ty = Some (\<tau>\<^sub>a, ve, n\<^sub>2)\<close> and
-      un: \<open>uni uf \<tau>\<^sub>1 \<tau>\<^sub>a n\<^sub>2 = Some (s\<^sub>2, n\<^sub>3)\<close> and
+      un: \<open>uni uf \<tau>\<^sub>1 (ann_ty (sappe s\<^sub>1 B) \<tau>\<^sub>1 \<tau>\<^sub>a) n\<^sub>2 = Some (s\<^sub>2, n\<^sub>3)\<close> and
       se: \<open>s = s\<^sub>2 \<odot> s\<^sub>1\<close> \<open>\<tau> = sapp s\<^sub>2 \<tau>\<^sub>1\<close> \<open>pd' = sub_pend s\<^sub>2 pd\<^sub>1\<close> \<open>n' = n\<^sub>3\<close>
       by (auto split: Option.bind_split_asm prod.split_asm)
     note w1 = infer_EAnn.IH[OF d1 I]
@@ -3124,7 +3157,8 @@ lemma infer_wf:
     have le2: \<open>n\<^sub>1 \<le> n\<^sub>2\<close> using tve_step_le[OF conjunct1[OF tw]] .
     have fa: \<open>fresh_ok \<tau>\<^sub>a n\<^sub>1 n\<^sub>2 FK\<close>
       by (rule fresh_ty_fresh_ok[OF conjunct2[OF tw] kv1])
-    note unf = uni_fresh[OF un fresh_ok_mono[OF f1 le_refl le2] fresh_ok_weaken0[OF fa] le0]
+    note unf = uni_fresh[OF un fresh_ok_mono[OF f1 le_refl le2]
+        fresh_ok_ann_ty[OF fresh_ok_weaken0[OF fa]] le0]
     have le3: \<open>n\<^sub>2 \<le> n\<^sub>3\<close> using unf by simp
     have sc2: \<open>sconf s\<^sub>2 {..< n\<^sub>3} {..< n\<^sub>3}\<close> using unf by (simp add: atLeast0LessThan)
     have kh2: \<open>khyg s\<^sub>2 FK\<close> and bf2: \<open>bfree_sub s\<^sub>2\<close> using unf by simp_all
