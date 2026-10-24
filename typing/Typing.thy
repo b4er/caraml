@@ -1167,11 +1167,51 @@ definition sel_tuple :: \<open>matom list \<Rightarrow> expr\<close> where
 definition open_match :: \<open>expr \<Rightarrow> matom list \<Rightarrow> (mpat \<times> expr) list \<Rightarrow> expr\<close> where
   \<open>open_match e evs arms = ELet (pvar rec_var) e (EMatch (sel_tuple evs) arms)\<close>
 
-definition open_let :: \<open>mpat \<Rightarrow> expr \<Rightarrow> matom list \<Rightarrow> expr \<Rightarrow> expr\<close> where
-  \<open>open_let p e evs b = ELet (pvar rec_var) e (ELet p (sel_tuple evs) b)\<close>
+definition open_val :: \<open>expr \<Rightarrow> matom list \<Rightarrow> expr\<close> where
+  \<open>open_val e evs = ELet (pvar rec_var) e (sel_tuple evs)\<close>
 
 definition open_fn :: \<open>matom list \<Rightarrow> mpat \<Rightarrow> expr \<Rightarrow> expr\<close> where
   \<open>open_fn evs p b = EFn [pvar rec_var] (ELet p (sel_tuple evs) b)\<close>
+
+text \<open>A \<open>let\<close> that abstracts requests under a pattern binds its right-hand side
+  once, to \<open>%p\<close>, and rebinds every variable of the pattern to its own evidence
+  abstraction: a match of \<open>%p\<close>, applied to evidence, against the pattern, selecting
+  the variable. A variable abstracts the requests whose row tail its type mentions;
+  the other rows are instantiated closed at \<open>%p\<close>, where their offsets are static,
+  so their evidence is a numeral. The pattern is exhaustive, so the match is
+  irrefutable; the right-hand side is a value, so its repetition per variable and per
+  instantiation costs time only. A single variable is wrapped directly, and without
+  requests the \<open>let\<close> stays as it is.\<close>
+
+definition abs_var :: name where
+  \<open>abs_var = str ''%p''\<close>
+
+fun req_in :: \<open>kty \<Rightarrow> name \<times> name \<times> kty \<Rightarrow> bool\<close> where
+  \<open>req_in \<tau> (v, l, r) = (case rtail r of TV a \<Rightarrow> a \<in> ftv \<tau> | _ \<Rightarrow> False)\<close>
+
+definition reqs_for :: \<open>kty \<Rightarrow> reqs \<Rightarrow> reqs\<close> where
+  \<open>reqs_for \<tau> = filter (req_in \<tau>)\<close>
+
+fun rclose :: \<open>kty \<Rightarrow> kty\<close> where
+  \<open>rclose (TRCons l t r) = TRCons l t (rclose r)\<close>
+| \<open>rclose r = TRNil\<close>
+
+fun close_ev :: \<open>kty \<Rightarrow> name \<times> name \<times> kty \<Rightarrow> matom\<close> where
+  \<open>close_ev \<tau> (v, l, r) =
+     (if req_in \<tau> (v, l, r) then off_var v
+      else case offset_of l (rclose r) of Some k \<Rightarrow> ANum no_loc (int k) None | None \<Rightarrow> off_var v)\<close>
+
+definition let_abs :: \<open>reqs \<Rightarrow> mpat \<Rightarrow> expr \<Rightarrow> (name \<times> kty) list \<Rightarrow> expr \<Rightarrow> expr\<close> where
+  \<open>let_abs reqs p e \<Gamma> b =
+     (if reqs = [] then ELet p e b
+      else if var_pat p then ELet p (ev_wrap reqs e) b
+      else ELet (pvar abs_var) (ev_wrap reqs e)
+             (foldr (\<lambda>(x, \<tau>) b. ELet (pvar x)
+                        (ev_wrap (reqs_for \<tau> reqs)
+                           (ELet p (ESpine (off_var abs_var # map (close_ev \<tau>) reqs))
+                                   (ESpine [off_var x])))
+                        b)
+                    \<Gamma> b))\<close>
 
 inductive wtp :: \<open>tenv \<Rightarrow> mpat \<Rightarrow> mpat \<Rightarrow> kty \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
   wtpa :: \<open>tenv \<Rightarrow> mpatom \<Rightarrow> mpatom \<Rightarrow> kty \<Rightarrow> (name \<times> kty) list \<Rightarrow> bool\<close> and
@@ -1417,18 +1457,21 @@ where
             wtp B p p' \<tau>\<^sub>p \<Gamma> \<Longrightarrow> \<tau>\<^sub>p \<simeq> \<tau>\<^sub>e \<Longrightarrow> covers B \<tau>\<^sub>e [p] \<Longrightarrow>
             as \<inter> ftv_env B = {} \<Longrightarrow> rs \<inter> frv_env B = {} \<Longrightarrow> rs \<inter> frv_row \<epsilon> = {} \<Longrightarrow>
             (as = {} \<and> rs = {}) \<or> val_exp B e' \<Longrightarrow>
-            reqs = [] \<or> (val_exp B e' \<and> var_pat p \<and> length \<Gamma> = 1) \<Longrightarrow> distinct (map fst reqs) \<Longrightarrow>
-            (map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (offs reqs \<tau>)))) \<Gamma> @ B),\<epsilon> \<turnstile> b \<leadsto> b' : \<tau> \<Longrightarrow>
+            reqs = [] \<or> val_exp B e' \<Longrightarrow> distinct (map fst reqs) \<Longrightarrow>
+            (map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (offs (reqs_for \<tau> reqs) \<tau>)))) \<Gamma> @ B),\<epsilon>
+              \<turnstile> b \<leadsto> b' : \<tau> \<Longrightarrow>
             btv \<tau>\<^sub>p = {} \<Longrightarrow> brv \<tau>\<^sub>p = {} \<Longrightarrow>
-            B,\<epsilon> \<turnstile> ELet p e b \<leadsto> ELet p' (ev_wrap reqs e') b' : \<tau>\<close>
-| W_letrec: \<open>B,\<epsilon> \<turnstile> e \<leadsto> e' : \<tau>\<^sub>e \<Longrightarrow> open_labels [p] = Some ls \<Longrightarrow> ls \<noteq> [] \<Longrightarrow>
-            wt_offs B ls \<tau>\<^sub>e evs \<tau>s \<Longrightarrow> wtp B (open_arm ls p) p' \<tau>\<^sub>p \<Gamma> \<Longrightarrow>
+            B,\<epsilon> \<turnstile> ELet p e b \<leadsto> let_abs reqs p' e' \<Gamma> b' : \<tau>\<close>
+| W_letrec: \<open>(ev_env reqs @ B),\<epsilon> \<turnstile> e \<leadsto> e' : \<tau>\<^sub>e \<Longrightarrow> open_labels [p] = Some ls \<Longrightarrow> ls \<noteq> [] \<Longrightarrow>
+            wt_offs (ev_env reqs @ B) ls \<tau>\<^sub>e evs \<tau>s \<Longrightarrow> wtp B (open_arm ls p) p' \<tau>\<^sub>p \<Gamma> \<Longrightarrow>
             \<tau>\<^sub>p \<simeq> tuple (\<tau>s @ [\<tau>\<^sub>e]) \<Longrightarrow> covers B \<tau>\<^sub>p [open_arm ls p] \<Longrightarrow>
             as \<inter> ftv_env B = {} \<Longrightarrow> rs \<inter> frv_env B = {} \<Longrightarrow> rs \<inter> frv_row \<epsilon> = {} \<Longrightarrow>
             (as = {} \<and> rs = {}) \<or> val_exp B e' \<Longrightarrow>
-            (map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs \<tau>))) \<Gamma> @ B),\<epsilon> \<turnstile> b \<leadsto> b' : \<tau> \<Longrightarrow>
+            reqs = [] \<or> val_exp B e' \<Longrightarrow> distinct (map fst reqs) \<Longrightarrow>
+            (map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (offs (reqs_for \<tau> reqs) \<tau>)))) \<Gamma> @ B),\<epsilon>
+              \<turnstile> b \<leadsto> b' : \<tau> \<Longrightarrow>
             btv \<tau>\<^sub>p = {} \<Longrightarrow> brv \<tau>\<^sub>p = {} \<Longrightarrow>
-            B,\<epsilon> \<turnstile> ELet p e b \<leadsto> open_let p' e' evs b' : \<tau>\<close>
+            B,\<epsilon> \<turnstile> ELet p e b \<leadsto> let_abs reqs p' (open_val e' evs) \<Gamma> b' : \<tau>\<close>
 | W_letfun: \<open>cls \<noteq> [] \<Longrightarrow> r = foldr EFnMod mbs (dfun_rhs cls) \<Longrightarrow> is_fn r \<Longrightarrow>
             (ev_env reqs @ (n_txt f, TEval (kmono \<tau>)) # B),\<epsilon> \<turnstile> r \<leadsto> r' : \<tau>' \<Longrightarrow> \<tau>' \<simeq> \<tau> \<Longrightarrow>
             as \<inter> ftv_env B = {} \<Longrightarrow> rs \<inter> frv_env B = {} \<Longrightarrow> rs \<inter> frv_row \<epsilon> = {} \<Longrightarrow>

@@ -620,14 +620,12 @@ where
                 (let s = s\<^sub>2 \<odot> sp \<odot> s\<^sub>1; B' = sappe s B; A' = sappr s A;
                      pd' = sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1; \<tau>\<^sub>e' = sapp s\<^sub>2 \<tau>\<^sub>p;
                      (as, rs, reqs, pdr) =
-                       (if val_exp B e'
-                        then (if var_pat p \<and> length \<Gamma> = 1 then gen_off B' A' pd' n \<tau>\<^sub>e'
-                              else (case gen_p B' A' pd' n \<tau>\<^sub>e' of (as, rs) \<Rightarrow> (as, rs, [], pd')))
-                        else ({}, {}, [], pd'));
-                     \<Gamma>' = map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>))))) \<Gamma>
+                       (if val_exp B e' then gen_off B' A' pd' n \<tau>\<^sub>e' else ({}, {}, [], pd'));
+                     \<Gamma>\<^sub>s = map (\<lambda>(x, \<tau>). (x, sapp s\<^sub>2 \<tau>)) \<Gamma>;
+                     \<Gamma>' = map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (offs (reqs_for \<tau> reqs) \<tau>)))) \<Gamma>\<^sub>s
                  in (if covers B' \<tau>\<^sub>e' [p] \<and> btv_list \<tau>\<^sub>e' = [] \<and> brv_list \<tau>\<^sub>e' = []
                      then infer uf (\<Gamma>' @ B') A' pdr b n\<^sub>3 \<bind> (\<lambda>(s\<^sub>3, b', \<tau>, pd\<^sub>3, n\<^sub>4).
-                            Some (s\<^sub>3 \<odot> s, ELet p' (ev_wrap reqs e') b', \<tau>, pd\<^sub>3, n\<^sub>4))
+                            Some (s\<^sub>3 \<odot> s, let_abs reqs p' e' \<Gamma>\<^sub>s b', \<tau>, pd\<^sub>3, n\<^sub>4))
                      else None))))
         | Some ls \<Rightarrow>
             open_scrut uf \<tau>\<^sub>e pd\<^sub>1 ls n\<^sub>1 \<bind> (\<lambda>(so, evs, \<tau>\<^sub>t, pdo, n\<^sub>2).
@@ -635,11 +633,15 @@ where
                 uni uf (sapp sp \<tau>\<^sub>t) \<tau>\<^sub>p n\<^sub>3 \<bind> (\<lambda>(s\<^sub>2, n\<^sub>4).
                   (let s = s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1; B' = sappe s B; A' = sappr s A;
                        pd' = sub_pend (s\<^sub>2 \<odot> sp) pdo; \<tau>\<^sub>t' = sapp s\<^sub>2 \<tau>\<^sub>p;
-                       (as, rs) = (if val_exp B e' then gen_p B' A' pd' n \<tau>\<^sub>t' else ({}, {}));
-                       \<Gamma>' = map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (sapp s\<^sub>2 \<tau>)))) \<Gamma>
+                       (as, rs, reqs, pdr) =
+                         (if val_exp B e' then gen_off B' A' pd' n \<tau>\<^sub>t' else ({}, {}, [], pd'));
+                       \<Gamma>\<^sub>s = map (\<lambda>(x, \<tau>). (x, sapp s\<^sub>2 \<tau>)) \<Gamma>;
+                       \<Gamma>' = map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (offs (reqs_for \<tau> reqs) \<tau>))))
+                                \<Gamma>\<^sub>s
                    in (if covers B' \<tau>\<^sub>t' [open_arm ls p] \<and> btv_list \<tau>\<^sub>t' = [] \<and> brv_list \<tau>\<^sub>t' = []
-                       then infer uf (\<Gamma>' @ B') A' pd' b n\<^sub>4 \<bind> (\<lambda>(s\<^sub>3, b', \<tau>, pd\<^sub>3, n\<^sub>5).
-                              Some (s\<^sub>3 \<odot> s, open_let p' e' evs b', \<tau>, pd\<^sub>3, n\<^sub>5))
+                       then infer uf (\<Gamma>' @ B') A' pdr b n\<^sub>4 \<bind> (\<lambda>(s\<^sub>3, b', \<tau>, pd\<^sub>3, n\<^sub>5).
+                              Some (s\<^sub>3 \<odot> s, let_abs reqs p' (open_val e' evs) \<Gamma>\<^sub>s b',
+                                    \<tau>, pd\<^sub>3, n\<^sub>5))
                        else None)))))))\<close>
 | \<open>infer uf B A pd (ESeq e\<^sub>1 e\<^sub>2) n =
      infer uf B A pd e\<^sub>1 n \<bind> (\<lambda>(s\<^sub>1, e\<^sub>1', \<tau>\<^sub>1, pd\<^sub>1, n\<^sub>1).
