@@ -277,6 +277,24 @@ definition name_at :: \<open>tenv \<Rightarrow> mpath \<Rightarrow> (name \<time
         [x] \<Rightarrow> (case map_of B (nkey x) of Some (TEeff l ls ar) \<Rightarrow> Some (l, ls) | _ \<Rightarrow> None)
       | _ \<Rightarrow> None)\<close>
 
+text \<open>The effect a name's type is for, when it is declared; and the entry a binder
+  of a name whose effect is declared adds, so that annotations under it may name it.\<close>
+
+definition eff_of_ty :: \<open>tenv \<Rightarrow> kty \<Rightarrow> (name \<times> name list \<times> nat) option\<close> where
+  \<open>eff_of_ty B t =
+     (case t of
+        TC c ts \<Rightarrow> find (\<lambda>(l, ls, ar). eff_ty l ts = t \<and> ar = length ts) (effs B)
+      | _ \<Rightarrow> None)\<close>
+
+definition name_env :: \<open>tenv \<Rightarrow> name \<Rightarrow> kty \<Rightarrow> tenv\<close> where
+  \<open>name_env B x t =
+     (case eff_of_ty B t of Some (l, ls, ar) \<Rightarrow> [(nkey x, TEeff l ls ar)] | None \<Rightarrow> [])\<close>
+
+lemma name_env_cases:
+  obtains (none) \<open>name_env B x t = []\<close>
+    | (eff) l ls ar where \<open>name_env B x t = [(nkey x, TEeff l ls ar)]\<close>
+  by (cases \<open>eff_of_ty B t\<close>) (auto simp: name_env_def)
+
 fun label_stat :: \<open>tenv \<Rightarrow> ty \<Rightarrow> name list option\<close> where
   \<open>label_stat B (TSpine [TPath p]) =
      (case name_at B p of
@@ -337,14 +355,14 @@ text \<open>A name type \<open>[E as]\<close> is the type of a handler name for 
   named handler: a function with latent row \<open>\<rho>\<close> from an action for \<open>E\<close> to \<open>b\<close>, where
   the action returns \<open>a\<close> and performs \<open>E\<close>'s operations on its name on top of \<open>\<rho>\<close>. The
   scope the action binds is fresh.
-
   A name-dependent arrow \<open>(f : [E as]) \<rightarrow> [\<rho>] \<tau>\<close> is that action type itself: it returns
   \<open>\<tau>\<close> and performs \<open>E\<close>'s operations on \<open>f\<close> on top of \<open>\<rho>\<close>. An absent row is read as for a
   plain arrow. The bound name \<open>f\<close> is in scope in \<open>\<rho>\<close> and \<open>\<tau>\<close> as a row entry
   (\<^const>\<open>name_at\<close>), for the types inside \<open>\<tau>\<close> that perform on \<open>f\<close> (the arrow's own
   row carries \<open>f\<close>'s operations already, so naming \<open>f\<close> there lists them twice). A name
-  bound by \<open>with\<close> is not in scope: inference learns its effect only after its body, so
-  an annotation in the body cannot name it. A handler type binds no name.\<close>
+  bound by \<open>with\<close> is in scope in its body the same way when its handler's effect is
+  known at the binding (\<^const>\<open>name_env\<close>, rule \<open>W_with\<close>). A handler type binds no
+  name.\<close>
 
 function (sequential) ty_stat :: \<open>tenv \<Rightarrow> bool \<Rightarrow> tvenv \<Rightarrow> nat \<Rightarrow> ty \<Rightarrow> (kty \<times> tvenv \<times> nat) option\<close> and
   atoms_stat :: \<open>tenv \<Rightarrow> bool \<Rightarrow> tvenv \<Rightarrow> nat \<Rightarrow> tatom list \<Rightarrow> (kty list \<times> tvenv \<times> nat) option\<close> and
@@ -1214,7 +1232,8 @@ where
             B,\<epsilon> \<turnstile> EHandlerN cls \<leadsto> EHandlerN cls' : TFn (TAct (eff_ty l args) [k] \<epsilon>\<^sub>0 \<tau>\<^sub>0) \<epsilon>' \<tau>\<close>
 | W_with:  \<open>B,\<epsilon> \<turnstile> h \<leadsto> h' : \<tau>\<^sub>h \<Longrightarrow> \<tau>\<^sub>h \<simeq> TFn (TAct lt K \<epsilon>\<^sub>0 \<tau>\<^sub>0) \<epsilon>\<^sub>l \<tau> \<Longrightarrow> \<epsilon>\<^sub>l \<approx> \<epsilon> \<Longrightarrow>
             k \<notin> ktv_env B \<Longrightarrow>
-            ((n_txt x, TEval (kmono (TEv lt' (TK k) targs))) # B),\<epsilon>\<^sub>0' \<turnstile> e \<leadsto> e' : \<tau>\<^sub>0' \<Longrightarrow>
+            (name_env B (n_txt x) lt' @ (n_txt x, TEval (kmono (TEv lt' (TK k) targs))) # B),\<epsilon>\<^sub>0'
+              \<turnstile> e \<leadsto> e' : \<tau>\<^sub>0' \<Longrightarrow>
             k \<notin> ktv \<tau>\<^sub>0' \<Longrightarrow> k \<notin> ktv targs \<Longrightarrow> k \<notin> ktv lt' \<Longrightarrow> nm_ok (n_txt x) \<Longrightarrow>
             length K = 1 \<Longrightarrow> set K \<inter> ktv_env B = {} \<Longrightarrow> set K \<inter> ktv \<tau>\<^sub>0 = {} \<Longrightarrow>
             TAct lt [k] \<epsilon>\<^sub>0 (ksubst (tsl (zip K [TK k])) \<tau>\<^sub>0) \<simeq> TAct lt' [k] \<epsilon>\<^sub>0' \<tau>\<^sub>0' \<Longrightarrow>

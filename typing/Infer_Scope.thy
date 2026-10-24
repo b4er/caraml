@@ -2271,30 +2271,41 @@ next
 next
   case (infer_EWith uf B A pd x h e n s e' \<tau> pd' n')
   from infer_EWith.prems have B: \<open>sigs_in B X\<close> and P: \<open>tsigs_pend pd \<subseteq> X\<close> by blast+
-  from infer_EWith.prems obtain s\<^sub>1 h' \<tau>\<^sub>h pd\<^sub>1 n\<^sub>1 s\<^sub>b e'' \<tau>\<^sub>b pd\<^sub>b n\<^sub>b s\<^sub>3 where
+  from infer_EWith.prems obtain s\<^sub>1 h' \<tau>\<^sub>h pd\<^sub>1 n\<^sub>1 s\<^sub>2 \<tau>\<^sub>a pd\<^sub>2 n\<^sub>3
+      s\<^sub>b e'' \<tau>\<^sub>b pd\<^sub>b n\<^sub>b s\<^sub>4 n\<^sub>5 where
     d1: \<open>infer uf B A pd h n = Some (s\<^sub>1, h', \<tau>\<^sub>h, pd\<^sub>1, n\<^sub>1)\<close> and
     kn: \<open>n\<^sub>1 \<notin> ktv_env (sappe s\<^sub>1 B)\<close> and nm: \<open>nm_ok (n_txt x)\<close> and
-    ib: \<open>infer uf ((n_txt x, TEval (kmono (TEv (TV (Suc n\<^sub>1)) (TK n\<^sub>1) (TV (Suc (Suc n\<^sub>1)))))) # sappe s\<^sub>1 B)
-           (RV (Suc (Suc (Suc n\<^sub>1)))) pd\<^sub>1 e (Suc (Suc (Suc (Suc n\<^sub>1))))
-             = Some (s\<^sub>b, e'', \<tau>\<^sub>b, pd\<^sub>b, n\<^sub>b)\<close> and
-    ap: \<open>app_arg uf (sappe (sproj (Suc (Suc (Suc (Suc n\<^sub>1)))) s\<^sub>b \<odot> s\<^sub>1) B)
-           (sappr (sproj (Suc (Suc (Suc (Suc n\<^sub>1)))) s\<^sub>b \<odot> s\<^sub>1) A) pd\<^sub>b
-           (sapp (sproj (Suc (Suc (Suc (Suc n\<^sub>1)))) s\<^sub>b) \<tau>\<^sub>h)
-           (TAct (sapp s\<^sub>b (TV (Suc n\<^sub>1))) [n\<^sub>1] (sappr s\<^sub>b (RV (Suc (Suc (Suc n\<^sub>1))))) \<tau>\<^sub>b) n\<^sub>b
-             = Some (s\<^sub>3, \<tau>, pd', n')\<close> and
-    se: \<open>s = s\<^sub>3 \<odot> (sproj (Suc (Suc (Suc (Suc n\<^sub>1)))) s\<^sub>b \<odot> s\<^sub>1)\<close>
+    ap: \<open>app_arg uf (sappe s\<^sub>1 B) (sappr s\<^sub>1 A) pd\<^sub>1 \<tau>\<^sub>h
+           (TAct (TV (Suc n\<^sub>1)) [n\<^sub>1] (RV (Suc (Suc (Suc n\<^sub>1)))) (TV (Suc (Suc (Suc (Suc n\<^sub>1))))))
+           (Suc (Suc (Suc (Suc (Suc n\<^sub>1))))) = Some (s\<^sub>2, \<tau>\<^sub>a, pd\<^sub>2, n\<^sub>3)\<close> and
+    ib: \<open>infer uf (name_env (sappe s\<^sub>2 (sappe s\<^sub>1 B)) (n_txt x) (sapp s\<^sub>2 (TV (Suc n\<^sub>1))) @
+           (n_txt x, TEval (kmono (TEv (sapp s\<^sub>2 (TV (Suc n\<^sub>1))) (TK n\<^sub>1)
+             (sapp s\<^sub>2 (TV (Suc (Suc n\<^sub>1))))))) # sappe s\<^sub>2 (sappe s\<^sub>1 B))
+           (sappr s\<^sub>2 (RV (Suc (Suc (Suc n\<^sub>1))))) pd\<^sub>2 e n\<^sub>3 = Some (s\<^sub>b, e'', \<tau>\<^sub>b, pd\<^sub>b, n\<^sub>b)\<close> and
+    un: \<open>uni uf (sapp (s\<^sub>b \<odot> s\<^sub>2) (TV (Suc (Suc (Suc (Suc n\<^sub>1)))))) \<tau>\<^sub>b n\<^sub>b = Some (s\<^sub>4, n\<^sub>5)\<close> and
+    se: \<open>s = sproj n\<^sub>3 (s\<^sub>4 \<odot> s\<^sub>b) \<odot> s\<^sub>2 \<odot> s\<^sub>1\<close> and
+    te: \<open>\<tau> = sapp (sproj n\<^sub>3 (s\<^sub>4 \<odot> s\<^sub>b)) \<tau>\<^sub>a\<close> and pe: \<open>pd' = sub_pend s\<^sub>4 pd\<^sub>b\<close>
     by (auto simp: Let_def bind_eq_Some_conv split: prod.split_asm if_split_asm)
   have w1: \<open>shyg s\<^sub>1 X \<and> tsigs \<tau>\<^sub>h \<subseteq> X \<and> tsigs_pend pd\<^sub>1 \<subseteq> X\<close>
     using d1 B P by (rule infer_EWith.IH)
-  have B': \<open>sigs_in ((n_txt x, TEval (kmono (TEv (TV (Suc n\<^sub>1)) (TK n\<^sub>1) (TV (Suc (Suc n\<^sub>1)))))) #
-      sappe s\<^sub>1 B) X\<close>
-    using sigs_in_sappe[OF conjunct1[OF w1] B] by simp
+  have s1: \<open>shyg s\<^sub>1 X\<close> using w1 by blast
+  have w2: \<open>shyg s\<^sub>2 X \<and> tsigs \<tau>\<^sub>a \<subseteq> X \<and> tsigs_pend pd\<^sub>2 \<subseteq> X\<close>
+    by (rule app_arg_sigs[OF ap]) (use w1 in auto)
+  have s2: \<open>shyg s\<^sub>2 X\<close> using w2 by blast
+  have B2: \<open>sigs_in (name_env (sappe s\<^sub>2 (sappe s\<^sub>1 B)) (n_txt x) (sapp s\<^sub>2 (TV (Suc n\<^sub>1))) @
+      (n_txt x, TEval (kmono (TEv (sapp s\<^sub>2 (TV (Suc n\<^sub>1))) (TK n\<^sub>1)
+        (sapp s\<^sub>2 (TV (Suc (Suc n\<^sub>1))))))) # sappe s\<^sub>2 (sappe s\<^sub>1 B)) X\<close>
+    using sigs_in_sappe[OF s2 sigs_in_sappe[OF s1 B]] tsigs_sapp[OF s2]
+    by (cases rule: name_env_cases[of \<open>sappe s\<^sub>2 (sappe s\<^sub>1 B)\<close> \<open>n_txt x\<close>
+        \<open>sapp s\<^sub>2 (TV (Suc n\<^sub>1))\<close>]) simp_all
   have wb: \<open>shyg s\<^sub>b X \<and> tsigs \<tau>\<^sub>b \<subseteq> X \<and> tsigs_pend pd\<^sub>b \<subseteq> X\<close>
-    by (rule infer_EWith.IH) (use d1 kn nm ib B' w1 in auto)
-  have sp: \<open>shyg (sproj (Suc (Suc (Suc (Suc n\<^sub>1)))) s\<^sub>b) X\<close> using wb shyg_sproj by simp
-  have w3: \<open>shyg s\<^sub>3 X \<and> tsigs \<tau> \<subseteq> X \<and> tsigs_pend pd' \<subseteq> X\<close>
-    by (rule app_arg_sigs[OF ap]) (use w1 wb sp tsigs_sapp in simp_all)
-  show ?case using se w1 sp w3 by (simp add: shyg_scomp)
+    by (rule infer_EWith.IH) (use d1 kn nm ap ib B2 w1 w2 in auto)
+  have s4: \<open>shyg s\<^sub>4 X\<close>
+    by (rule uni_shyg[OF un]) (use wb s2 tsigs_sapp in \<open>simp_all add: shyg_scomp\<close>)
+  have sp: \<open>shyg (sproj n\<^sub>3 (s\<^sub>4 \<odot> s\<^sub>b)) X\<close> using s4 wb by (simp add: shyg_sproj shyg_scomp)
+  show ?case
+    using se te pe sp s1 s2 w2 tsigs_sapp[OF sp] tsigs_sub_pend[OF s4] wb s4
+    by (simp add: shyg_scomp)
 next
   case (infer_EHandlerN uf B A pd cls n s e' \<tau> pd' n')
   from infer_EHandlerN.prems have B: \<open>sigs_in B X\<close> and P: \<open>tsigs_pend pd \<subseteq> X\<close> by blast+

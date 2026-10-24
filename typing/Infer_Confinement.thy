@@ -2634,70 +2634,129 @@ lemma infer_with_wf:
     and I: \<open>inwf B A pd FK n\<close>
     and IH\<^sub>1: \<open>\<And>s\<^sub>1 h' \<tau>\<^sub>h pd\<^sub>1 n\<^sub>1. infer uf B A pd h n = Some (s\<^sub>1, h', \<tau>\<^sub>h, pd\<^sub>1, n\<^sub>1) \<Longrightarrow>
         inwf B A pd FK n \<Longrightarrow> n \<le> n\<^sub>1 \<and> outwf s\<^sub>1 pd\<^sub>1 FK n\<^sub>1 \<and> fresh_ok \<tau>\<^sub>h 0 n\<^sub>1 FK\<close>
-    and IH\<^sub>2: \<open>\<And>s\<^sub>1 h' \<tau>\<^sub>h pd\<^sub>1 n\<^sub>1 s\<^sub>b e'' \<tau>\<^sub>b pd\<^sub>b n\<^sub>b FK'.
+    and IH\<^sub>2: \<open>\<And>s\<^sub>1 h' \<tau>\<^sub>h pd\<^sub>1 n\<^sub>1 s\<^sub>2 \<tau>\<^sub>a pd\<^sub>2 n\<^sub>3 s\<^sub>b e'' \<tau>\<^sub>b pd\<^sub>b n\<^sub>b FK'.
         infer uf B A pd h n = Some (s\<^sub>1, h', \<tau>\<^sub>h, pd\<^sub>1, n\<^sub>1) \<Longrightarrow>
         n\<^sub>1 \<notin> ktv_env (sappe s\<^sub>1 B) \<Longrightarrow> nm_ok (n_txt x) \<Longrightarrow>
-        infer uf ((n_txt x, TEval (kmono (TEv (TV (Suc n\<^sub>1)) (TK n\<^sub>1) (TV (Suc (Suc n\<^sub>1)))))) # sappe s\<^sub>1 B)
-          (RV (Suc (Suc (Suc n\<^sub>1)))) pd\<^sub>1 e (Suc (Suc (Suc (Suc n\<^sub>1)))) = Some (s\<^sub>b, e'', \<tau>\<^sub>b, pd\<^sub>b, n\<^sub>b) \<Longrightarrow>
-        inwf ((n_txt x, TEval (kmono (TEv (TV (Suc n\<^sub>1)) (TK n\<^sub>1) (TV (Suc (Suc n\<^sub>1)))))) # sappe s\<^sub>1 B)
-          (RV (Suc (Suc (Suc n\<^sub>1)))) pd\<^sub>1 FK' (Suc (Suc (Suc (Suc n\<^sub>1)))) \<Longrightarrow>
-        Suc (Suc (Suc (Suc n\<^sub>1))) \<le> n\<^sub>b \<and> outwf s\<^sub>b pd\<^sub>b FK' n\<^sub>b \<and> fresh_ok \<tau>\<^sub>b 0 n\<^sub>b FK'\<close>
+        app_arg uf (sappe s\<^sub>1 B) (sappr s\<^sub>1 A) pd\<^sub>1 \<tau>\<^sub>h
+          (TAct (TV (Suc n\<^sub>1)) [n\<^sub>1] (RV (Suc (Suc (Suc n\<^sub>1)))) (TV (Suc (Suc (Suc (Suc n\<^sub>1))))))
+          (Suc (Suc (Suc (Suc (Suc n\<^sub>1))))) = Some (s\<^sub>2, \<tau>\<^sub>a, pd\<^sub>2, n\<^sub>3) \<Longrightarrow>
+        infer uf (name_env (sappe s\<^sub>2 (sappe s\<^sub>1 B)) (n_txt x) (sapp s\<^sub>2 (TV (Suc n\<^sub>1))) @
+            (n_txt x, TEval (kmono (TEv (sapp s\<^sub>2 (TV (Suc n\<^sub>1))) (TK n\<^sub>1)
+                                        (sapp s\<^sub>2 (TV (Suc (Suc n\<^sub>1))))))) #
+            sappe s\<^sub>2 (sappe s\<^sub>1 B))
+          (sappr s\<^sub>2 (RV (Suc (Suc (Suc n\<^sub>1))))) pd\<^sub>2 e n\<^sub>3 = Some (s\<^sub>b, e'', \<tau>\<^sub>b, pd\<^sub>b, n\<^sub>b) \<Longrightarrow>
+        inwf (name_env (sappe s\<^sub>2 (sappe s\<^sub>1 B)) (n_txt x) (sapp s\<^sub>2 (TV (Suc n\<^sub>1))) @
+            (n_txt x, TEval (kmono (TEv (sapp s\<^sub>2 (TV (Suc n\<^sub>1))) (TK n\<^sub>1)
+                                        (sapp s\<^sub>2 (TV (Suc (Suc n\<^sub>1))))))) #
+            sappe s\<^sub>2 (sappe s\<^sub>1 B))
+          (sappr s\<^sub>2 (RV (Suc (Suc (Suc n\<^sub>1))))) pd\<^sub>2 FK' n\<^sub>3 \<Longrightarrow>
+        n\<^sub>3 \<le> n\<^sub>b \<and> outwf s\<^sub>b pd\<^sub>b FK' n\<^sub>b \<and> fresh_ok \<tau>\<^sub>b 0 n\<^sub>b FK'\<close>
   shows \<open>n \<le> n' \<and> outwf s pd' FK n' \<and> fresh_ok \<tau> 0 n' FK\<close>
 proof -
   from E obtain s\<^sub>1 h' \<tau>\<^sub>h pd\<^sub>1 n\<^sub>1 where
     d1: \<open>infer uf B A pd h n = Some (s\<^sub>1, h', \<tau>\<^sub>h, pd\<^sub>1, n\<^sub>1)\<close>
     by (auto simp: bind_eq_Some_conv)
-  let ?B\<^sub>1 = \<open>sappe s\<^sub>1 B\<close> and ?n\<^sub>2 = \<open>Suc (Suc (Suc n\<^sub>1))\<close>
-  let ?B' = \<open>(n_txt x, TEval (kmono (TEv (TV (Suc n\<^sub>1)) (TK n\<^sub>1) (TV (Suc (Suc n\<^sub>1)))))) # ?B\<^sub>1\<close>
-  from E d1 obtain s\<^sub>b e'' \<tau>\<^sub>b pd\<^sub>b n\<^sub>b s\<^sub>3 where
+  let ?B\<^sub>1 = \<open>sappe s\<^sub>1 B\<close> and ?n\<^sub>2 = \<open>Suc (Suc (Suc (Suc (Suc n\<^sub>1))))\<close>
+  from E d1 obtain s\<^sub>2 \<tau>\<^sub>a pd\<^sub>2 n\<^sub>3 s\<^sub>b e'' \<tau>\<^sub>b pd\<^sub>b n\<^sub>b s\<^sub>4 n\<^sub>5 where
     kn: \<open>n\<^sub>1 \<notin> ktv_env ?B\<^sub>1\<close> and nm: \<open>nm_ok (n_txt x)\<close> and
-    ib: \<open>infer uf ?B' (RV ?n\<^sub>2) pd\<^sub>1 e (Suc ?n\<^sub>2) = Some (s\<^sub>b, e'', \<tau>\<^sub>b, pd\<^sub>b, n\<^sub>b)\<close> and
-    esc: \<open>n\<^sub>1 \<notin> ktv \<tau>\<^sub>b\<close> \<open>list_all (\<lambda>a. n\<^sub>1 \<notin> ktv (fst s\<^sub>b a)) [0 ..< Suc ?n\<^sub>2]\<close> and
-    ap: \<open>app_arg uf (sappe (sproj (Suc ?n\<^sub>2) s\<^sub>b \<odot> s\<^sub>1) B) (sappr (sproj (Suc ?n\<^sub>2) s\<^sub>b \<odot> s\<^sub>1) A) pd\<^sub>b
-      (sapp (sproj (Suc ?n\<^sub>2) s\<^sub>b) \<tau>\<^sub>h)
-      (TAct (sapp s\<^sub>b (TV (Suc n\<^sub>1))) [n\<^sub>1] (sappr s\<^sub>b (RV ?n\<^sub>2)) \<tau>\<^sub>b) n\<^sub>b = Some (s\<^sub>3, \<tau>, pd', n')\<close> and
-    se: \<open>s = s\<^sub>3 \<odot> (sproj (Suc ?n\<^sub>2) s\<^sub>b \<odot> s\<^sub>1)\<close>
+    ap: \<open>app_arg uf ?B\<^sub>1 (sappr s\<^sub>1 A) pd\<^sub>1 \<tau>\<^sub>h
+      (TAct (TV (Suc n\<^sub>1)) [n\<^sub>1] (RV (Suc (Suc (Suc n\<^sub>1)))) (TV (Suc (Suc (Suc (Suc n\<^sub>1))))))
+      ?n\<^sub>2 = Some (s\<^sub>2, \<tau>\<^sub>a, pd\<^sub>2, n\<^sub>3)\<close> and
+    ib: \<open>infer uf (name_env (sappe s\<^sub>2 ?B\<^sub>1) (n_txt x) (sapp s\<^sub>2 (TV (Suc n\<^sub>1))) @
+          (n_txt x, TEval (kmono (TEv (sapp s\<^sub>2 (TV (Suc n\<^sub>1))) (TK n\<^sub>1)
+                                      (sapp s\<^sub>2 (TV (Suc (Suc n\<^sub>1))))))) # sappe s\<^sub>2 ?B\<^sub>1)
+        (sappr s\<^sub>2 (RV (Suc (Suc (Suc n\<^sub>1))))) pd\<^sub>2 e n\<^sub>3 = Some (s\<^sub>b, e'', \<tau>\<^sub>b, pd\<^sub>b, n\<^sub>b)\<close> and
+    un: \<open>uni uf (sapp (s\<^sub>b \<odot> s\<^sub>2) (TV (Suc (Suc (Suc (Suc n\<^sub>1)))))) \<tau>\<^sub>b n\<^sub>b = Some (s\<^sub>4, n\<^sub>5)\<close> and
+    esc: \<open>list_all (\<lambda>a. n\<^sub>1 \<notin> ktv (fst (s\<^sub>4 \<odot> s\<^sub>b) a)) [0 ..< n\<^sub>3]\<close> and
+    se: \<open>s = sproj n\<^sub>3 (s\<^sub>4 \<odot> s\<^sub>b) \<odot> s\<^sub>2 \<odot> s\<^sub>1\<close> \<open>\<tau> = sapp (sproj n\<^sub>3 (s\<^sub>4 \<odot> s\<^sub>b)) \<tau>\<^sub>a\<close>
+      \<open>pd' = sub_pend s\<^sub>4 pd\<^sub>b\<close> \<open>n' = n\<^sub>5\<close>
     by (auto simp: Let_def bind_eq_Some_conv split: prod.split_asm if_split_asm)
   note w1 = IH\<^sub>1[OF d1 I]
   have le1: \<open>n \<le> n\<^sub>1\<close> and o1: \<open>outwf s\<^sub>1 pd\<^sub>1 FK n\<^sub>1\<close> and fh: \<open>fresh_ok \<tau>\<^sub>h 0 n\<^sub>1 FK\<close>
     using w1 by simp_all
   have I1: \<open>inwf ?B\<^sub>1 (sappr s\<^sub>1 A) pd\<^sub>1 FK n\<^sub>1\<close> by (rule inwf_step[OF I o1 le1])
-  from I1 have cenvB: \<open>cenv ?B\<^sub>1\<close> and bfB: \<open>bfree_env ?B\<^sub>1\<close> and ktvB: \<open>ktv_env ?B\<^sub>1 \<subseteq> FK\<close>
-    and ftvB: \<open>ftv_env ?B\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frvB: \<open>frv_env ?B\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close>
-    and ftp: \<open>ftv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close> and frp: \<open>frv_pend pd\<^sub>1 \<subseteq> {..< n\<^sub>1}\<close>
+  have le12: \<open>n\<^sub>1 \<le> ?n\<^sub>2\<close> by simp
+  have I1': \<open>inwf ?B\<^sub>1 (sappr s\<^sub>1 A) pd\<^sub>1 FK ?n\<^sub>2\<close>
+    using inwf_step[OF I1 outwf_sid_mono[OF I1 le12] le12] by simp
+  have fh': \<open>fresh_ok \<tau>\<^sub>h 0 ?n\<^sub>2 FK\<close> by (rule fresh_ok_mono[OF fh le_refl le12])
+  have fa: \<open>fresh_ok (TAct (TV (Suc n\<^sub>1)) [n\<^sub>1] (RV (Suc (Suc (Suc n\<^sub>1))))
+      (TV (Suc (Suc (Suc (Suc n\<^sub>1)))))) 0 ?n\<^sub>2 FK\<close>
+    by (auto simp: fresh_ok_def bfree_def)
+  note w2 = app_arg_wf[OF ap I1' fh' fa]
+  have le23: \<open>Suc ?n\<^sub>2 \<le> n\<^sub>3\<close> and o2: \<open>outwf s\<^sub>2 pd\<^sub>2 FK n\<^sub>3\<close> and fta: \<open>fresh_ok \<tau>\<^sub>a 0 n\<^sub>3 FK\<close>
+    using w2 by simp_all
+  have I2: \<open>inwf (sappe s\<^sub>2 ?B\<^sub>1) (sappr s\<^sub>2 (sappr s\<^sub>1 A)) pd\<^sub>2 FK n\<^sub>3\<close>
+    by (rule inwf_step[OF I1' o2]) (use le23 in simp)
+  from I2 have cenvB: \<open>cenv (sappe s\<^sub>2 ?B\<^sub>1)\<close> and bfB: \<open>bfree_env (sappe s\<^sub>2 ?B\<^sub>1)\<close>
+    and ktvB: \<open>ktv_env (sappe s\<^sub>2 ?B\<^sub>1) \<subseteq> FK\<close>
+    and ftvB: \<open>ftv_env (sappe s\<^sub>2 ?B\<^sub>1) \<subseteq> {..< n\<^sub>3}\<close>
+    and frvB: \<open>frv_env (sappe s\<^sub>2 ?B\<^sub>1) \<subseteq> {..< n\<^sub>3}\<close>
+    and ftp: \<open>ftv_pend pd\<^sub>2 \<subseteq> {..< n\<^sub>3}\<close> and frp: \<open>frv_pend pd\<^sub>2 \<subseteq> {..< n\<^sub>3}\<close>
     by (auto simp: inwf_def)
-  have iB': \<open>inwf ?B' (RV ?n\<^sub>2) pd\<^sub>1 (insert n\<^sub>1 FK) (Suc ?n\<^sub>2)\<close>
-    using cenvB bfB ktvB ftvB frvB ftp frp by (auto simp: inwf_def bfree_def)
-  note wb = IH\<^sub>2[OF d1 kn nm ib iB']
-  have le: \<open>Suc ?n\<^sub>2 \<le> n\<^sub>b\<close> and o: \<open>outwf s\<^sub>b pd\<^sub>b (insert n\<^sub>1 FK) n\<^sub>b\<close>
+  from o2 have sc2: \<open>sconf s\<^sub>2 {..< n\<^sub>3} {..< n\<^sub>3}\<close> and kh2: \<open>khyg s\<^sub>2 FK\<close>
+    and bf2: \<open>bfree_sub s\<^sub>2\<close> by (auto simp: outwf_def)
+  let ?lt = \<open>sapp s\<^sub>2 (TV (Suc n\<^sub>1))\<close> and ?ta = \<open>sapp s\<^sub>2 (TV (Suc (Suc n\<^sub>1)))\<close>
+  have klt: \<open>ktv ?lt \<subseteq> FK\<close> and kta: \<open>ktv ?ta \<subseteq> FK\<close>
+    by (rule khyg_sapp[OF kh2], simp)+
+  have flt: \<open>ftv ?lt \<subseteq> {..< n\<^sub>3}\<close> and fta': \<open>ftv ?ta \<subseteq> {..< n\<^sub>3}\<close>
+    by (rule ftv_sapp_sconf[OF sc2], use le23 in simp)+
+  have rlt: \<open>frv ?lt \<subseteq> {..< n\<^sub>3}\<close> and rta: \<open>frv ?ta \<subseteq> {..< n\<^sub>3}\<close>
+    by (rule frv_sapp_sconf[OF sc2]; use le23 in simp)+
+  have blt: \<open>bfree ?lt\<close> and bta: \<open>bfree ?ta\<close> by (rule bfree_sapp[OF bf2], simp)+
+  have ne: \<open>cenv (name_env (sappe s\<^sub>2 ?B\<^sub>1) (n_txt x) ?lt) \<and>
+      bfree_env (name_env (sappe s\<^sub>2 ?B\<^sub>1) (n_txt x) ?lt) \<and>
+      ktv_env (name_env (sappe s\<^sub>2 ?B\<^sub>1) (n_txt x) ?lt) = {} \<and>
+      ftv_env (name_env (sappe s\<^sub>2 ?B\<^sub>1) (n_txt x) ?lt) = {} \<and>
+      frv_env (name_env (sappe s\<^sub>2 ?B\<^sub>1) (n_txt x) ?lt) = {}\<close>
+    by (cases rule: name_env_cases[of \<open>sappe s\<^sub>2 ?B\<^sub>1\<close> \<open>n_txt x\<close> ?lt]) simp_all
+  have fr0: \<open>frv_row (sappr s\<^sub>2 (RV (Suc (Suc (Suc n\<^sub>1))))) \<subseteq> {..< n\<^sub>3}\<close>
+    by (rule frv_sappr_sconf[OF sc2]) (use le23 in auto)
+  have br0: \<open>brv_row (sappr s\<^sub>2 (RV (Suc (Suc (Suc n\<^sub>1))))) = {}\<close>
+    by (rule bfree_sappr[OF bf2]) simp
+  have iB': \<open>inwf (name_env (sappe s\<^sub>2 ?B\<^sub>1) (n_txt x) ?lt @
+        (n_txt x, TEval (kmono (TEv ?lt (TK n\<^sub>1) ?ta))) # sappe s\<^sub>2 ?B\<^sub>1)
+      (sappr s\<^sub>2 (RV (Suc (Suc (Suc n\<^sub>1))))) pd\<^sub>2 (insert n\<^sub>1 FK) n\<^sub>3\<close>
+    using ne cenvB bfB ktvB ftvB frvB ftp frp klt kta flt fta' rlt rta blt bta fr0 br0
+    by (auto simp: inwf_def bfree_def)
+  note wb = IH\<^sub>2[OF d1 kn nm ap ib iB']
+  have le3: \<open>n\<^sub>3 \<le> n\<^sub>b\<close> and ob: \<open>outwf s\<^sub>b pd\<^sub>b (insert n\<^sub>1 FK) n\<^sub>b\<close>
     and ftb: \<open>fresh_ok \<tau>\<^sub>b 0 n\<^sub>b (insert n\<^sub>1 FK)\<close> using wb by simp_all
-  have scb: \<open>sconf s\<^sub>b {..< n\<^sub>b} {..< n\<^sub>b}\<close> and khb: \<open>khyg s\<^sub>b (insert n\<^sub>1 FK)\<close>
-    and bfb: \<open>bfree_sub s\<^sub>b\<close> and opd: \<open>ftv_pend pd\<^sub>b \<subseteq> {..< n\<^sub>b}\<close> \<open>frv_pend pd\<^sub>b \<subseteq> {..< n\<^sub>b}\<close>
-    using o by (auto simp: outwf_def)
-  have kall: \<open>\<forall>a < Suc ?n\<^sub>2. ktv (fst s\<^sub>b a) \<subseteq> FK\<close>
+  have o2': \<open>outwf s\<^sub>2 pd\<^sub>2 (insert n\<^sub>1 FK) n\<^sub>3\<close>
+    using o2 khyg_mono[OF kh2, of \<open>insert n\<^sub>1 FK\<close>] by (auto simp: outwf_def)
+  have f0: \<open>fresh_ok (TV (Suc (Suc (Suc (Suc n\<^sub>1))))) 0 n\<^sub>3 (insert n\<^sub>1 FK)\<close>
+    by (rule fresh_ok_mono[OF fresh_ok_TV]) (use le23 in simp_all)
+  have f1: \<open>fresh_ok (sapp (s\<^sub>b \<odot> s\<^sub>2) (TV (Suc (Suc (Suc (Suc n\<^sub>1)))))) 0 n\<^sub>b (insert n\<^sub>1 FK)\<close>
+    unfolding sapp_scomp by (rule fresh_ok_sapp0[OF fresh_ok_sapp0[OF f0 o2' order_refl] ob le3])
+  note wu = uni_fresh[OF un f1 ftb zero_le]
+  have le4: \<open>n\<^sub>b \<le> n\<^sub>5\<close> and sc4: \<open>sconf s\<^sub>4 {..< n\<^sub>5} {..< n\<^sub>5}\<close> and kh4: \<open>khyg s\<^sub>4 (insert n\<^sub>1 FK)\<close>
+    and bf4: \<open>bfree_sub s\<^sub>4\<close> using wu by (simp_all add: atLeast0LessThan)
+  from ob have opd: \<open>ftv_pend pd\<^sub>b \<subseteq> {..< n\<^sub>b}\<close> \<open>frv_pend pd\<^sub>b \<subseteq> {..< n\<^sub>b}\<close>
+    by (auto simp: outwf_def)
+  have o4: \<open>outwf s\<^sub>4 (sub_pend s\<^sub>4 pd\<^sub>b) (insert n\<^sub>1 FK) n\<^sub>5\<close>
+    by (rule outwf_of_uni[OF sc4 kh4 bf4 opd le4])
+  have o': \<open>outwf (s\<^sub>4 \<odot> s\<^sub>b) (sub_pend s\<^sub>4 pd\<^sub>b) (insert n\<^sub>1 FK) n\<^sub>5\<close>
+    by (rule outwf_scomp[OF ob o4 le4])
+  then have sc': \<open>sconf (s\<^sub>4 \<odot> s\<^sub>b) {..< n\<^sub>5} {..< n\<^sub>5}\<close> and kh': \<open>khyg (s\<^sub>4 \<odot> s\<^sub>b) (insert n\<^sub>1 FK)\<close>
+    and bf': \<open>bfree_sub (s\<^sub>4 \<odot> s\<^sub>b)\<close> and pd': \<open>ftv_pend (sub_pend s\<^sub>4 pd\<^sub>b) \<subseteq> {..< n\<^sub>5}\<close>
+      \<open>frv_pend (sub_pend s\<^sub>4 pd\<^sub>b) \<subseteq> {..< n\<^sub>5}\<close> by (auto simp: outwf_def)
+  have kall: \<open>\<forall>a < n\<^sub>3. ktv (fst (s\<^sub>4 \<odot> s\<^sub>b) a) \<subseteq> FK\<close>
   proof (intro allI impI)
-    fix a assume \<open>a < Suc ?n\<^sub>2\<close>
-    then have \<open>n\<^sub>1 \<notin> ktv (fst s\<^sub>b a)\<close> using esc(2) by (auto simp: list_all_iff simp del: upt_Suc)
-    then show \<open>ktv (fst s\<^sub>b a) \<subseteq> FK\<close> using khb unfolding khyg_def by blast
+    fix a assume \<open>a < n\<^sub>3\<close>
+    then have \<open>n\<^sub>1 \<notin> ktv (fst (s\<^sub>4 \<odot> s\<^sub>b) a)\<close> using esc by (auto simp: list_all_iff)
+    then show \<open>ktv (fst (s\<^sub>4 \<odot> s\<^sub>b) a) \<subseteq> FK\<close> using kh' unfolding khyg_def by blast
   qed
-  have o2: \<open>outwf (sproj (Suc ?n\<^sub>2) s\<^sub>b) pd\<^sub>b FK n\<^sub>b\<close>
-    unfolding outwf_def using sconf_sproj[OF scb] khyg_sproj[OF kall] bfree_sub_sproj[OF bfb] opd
+  have op: \<open>outwf (sproj n\<^sub>3 (s\<^sub>4 \<odot> s\<^sub>b)) (sub_pend s\<^sub>4 pd\<^sub>b) FK n\<^sub>5\<close>
+    unfolding outwf_def using sconf_sproj[OF sc'] khyg_sproj[OF kall] bfree_sub_sproj[OF bf'] pd'
     by simp
-  have flt: \<open>fresh_ok (sapp s\<^sub>b (TV (Suc n\<^sub>1))) 0 n\<^sub>b (insert n\<^sub>1 FK)\<close>
-    by (rule fresh_ok_sapp0[OF fresh_ok_TV o le]) simp
-  have klt: \<open>ktv (sapp s\<^sub>b (TV (Suc n\<^sub>1))) \<subseteq> FK\<close> using kall by (cases s\<^sub>b) auto
-  have frsr: \<open>frv_row (sappr s\<^sub>b (RV ?n\<^sub>2)) \<subseteq> {..< n\<^sub>b}\<close>
-    by (rule frv_sappr_sconf[OF scb]) (use le in auto)
-  have brsr: \<open>brv_row (sappr s\<^sub>b (RV ?n\<^sub>2)) = {}\<close> by (rule bfree_sappr[OF bfb]) simp
-  have fa: \<open>fresh_ok (TAct (sapp s\<^sub>b (TV (Suc n\<^sub>1))) [n\<^sub>1] (sappr s\<^sub>b (RV ?n\<^sub>2)) \<tau>\<^sub>b) 0 n\<^sub>b FK\<close>
-    using flt klt ftb frsr brsr esc(1) by (auto simp: fresh_ok_def bfree_def)
-  have le2: \<open>n\<^sub>1 \<le> n\<^sub>b\<close> using le by simp
-  have os: \<open>outwf (sproj (Suc ?n\<^sub>2) s\<^sub>b \<odot> s\<^sub>1) pd\<^sub>b FK n\<^sub>b\<close> by (rule outwf_scomp[OF o1 o2 le2])
-  have le12: \<open>n \<le> n\<^sub>b\<close> using le1 le2 by simp
-  note w3 = app_arg_wf[OF ap inwf_step[OF I os le12] fresh_ok_sapp0[OF fh o2 le2] fa]
-  have le3: \<open>n\<^sub>b \<le> n'\<close> and o3: \<open>outwf s\<^sub>3 pd' FK n'\<close> and f\<tau>: \<open>fresh_ok \<tau> 0 n' FK\<close>
-    using w3 by simp_all
-  show ?thesis using se le12 le3 f\<tau> outwf_scomp[OF os o3 le3] by simp
+  have le35: \<open>n\<^sub>3 \<le> n\<^sub>5\<close> using le3 le4 by simp
+  have os2: \<open>outwf (sproj n\<^sub>3 (s\<^sub>4 \<odot> s\<^sub>b) \<odot> s\<^sub>2) (sub_pend s\<^sub>4 pd\<^sub>b) FK n\<^sub>5\<close>
+    by (rule outwf_scomp[OF o2 op le35])
+  have le15: \<open>n\<^sub>1 \<le> n\<^sub>5\<close> using le12 le23 le35 by simp
+  have os: \<open>outwf s (sub_pend s\<^sub>4 pd\<^sub>b) FK n\<^sub>5\<close>
+    unfolding se(1) by (rule outwf_scomp[OF o1 os2 le15])
+  have f\<tau>: \<open>fresh_ok \<tau> 0 n\<^sub>5 FK\<close> unfolding se(2) by (rule fresh_ok_sapp0[OF fta op le35])
+  have \<open>n \<le> n\<^sub>5\<close> using le1 le15 by simp
+  then show ?thesis using os f\<tau> se by simp
 qed
 
 text \<open>A \<open>let\<close>: the bound pattern's generalised frame (\<^const>\<open>gen_env\<close>) is
@@ -4370,7 +4429,8 @@ lemma infer_wf:
   next
     case (infer_EWith uf B A pd x h e n s e' \<tau> pd' n' FK)
     show ?case
-      by (rule infer_with_wf[OF infer_EWith.prems]) (rule infer_EWith.IH; auto)+
+      by (rule infer_with_wf[OF infer_EWith.prems])
+         (rule infer_EWith.IH; (simp only: sappe.simps)?; auto)+
   next
     case (infer_EHandlerN uf B A pd cls n s e' \<tau> pd' n' FK)
     show ?case

@@ -714,8 +714,12 @@ where
 | \<open>infer_cls uf B A pd nm \<tau>\<^sub>0 targs (_ # cls) n = None\<close>
 
   \<comment> \<open>Named handlers: a first-class named handler (\<open>W_handlern\<close>), and its
-     installation (\<open>W_with\<close>), whose body is typed as an action with one scope
-     variable and applied to the handler as by \<^const>\<open>app_arg\<close>.\<close>
+     installation (\<open>W_with\<close>): the handler is applied as by \<^const>\<open>app_arg\<close> to an
+     action with one scope variable and a fresh effect, row and type, so that the
+     name's effect is known when the body is inferred (and so may be named in its
+     annotations); the body is then unified with the action's result type. The scope
+     variable must not escape into the substitution on the variables older than
+     the body; the variables the body minted are projected away.\<close>
 | \<open>infer uf B A pd (EHandlerN cls) n =
      (case hlabels B cls of
         [] \<Rightarrow> None
@@ -743,16 +747,20 @@ where
 | \<open>infer uf B A pd (EWith x h e) n =
      infer uf B A pd h n \<bind> (\<lambda>(s\<^sub>1, h', \<tau>\<^sub>h, pd\<^sub>1, n\<^sub>1).
        (let B\<^sub>1 = sappe s\<^sub>1 B; k = n\<^sub>1; lt = TV (Suc n\<^sub>1); targs = TV (Suc (Suc n\<^sub>1));
-            n\<^sub>2 = Suc (Suc (Suc n\<^sub>1))
+            \<epsilon>\<^sub>0 = RV (Suc (Suc (Suc n\<^sub>1))); \<tau>\<^sub>0 = TV (Suc (Suc (Suc (Suc n\<^sub>1))));
+            n\<^sub>2 = Suc (Suc (Suc (Suc (Suc n\<^sub>1))))
         in (if k \<in> ktv_env B\<^sub>1 \<or> \<not> nm_ok (n_txt x) then None else
-            infer uf ((n_txt x, TEval (kmono (TEv lt (TK k) targs))) # B\<^sub>1) (RV n\<^sub>2) pd\<^sub>1 e (Suc n\<^sub>2) \<bind>
-              (\<lambda>(s\<^sub>2, e', \<tau>\<^sub>0, pd\<^sub>2, n\<^sub>3).
-                (if k \<notin> ktv \<tau>\<^sub>0 \<and> list_all (\<lambda>a. k \<notin> ktv (fst s\<^sub>2 a)) [0 ..< Suc n\<^sub>2]
-                 then (let s\<^sub>2' = sproj (Suc n\<^sub>2) s\<^sub>2; s = s\<^sub>2' \<odot> s\<^sub>1
-                       in app_arg uf (sappe s B) (sappr s A) pd\<^sub>2 (sapp s\<^sub>2' \<tau>\<^sub>h)
-                            (TAct (sapp s\<^sub>2 lt) [k] (sappr s\<^sub>2 (RV n\<^sub>2)) \<tau>\<^sub>0) n\<^sub>3 \<bind>
-                            (\<lambda>(s\<^sub>3, \<tau>, pd\<^sub>3, n\<^sub>4). Some (s\<^sub>3 \<odot> s, EWith x h' e', \<tau>, pd\<^sub>3, n\<^sub>4)))
-                 else None)))))\<close>
+            app_arg uf B\<^sub>1 (sappr s\<^sub>1 A) pd\<^sub>1 \<tau>\<^sub>h (TAct lt [k] \<epsilon>\<^sub>0 \<tau>\<^sub>0) n\<^sub>2 \<bind> (\<lambda>(s\<^sub>2, \<tau>, pd\<^sub>2, n\<^sub>3).
+              (let B\<^sub>2 = sappe s\<^sub>2 B\<^sub>1; lt' = sapp s\<^sub>2 lt
+               in infer uf (name_env B\<^sub>2 (n_txt x) lt' @
+                            (n_txt x, TEval (kmono (TEv lt' (TK k) (sapp s\<^sub>2 targs)))) # B\<^sub>2)
+                     (sappr s\<^sub>2 \<epsilon>\<^sub>0) pd\<^sub>2 e n\<^sub>3 \<bind> (\<lambda>(s\<^sub>3, e', \<tau>\<^sub>0', pd\<^sub>3, n\<^sub>4).
+                 uni uf (sapp (s\<^sub>3 \<odot> s\<^sub>2) \<tau>\<^sub>0) \<tau>\<^sub>0' n\<^sub>4 \<bind> (\<lambda>(s\<^sub>4, n\<^sub>5).
+                   (let s' = s\<^sub>4 \<odot> s\<^sub>3
+                    in (if list_all (\<lambda>a. k \<notin> ktv (fst s' a)) [0 ..< n\<^sub>3]
+                        then Some (sproj n\<^sub>3 s' \<odot> s\<^sub>2 \<odot> s\<^sub>1, EWith x h' e', sapp (sproj n\<^sub>3 s') \<tau>,
+                                   sub_pend s\<^sub>4 pd\<^sub>3, n\<^sub>5)
+                        else None)))))))))\<close>
   by pat_completeness auto
 
 termination
