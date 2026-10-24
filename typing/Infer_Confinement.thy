@@ -265,13 +265,28 @@ lemma ftv_sch_close_eq: \<open>ftv_sch (close_sch as rs t) = ftv t - as\<close>
 lemma frv_sch_close_eq: \<open>frv_sch (close_sch as rs t) = frv t - rs\<close>
   by (simp add: close_sch_def frv_close_ty)
 
+text \<open>The requests a variable abstracts are among the binding's:\<close>
+
+lemma ftv_offs_for:
+  \<open>ftv (offs (reqs_for \<sigma> reqs) \<tau>) \<subseteq> ftv \<tau> \<union> (\<Union>(v, x, r)\<in>set reqs. ftv r)\<close>
+  unfolding offs_ftv reqs_for_def by auto
+
+lemma frv_offs_for:
+  \<open>frv (offs (reqs_for \<sigma> reqs) \<tau>) \<subseteq> frv \<tau> \<union> (\<Union>(v, x, r)\<in>set reqs. frv r)\<close>
+  unfolding offs_frv reqs_for_def by auto
+
+lemma ktv_offs_for:
+  \<open>ktv (offs (reqs_for \<sigma> reqs) \<tau>) \<subseteq> ktv \<tau> \<union> (\<Union>(v, x, r)\<in>set reqs. ktv r)\<close>
+  unfolding offs_ktv reqs_for_def by auto
+
 text \<open>A generalised binder frame, what a \<open>let\<close> adds to the basis: the bound
-  values' schemes, abstracted over the offset requests \<open>reqs\<close> and closed over
-  \<open>as\<close>/\<open>rs\<close>.\<close>
+  values' schemes, each abstracted over its offset requests among \<open>reqs\<close> and closed
+  over \<open>as\<close>/\<open>rs\<close>.\<close>
 
 definition gen_env :: \<open>ksub \<Rightarrow> tvar set \<Rightarrow> rvar set \<Rightarrow> reqs \<Rightarrow> (name \<times> kty) list \<Rightarrow> tenv\<close> where
   \<open>gen_env s\<^sub>2 as rs reqs \<Gamma> =
-     map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>))))) \<Gamma>\<close>
+     map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (offs (reqs_for \<tau> reqs) \<tau>))))
+         (map (\<lambda>(x, \<tau>). (x, sapp s\<^sub>2 \<tau>)) \<Gamma>)\<close>
 
 lemma cenv_gen_env[simp]: \<open>cenv (gen_env s\<^sub>2 as rs reqs \<Gamma>)\<close>
   by (induction \<Gamma>) (auto simp: gen_env_def)
@@ -285,11 +300,13 @@ lemma ftv_env_gen_env:
 proof (induction \<Gamma>)
   case (Cons a \<Gamma>) obtain x \<tau> where a: \<open>a = (x, \<tau>)\<close> by fastforce
   have \<open>ftv_env (gen_env s\<^sub>2 as rs reqs (a # \<Gamma>))
-          = ftv_sch (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>))) \<union> ftv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>)\<close>
+          = ftv_sch (close_sch as rs (offs (reqs_for (sapp s\<^sub>2 \<tau>) reqs) (sapp s\<^sub>2 \<tau>)))
+            \<union> ftv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>)\<close>
     by (simp add: gen_env_def a)
   also have \<open>... \<subseteq> ftv (sapp s\<^sub>2 \<tau>) \<union> (\<Union>(v, x, r)\<in>set reqs. ftv r)
                   \<union> ((\<Union>(x, \<tau>)\<in>set \<Gamma>. ftv (sapp s\<^sub>2 \<tau>)) \<union> (\<Union>(v, x, r)\<in>set reqs. ftv r))\<close>
-    using ftv_sch_close[of as rs \<open>offs reqs (sapp s\<^sub>2 \<tau>)\<close>, unfolded offs_ftv] Cons by blast
+    using subset_trans[OF ftv_sch_close[of as rs \<open>offs (reqs_for (sapp s\<^sub>2 \<tau>) reqs) (sapp s\<^sub>2 \<tau>)\<close>]
+                       ftv_offs_for[of \<open>sapp s\<^sub>2 \<tau>\<close> reqs \<open>sapp s\<^sub>2 \<tau>\<close>]] Cons by blast
   also have \<open>... = (\<Union>(x, \<tau>)\<in>set (a # \<Gamma>). ftv (sapp s\<^sub>2 \<tau>)) \<union> (\<Union>(v, x, r)\<in>set reqs. ftv r)\<close>
     by (auto simp: a)
   finally show ?case .
@@ -301,11 +318,13 @@ lemma frv_env_gen_env:
 proof (induction \<Gamma>)
   case (Cons a \<Gamma>) obtain x \<tau> where a: \<open>a = (x, \<tau>)\<close> by fastforce
   have \<open>frv_env (gen_env s\<^sub>2 as rs reqs (a # \<Gamma>))
-          = frv_sch (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>))) \<union> frv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>)\<close>
+          = frv_sch (close_sch as rs (offs (reqs_for (sapp s\<^sub>2 \<tau>) reqs) (sapp s\<^sub>2 \<tau>)))
+            \<union> frv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>)\<close>
     by (simp add: gen_env_def a)
   also have \<open>... \<subseteq> frv (sapp s\<^sub>2 \<tau>) \<union> (\<Union>(v, x, r)\<in>set reqs. frv r)
                   \<union> ((\<Union>(x, \<tau>)\<in>set \<Gamma>. frv (sapp s\<^sub>2 \<tau>)) \<union> (\<Union>(v, x, r)\<in>set reqs. frv r))\<close>
-    using frv_sch_close[of as rs \<open>offs reqs (sapp s\<^sub>2 \<tau>)\<close>, unfolded offs_frv] Cons by blast
+    using subset_trans[OF frv_sch_close[of as rs \<open>offs (reqs_for (sapp s\<^sub>2 \<tau>) reqs) (sapp s\<^sub>2 \<tau>)\<close>]
+                       frv_offs_for[of \<open>sapp s\<^sub>2 \<tau>\<close> reqs \<open>sapp s\<^sub>2 \<tau>\<close>]] Cons by blast
   also have \<open>... = (\<Union>(x, \<tau>)\<in>set (a # \<Gamma>). frv (sapp s\<^sub>2 \<tau>)) \<union> (\<Union>(v, x, r)\<in>set reqs. frv r)\<close>
     by (auto simp: a)
   finally show ?case .
@@ -317,11 +336,13 @@ lemma ktv_env_gen_env:
 proof (induction \<Gamma>)
   case (Cons a \<Gamma>) obtain x \<tau> where a: \<open>a = (x, \<tau>)\<close> by fastforce
   have \<open>ktv_env (gen_env s\<^sub>2 as rs reqs (a # \<Gamma>))
-          = ktv_sch (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>))) \<union> ktv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>)\<close>
+          = ktv_sch (close_sch as rs (offs (reqs_for (sapp s\<^sub>2 \<tau>) reqs) (sapp s\<^sub>2 \<tau>)))
+            \<union> ktv_env (gen_env s\<^sub>2 as rs reqs \<Gamma>)\<close>
     by (simp add: gen_env_def a)
   also have \<open>... \<subseteq> ktv (sapp s\<^sub>2 \<tau>) \<union> (\<Union>(v, x, r)\<in>set reqs. ktv r)
                   \<union> ((\<Union>(x, \<tau>)\<in>set \<Gamma>. ktv (sapp s\<^sub>2 \<tau>)) \<union> (\<Union>(v, x, r)\<in>set reqs. ktv r))\<close>
-    using ktv_sch_close[of as rs \<open>offs reqs (sapp s\<^sub>2 \<tau>)\<close>, unfolded offs_ktv] Cons by blast
+    using subset_trans[OF ktv_sch_close[of as rs \<open>offs (reqs_for (sapp s\<^sub>2 \<tau>) reqs) (sapp s\<^sub>2 \<tau>)\<close>]
+                       ktv_offs_for[of \<open>sapp s\<^sub>2 \<tau>\<close> reqs \<open>sapp s\<^sub>2 \<tau>\<close>]] Cons by blast
   also have \<open>... = (\<Union>(x, \<tau>)\<in>set (a # \<Gamma>). ktv (sapp s\<^sub>2 \<tau>)) \<union> (\<Union>(v, x, r)\<in>set reqs. ktv r)\<close>
     by (auto simp: a)
   finally show ?case .
@@ -436,14 +457,11 @@ proof -
       af ab pf pr pk by simp
 qed
 
-text \<open>The rows a \<open>let\<close> abstracts over come from its pending requests, whichever
-  branch of generalisation it takes:\<close>
+text \<open>The rows a \<open>let\<close> abstracts over come from its pending requests, whether it
+  generalises or not:\<close>
 
 lemma gen_choice_pend:
-  assumes \<open>(as, rs, reqs, pdr) =
-    (if c then (if d then gen_off B A pd n \<tau>
-                else (case gen_p B A pd n \<tau> of (as, rs) \<Rightarrow> (as, rs, [], pd)))
-     else ({}, {}, [], pd))\<close>
+  assumes \<open>(as, rs, reqs, pdr) = (if c then gen_off B A pd n \<tau> else ({}, {}, [], pd))\<close>
   shows \<open>set pdr \<subseteq> set pd\<close> and \<open>\<And>v x r. (v, x, r) \<in> set reqs \<Longrightarrow> (v, POff x r) \<in> set pd\<close>
   using assms gen_off_pend[of B A pd n \<tau> as rs reqs pdr]
   by (auto split: if_split_asm prod.split_asm)
@@ -3052,26 +3070,24 @@ lemma infer_let_open_wf:
     and ol: \<open>open_labels [p] = Some (l # ls)\<close>
     and IH\<^sub>e: \<open>\<And>s e' \<tau> pd' n' FK. infer uf B A pd e n = Some (s, e', \<tau>, pd', n') \<Longrightarrow>
         inwf B A pd FK n \<Longrightarrow> n \<le> n' \<and> outwf s pd' FK n' \<and> fresh_ok \<tau> 0 n' FK\<close>
-    and IH\<^sub>b: \<open>\<And>s\<^sub>1 e'' \<tau>\<^sub>e pd\<^sub>1 n\<^sub>1 so evs \<tau>\<^sub>t pdo n\<^sub>2 sp p\<^sub>x \<tau>\<^sub>p \<Gamma> n\<^sub>3 s\<^sub>2 n\<^sub>4 asx rsx s\<^sub>3 b'' \<tau>\<^sub>b pd\<^sub>3 n\<^sub>5 FK.
+    and IH\<^sub>b: \<open>\<And>s\<^sub>1 e'' \<tau>\<^sub>e pd\<^sub>1 n\<^sub>1 so evs \<tau>\<^sub>t pdo n\<^sub>2 sp p\<^sub>x \<tau>\<^sub>p \<Gamma> n\<^sub>3 s\<^sub>2 n\<^sub>4 asx rsx reqs pdr
+          s\<^sub>3 b'' \<tau>\<^sub>b pd\<^sub>3 n\<^sub>5 FK.
         infer uf B A pd e n = Some (s\<^sub>1, e'', \<tau>\<^sub>e, pd\<^sub>1, n\<^sub>1) \<Longrightarrow>
         open_labels [p] = Some (l # ls) \<Longrightarrow>
         open_scrut uf \<tau>\<^sub>e pd\<^sub>1 (l # ls) n\<^sub>1 = Some (so, evs, \<tau>\<^sub>t, pdo, n\<^sub>2) \<Longrightarrow>
         infer_pat uf (sappe (so \<odot> s\<^sub>1) B) (open_arm (l # ls) p) n\<^sub>2 = Some (sp, p\<^sub>x, \<tau>\<^sub>p, \<Gamma>, n\<^sub>3) \<Longrightarrow>
         uni uf (sapp sp \<tau>\<^sub>t) \<tau>\<^sub>p n\<^sub>3 = Some (s\<^sub>2, n\<^sub>4) \<Longrightarrow>
-        (asx, rsx) =
+        (asx, rsx, reqs, pdr) =
           (if val_exp B e''
-           then gen_p (sappe (s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1) A)
+           then gen_off (sappe (s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1) A)
                   (sub_pend (s\<^sub>2 \<odot> sp) pdo) n (sapp s\<^sub>2 \<tau>\<^sub>p)
-           else ({}, {})) \<Longrightarrow>
+           else ({}, {}, [], sub_pend (s\<^sub>2 \<odot> sp) pdo)) \<Longrightarrow>
         covers (sappe (s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1) B) (sapp s\<^sub>2 \<tau>\<^sub>p) [open_arm (l # ls) p] \<and>
           btv_list (sapp s\<^sub>2 \<tau>\<^sub>p) = [] \<and> brv_list (sapp s\<^sub>2 \<tau>\<^sub>p) = [] \<Longrightarrow>
-        infer uf (map (\<lambda>(x, \<tau>). (x, TEval (close_sch asx rsx (sapp s\<^sub>2 \<tau>)))) \<Gamma> @
-                  sappe (s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1) B)
-          (sappr (s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1) A) (sub_pend (s\<^sub>2 \<odot> sp) pdo) b n\<^sub>4
-          = Some (s\<^sub>3, b'', \<tau>\<^sub>b, pd\<^sub>3, n\<^sub>5) \<Longrightarrow>
-        inwf (map (\<lambda>(x, \<tau>). (x, TEval (close_sch asx rsx (sapp s\<^sub>2 \<tau>)))) \<Gamma> @
-              sappe (s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1) B)
-          (sappr (s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1) A) (sub_pend (s\<^sub>2 \<odot> sp) pdo) FK n\<^sub>4 \<Longrightarrow>
+        infer uf (gen_env s\<^sub>2 asx rsx reqs \<Gamma> @ sappe (s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1) B)
+          (sappr (s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1) A) pdr b n\<^sub>4 = Some (s\<^sub>3, b'', \<tau>\<^sub>b, pd\<^sub>3, n\<^sub>5) \<Longrightarrow>
+        inwf (gen_env s\<^sub>2 asx rsx reqs \<Gamma> @ sappe (s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1) B)
+          (sappr (s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1) A) pdr FK n\<^sub>4 \<Longrightarrow>
         n\<^sub>4 \<le> n\<^sub>5 \<and> outwf s\<^sub>3 pd\<^sub>3 FK n\<^sub>5 \<and> fresh_ok \<tau>\<^sub>b 0 n\<^sub>5 FK\<close>
   shows \<open>n \<le> n' \<and> outwf s pd' FK n' \<and> fresh_ok \<tau> 0 n' FK\<close>
 proof -
@@ -3093,16 +3109,17 @@ proof -
     by (auto simp: d1 ol os dp split: Option.bind_split_asm prod.split_asm
           simp del: sapp.simps sappe.simps sappr.simps sapps.simps)
   let ?s = \<open>s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1\<close> and ?pd = \<open>sub_pend (s\<^sub>2 \<odot> sp) pdo\<close>
-  obtain asx rsx where asrs: \<open>(asx, rsx) =
-    (if val_exp B e'' then gen_p (sappe ?s B) (sappr ?s A) ?pd n (sapp s\<^sub>2 \<tau>\<^sub>p) else ({}, {}))\<close>
-    by (metis prod.collapse)
-  let ?\<Gamma>' = \<open>map (\<lambda>(x, \<tau>). (x, TEval (close_sch asx rsx (sapp s\<^sub>2 \<tau>)))) \<Gamma>\<close>
+  obtain asx rsx reqs pdr where asrs: \<open>(asx, rsx, reqs, pdr) =
+    (if val_exp B e'' then gen_off (sappe ?s B) (sappr ?s A) ?pd n (sapp s\<^sub>2 \<tau>\<^sub>p)
+     else ({}, {}, [], ?pd))\<close>
+    by (metis prod_cases4)
   from E obtain s\<^sub>3 b'' pd\<^sub>3 where
     covb: \<open>covers (sappe ?s B) (sapp s\<^sub>2 \<tau>\<^sub>p) [open_arm (l # ls) p] \<and>
            btv_list (sapp s\<^sub>2 \<tau>\<^sub>p) = [] \<and> brv_list (sapp s\<^sub>2 \<tau>\<^sub>p) = []\<close> and
-    d3: \<open>infer uf (?\<Gamma>' @ sappe ?s B) (sappr ?s A) ?pd b n\<^sub>4 = Some (s\<^sub>3, b'', \<tau>, pd\<^sub>3, n')\<close> and
+    d3: \<open>infer uf (gen_env s\<^sub>2 asx rsx reqs \<Gamma> @ sappe ?s B) (sappr ?s A) pdr b n\<^sub>4
+         = Some (s\<^sub>3, b'', \<tau>, pd\<^sub>3, n')\<close> and
     se: \<open>s = s\<^sub>3 \<odot> ?s\<close> \<open>pd' = pd\<^sub>3\<close>
-    by (auto simp: d1 ol os dp u1 asrs[symmetric] Let_def
+    by (auto simp: d1 ol os dp u1 asrs[symmetric] gen_env_def Let_def
           split: Option.bind_split_asm prod.split_asm if_split_asm
           simp del: sapp.simps sappe.simps sappr.simps sapps.simps)
   from I have cenvB: \<open>cenv B\<close> and bfB: \<open>bfree_env B\<close> and ktvB: \<open>ktv_env B \<subseteq> FK\<close>
@@ -3160,9 +3177,13 @@ proof -
   have pr: \<open>frv_pend ?pd \<subseteq> {..< n\<^sub>4}\<close>
     by (rule frv_pend_sub_pend[OF sc2p subset_trans[OF ftpo subn24] subset_trans[OF frpo subn24]])
   have pk: \<open>ktv_rows ?pd \<subseteq> FK\<close> by (rule ktv_rows_sub_pend[OF kh2p pko])
-  have ge: \<open>?\<Gamma>' = gen_env s\<^sub>2 asx rsx [] \<Gamma>\<close> by (simp add: gen_env_def)
-  have i3: \<open>inwf (?\<Gamma>' @ sappe ?s B) (sappr ?s A) ?pd FK n\<^sub>4\<close>
-    unfolding ge by (rule inwf_let[OF I scs khs bfs sc2 kh2 boG0 af ab pf pr pk _ le14]) simp
+  note gc = gen_choice_pend[OF asrs]
+  have pf': \<open>ftv_pend pdr \<subseteq> {..< n\<^sub>4}\<close> using ftv_pend_mono[OF gc(1)] pf by blast
+  have pr': \<open>frv_pend pdr \<subseteq> {..< n\<^sub>4}\<close> using frv_pend_mono[OF gc(1)] pr by blast
+  have pk': \<open>ktv_rows pdr \<subseteq> FK\<close> using ktv_rows_mono[OF gc(1)] pk by blast
+  note rk = reqs_bounds[OF gc(2) pf pr pk]
+  have i3: \<open>inwf (gen_env s\<^sub>2 asx rsx reqs \<Gamma> @ sappe ?s B) (sappr ?s A) pdr FK n\<^sub>4\<close>
+    by (rule inwf_let[OF I scs khs bfs sc2 kh2 boG0 af ab pf' pr' pk' rk le14])
   have \<open>n\<^sub>4 \<le> n' \<and> outwf s\<^sub>3 pd\<^sub>3 FK n' \<and> fresh_ok \<tau> 0 n' FK\<close>
     by (rule IH\<^sub>b[OF d1 ol os dp u1 asrs covb d3 i3])
   then have le5: \<open>n\<^sub>4 \<le> n'\<close> and o3: \<open>outwf s\<^sub>3 pd\<^sub>3 FK n'\<close>
@@ -3184,12 +3205,8 @@ lemma infer_let_wf:
         uni uf (sapp sp \<tau>\<^sub>e) \<tau>\<^sub>p n\<^sub>2 = Some (s\<^sub>2, n\<^sub>3) \<Longrightarrow>
         (asx, rsx, reqs, pdr) =
           (if val_exp B e''
-           then (if var_pat p \<and> length \<Gamma> = 1
-                 then gen_off (sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) A)
-                        (sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1) n (sapp s\<^sub>2 \<tau>\<^sub>p)
-                 else (case gen_p (sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) A)
-                              (sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1) n (sapp s\<^sub>2 \<tau>\<^sub>p)
-                       of (as, rs) \<Rightarrow> (as, rs, [], sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1)))
+           then gen_off (sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) A)
+                  (sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1) n (sapp s\<^sub>2 \<tau>\<^sub>p)
            else ({}, {}, [], sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1)) \<Longrightarrow>
         covers (sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sapp s\<^sub>2 \<tau>\<^sub>p) [p] \<and>
           btv_list (sapp s\<^sub>2 \<tau>\<^sub>p) = [] \<and> brv_list (sapp s\<^sub>2 \<tau>\<^sub>p) = [] \<Longrightarrow>
@@ -3222,11 +3239,7 @@ proof -
   qed
   let ?s = \<open>s\<^sub>2 \<odot> sp \<odot> s\<^sub>1\<close> and ?pd = \<open>sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1\<close>
   obtain asx rsx reqs pdr where asrs: \<open>(asx, rsx, reqs, pdr) =
-    (if val_exp B e''
-     then (if var_pat p \<and> length \<Gamma> = 1
-           then gen_off (sappe ?s B) (sappr ?s A) ?pd n (sapp s\<^sub>2 \<tau>\<^sub>p)
-           else (case gen_p (sappe ?s B) (sappr ?s A) ?pd n (sapp s\<^sub>2 \<tau>\<^sub>p)
-                 of (as, rs) \<Rightarrow> (as, rs, [], ?pd)))
+    (if val_exp B e'' then gen_off (sappe ?s B) (sappr ?s A) ?pd n (sapp s\<^sub>2 \<tau>\<^sub>p)
      else ({}, {}, [], ?pd))\<close>
     by (metis prod_cases4)
   have covb: \<open>covers (sappe ?s B) (sapp s\<^sub>2 \<tau>\<^sub>p) [p] \<and>
@@ -3311,6 +3324,22 @@ proof -
   show ?thesis using se le13 le4 fresh outwf_scomp[OF os o3 le4] by simp
 qed
 
+
+text \<open>A binding whose type is the one its requests were taken from abstracts them all:\<close>
+
+lemma gen_off_reqs_for:
+  assumes \<open>gen_off B A pd n \<tau> = (as, rs, reqs, pdr)\<close>
+  shows \<open>reqs_for \<tau> reqs = reqs\<close>
+proof -
+  obtain as\<^sub>0 rs\<^sub>0 where g: \<open>gen_p B A (filter (\<lambda>(v, q). \<not> is_off q) pd) n \<tau> = (as\<^sub>0, rs\<^sub>0)\<close>
+    by (metis prod.collapse)
+  have as0: \<open>as\<^sub>0 \<subseteq> ftv \<tau>\<close> using g by (auto simp: gen_p_def)
+  have reqs: \<open>reqs = map req_of (filter (\<lambda>(v, q). abs_req as\<^sub>0 q) pd)\<close>
+    using assms g by (simp add: gen_off_def Let_def)
+  have \<open>req_in \<tau> (req_of (v, q))\<close> if \<open>abs_req as\<^sub>0 q\<close> for v q
+    using that as0 by (cases q) (auto split: kty.splits)
+  then show ?thesis unfolding reqs reqs_for_def by (auto simp: filter_id_conv)
+qed
 
 lemma infer_letfun_wf:
   assumes E: \<open>infer uf B A pd (ELetFun f mbs cls b) n = Some (s, e\<^sub>x, \<tau>, pd', n')\<close>
@@ -3420,7 +3449,7 @@ proof -
     by (rule inwf_let[OF I scs khs bfs sc2 kh2 boG af ab pf' pr' pk' rk le12])
   then have i3': \<open>inwf ((n_txt f, TEval (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>')))) # sappe (s\<^sub>2 \<odot> s\<^sub>1) B)
       (sappr (s\<^sub>2 \<odot> s\<^sub>1) A) pdr FK n\<^sub>2\<close>
-    by (simp add: gen_env_def)
+    by (simp add: gen_env_def gen_off_reqs_for[OF asrs[symmetric]])
   have w3: \<open>n\<^sub>2 \<le> n' \<and> outwf s\<^sub>3 pd\<^sub>3 FK n' \<and> fresh_ok \<tau> 0 n' FK\<close>
     by (rule IH\<^sub>b[OF d1 u1 asrs bt d3 i3'])
   then have le3: \<open>n\<^sub>2 \<le> n'\<close> and o3: \<open>outwf s\<^sub>3 pd\<^sub>3 FK n'\<close> and fresh: \<open>fresh_ok \<tau> 0 n' FK\<close>
@@ -3817,7 +3846,7 @@ lemma infer_wf:
       case (Cons l ls')
       with ol have ol': \<open>open_labels [p] = Some (l # ls')\<close> by simp
       from infer_ELet.prems ol' show ?thesis
-        by (rule infer_let_open_wf) (rule infer_ELet.IH; (assumption | rule refl)+)+
+        by (rule infer_let_open_wf) (rule infer_ELet.IH; (assumption | rule gen_env_def refl)+)+
     qed
   next
     case (infer_ELetFun uf B A pd f mbs cls b n s e' \<tau> pd' n' FK)

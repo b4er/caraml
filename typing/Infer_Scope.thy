@@ -1584,7 +1584,11 @@ text \<open>The generalised bindings that \<open>let\<close> adds for the names 
 
 definition gen_env_s :: \<open>ksub \<Rightarrow> tvar set \<Rightarrow> rvar set \<Rightarrow> reqs \<Rightarrow> (name \<times> kty) list \<Rightarrow> tenv\<close> where
   \<open>gen_env_s s\<^sub>2 as rs reqs \<Gamma> =
-     map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (offs reqs (sapp s\<^sub>2 \<tau>))))) \<Gamma>\<close>
+     map (\<lambda>(x, \<tau>). (x, TEval (close_sch as rs (offs (reqs_for \<tau> reqs) \<tau>))))
+         (map (\<lambda>(x, \<tau>). (x, sapp s\<^sub>2 \<tau>)) \<Gamma>)\<close>
+
+lemma tsigs_offs_for: \<open>tsigs (offs (reqs_for \<sigma> reqs) \<tau>) \<subseteq> tsigs (offs reqs \<tau>)\<close>
+  unfolding offs_tsigs reqs_for_def by auto
 
 text \<open>Generalising over offset requests keeps the remaining requests over \<open>X\<close>, and the
   abstracted rows come from requests over \<open>X\<close>:\<close>
@@ -1611,7 +1615,8 @@ qed
 lemma sigs_in_gen_env_s:
   assumes \<open>shyg s X\<close> \<open>tsigs_bs \<Gamma> \<subseteq> X\<close> \<open>\<And>\<tau>. tsigs \<tau> \<subseteq> X \<Longrightarrow> tsigs (offs reqs \<tau>) \<subseteq> X\<close>
   shows \<open>sigs_in (gen_env_s s as rs reqs \<Gamma>) X\<close>
-  using assms unfolding gen_env_s_def by (induction \<Gamma>) (auto simp: tsigs_sapp)
+  using assms subset_trans[OF tsigs_offs_for] unfolding gen_env_s_def
+  by (induction \<Gamma>) (auto simp: tsigs_sapp)
 
 text \<open>Over a basis and pending requests over \<open>X\<close>, the expression algorithm returns a
   hygienic substitution, types over \<open>X\<close> and pending requests over \<open>X\<close>:\<close>
@@ -1819,13 +1824,9 @@ next
       case (Some r) then show ?thesis using that by (cases r) auto
     qed
     obtain asx rsx reqs pdr where asrs: \<open>(asx, rsx, reqs, pdr) =
-      (if val_exp B e'' then (if var_pat p \<and> length \<Gamma> = 1
-          then gen_off (sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) A) (sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1) n
-                 (sapp s\<^sub>2 \<tau>\<^sub>p)
-          else (case gen_p (sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) A)
-                       (sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1) n
-                       (sapp s\<^sub>2 \<tau>\<^sub>p)
-                of (as, rs) \<Rightarrow> (as, rs, [], sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1)))
+      (if val_exp B e''
+       then gen_off (sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) A)
+              (sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1) n (sapp s\<^sub>2 \<tau>\<^sub>p)
        else ({}, {}, [], sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1))\<close>
       by (metis prod_cases4)
     have covb: \<open>covers (sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sapp s\<^sub>2 \<tau>\<^sub>p) [p] \<and>
@@ -1852,7 +1853,7 @@ next
     have P3: \<open>tsigs_pend (sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1) \<subseteq> X\<close>
       using tsigs_sub_pend[of \<open>s\<^sub>2 \<odot> sp\<close> X pd\<^sub>1] p s2 i1 by (simp add: shyg_scomp)
     have gs: \<open>tsigs_pend pdr \<subseteq> X \<and> (\<forall>\<tau>. tsigs \<tau> \<subseteq> X \<longrightarrow> tsigs (offs reqs \<tau>) \<subseteq> X)\<close>
-    proof (cases \<open>val_exp B e'' \<and> var_pat p \<and> length \<Gamma> = 1\<close>)
+    proof (cases \<open>val_exp B e''\<close>)
       case True
       then have \<open>gen_off (sappe (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) B) (sappr (s\<^sub>2 \<odot> sp \<odot> s\<^sub>1) A)
                    (sub_pend (s\<^sub>2 \<odot> sp) pd\<^sub>1) n
@@ -1871,7 +1872,7 @@ next
       using G sigs_in_sappe[OF s B] by simp
     have i3: \<open>shyg s\<^sub>3 X \<and> tsigs \<tau> \<subseteq> X \<and> tsigs_pend pd\<^sub>3 \<subseteq> X\<close>
       using d1 refl refl refl refl ol' refl dp refl refl refl refl u1 refl refl refl refl refl refl
-        refl asrs refl refl gen_env_s_def covb d3 B3 conjunct1[OF gs]
+        refl asrs refl refl refl gen_env_s_def covb d3 B3 conjunct1[OF gs]
       by (rule infer_ELet.IH)
     show ?thesis using s i3 se by (simp add: shyg_scomp)
   next
@@ -1890,14 +1891,16 @@ next
             simp del: sapp.simps sappe.simps sappr.simps sapps.simps)
     let ?s = \<open>s\<^sub>2 \<odot> sp \<odot> so \<odot> s\<^sub>1\<close>
     let ?pd = \<open>sub_pend (s\<^sub>2 \<odot> sp) pdo\<close>
-    obtain asx rsx where asrs: \<open>(asx, rsx) =
-      (if val_exp B e'' then gen_p (sappe ?s B) (sappr ?s A) ?pd n (sapp s\<^sub>2 \<tau>\<^sub>p) else ({}, {}))\<close>
-      by (metis prod.collapse)
-    let ?\<Gamma>' = \<open>map (\<lambda>(x, \<tau>). (x, TEval (close_sch asx rsx (sapp s\<^sub>2 \<tau>)))) \<Gamma>\<close>
+    obtain asx rsx reqs pdr where asrs: \<open>(asx, rsx, reqs, pdr) =
+      (if val_exp B e'' then gen_off (sappe ?s B) (sappr ?s A) ?pd n (sapp s\<^sub>2 \<tau>\<^sub>p)
+       else ({}, {}, [], ?pd))\<close>
+      by (metis prod_cases4)
+    let ?\<Gamma>' = \<open>map (\<lambda>(x, \<tau>). (x, TEval (close_sch asx rsx (offs (reqs_for \<tau> reqs) \<tau>))))
+                 (map (\<lambda>(x, \<tau>). (x, sapp s\<^sub>2 \<tau>)) \<Gamma>)\<close>
     from infer_ELet.prems obtain s\<^sub>3 b'' pd\<^sub>3 where
       covb: \<open>covers (sappe ?s B) (sapp s\<^sub>2 \<tau>\<^sub>p) [open_arm (l # ls') p] \<and>
              btv_list (sapp s\<^sub>2 \<tau>\<^sub>p) = [] \<and> brv_list (sapp s\<^sub>2 \<tau>\<^sub>p) = []\<close> and
-      d3: \<open>infer uf (?\<Gamma>' @ sappe ?s B) (sappr ?s A) ?pd b n\<^sub>4 = Some (s\<^sub>3, b'', \<tau>, pd\<^sub>3, n')\<close> and
+      d3: \<open>infer uf (?\<Gamma>' @ sappe ?s B) (sappr ?s A) pdr b n\<^sub>4 = Some (s\<^sub>3, b'', \<tau>, pd\<^sub>3, n')\<close> and
       se: \<open>s = s\<^sub>3 \<odot> ?s\<close> \<open>pd' = pd\<^sub>3\<close>
       by (auto simp: d1 ol' os dp u1 asrs[symmetric] Let_def
             split: Option.bind_split_asm prod.split_asm if_split_asm
@@ -1911,12 +1914,23 @@ next
     have s: \<open>shyg ?s X\<close> using i1 o p s2 by (simp add: shyg_scomp)
     have P3: \<open>tsigs_pend ?pd \<subseteq> X\<close>
       using tsigs_sub_pend[of \<open>s\<^sub>2 \<odot> sp\<close> X pdo] o p s2 by (simp add: shyg_scomp)
-    have G: \<open>sigs_in ?\<Gamma>' X\<close>
-      using sigs_in_gen_env_s[OF s2 conjunct2[OF conjunct2[OF p]], where reqs = \<open>[]\<close>]
-      by (simp add: gen_env_s_def)
-    have B3: \<open>sigs_in (?\<Gamma>' @ sappe ?s B) X\<close> using G sigs_in_sappe[OF s B] by simp
+    have gs: \<open>tsigs_pend pdr \<subseteq> X \<and> (\<forall>\<tau>. tsigs \<tau> \<subseteq> X \<longrightarrow> tsigs (offs reqs \<tau>) \<subseteq> X)\<close>
+    proof (cases \<open>val_exp B e''\<close>)
+      case True
+      then have \<open>gen_off (sappe ?s B) (sappr ?s A) ?pd n (sapp s\<^sub>2 \<tau>\<^sub>p) = (asx, rsx, reqs, pdr)\<close>
+        using asrs by simp
+      from gen_off_sigs[OF this P3] show ?thesis by blast
+    next
+      case False
+      then have \<open>reqs = [] \<and> pdr = ?pd\<close> using asrs by (auto split: if_split_asm prod.split_asm)
+      then show ?thesis using P3 by simp
+    qed
+    have G: \<open>sigs_in (gen_env_s s\<^sub>2 asx rsx reqs \<Gamma>) X\<close>
+      using p gs by (intro sigs_in_gen_env_s[OF s2]) blast+
+    have B3: \<open>sigs_in (?\<Gamma>' @ sappe ?s B) X\<close>
+      using G[unfolded gen_env_s_def] sigs_in_sappe[OF s B] by simp
     have i3: \<open>shyg s\<^sub>3 X \<and> tsigs \<tau> \<subseteq> X \<and> tsigs_pend pd\<^sub>3 \<subseteq> X\<close>
-      using d1 ol' os dp u1 asrs covb d3 B3 P3
+      using d1 ol' os dp u1 asrs covb d3 B3 conjunct1[OF gs]
       by - (rule infer_ELet.IH; (rule refl | assumption)+)
     show ?thesis using s i3 se by (simp add: shyg_scomp)
   qed
