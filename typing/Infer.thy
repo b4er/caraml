@@ -129,9 +129,11 @@ definition gen_p :: \<open>tenv \<Rightarrow> krow \<Rightarrow> pend \<Rightarr
 text \<open>A binding that generalises abstracts the projections whose record type ends
   in a variable it generalises: they become evidence
   parameters of the binding, prefixes of its scheme, and leave the pending
-  resolutions. The other projections, and the implicit requests, keep their
-  variables monomorphic as before. The evidence variable of an abstracted
-  projection is its placeholder, bound by the binding instead of replaced.\<close>
+  resolutions (the evidence abstraction of \<^cite>\<open>\<open>Sect. 5.1\<close> in gaster1996\<close>, the
+  offsets floated out of the worker in \<^cite>\<open>\<open>Sect. 8\<close> in leijen2005\<close>). The other
+  projections, and the implicit requests, keep their variables monomorphic as
+  before. The evidence variable of an abstracted projection is its placeholder,
+  bound by the binding instead of replaced.\<close>
 
 fun is_off :: \<open>preq \<Rightarrow> bool\<close> where
   \<open>is_off (POff l r) = True\<close>

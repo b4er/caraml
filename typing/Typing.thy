@@ -1007,8 +1007,9 @@ fun fn_ty :: \<open>kty list \<Rightarrow> kty\<close> where
 text \<open>A closed record pattern elaborates to the one listing its fields in the
   canonical order, so that the backend reads positions off the pattern. Selection
   elaborates to the reserved primitive \<open>%sel\<close> applied to the record and to the
-  field's offset in that order: the evidence translation of a lacks predicate,
-  with the checker as the static lookup. The
+  field's offset in that order: the evidence translation of a lacks predicate
+  \<^cite>\<open>\<open>Sect. 5.1, Fig. 6\<close> in gaster1996\<close>, with the checker as the static
+  \<open>lookup\<close> of \<^cite>\<open>\<open>Sect. 8\<close> in leijen2005\<close>. The
   evidence is the offset itself once the record type is closed, and otherwise an
   evidence variable (\<^const>\<open>TEoff\<close>) that the enclosing binding receives as a
   parameter: its scheme carries one \<^const>\<open>TOff\<close> prefix per such projection, and
