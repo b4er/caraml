@@ -2,7 +2,6 @@ theory Index
   imports CaraML_Site
 begin
 
-\<comment> \<open>the landing page: no reader profile, since nothing here is gated\<close>
 page (control: none) \<open>CaraML\<close>
 
 div (hero) \<open>
@@ -11,24 +10,30 @@ div (hero) \<open>
    Isabelle/HOL.\<close>
 \<close>
 
-caraml \<open>effect File {
-  fopen : Str -> Nat;
-  read : Nat -> Nat
-}
+caraml \<open>effect Choose { pick: list int \<rightarrow> int }
 
-main =
-  with f = handler {
-    fopen p -> openFile p;
-    read h -> readByte h
-  }
-  print (f.read (f.fopen "data"))  -- the file is opened before it is read\<close>
+triples: int \<rightarrow> list (int, int, int)
+triples n =
+  with handler
+    -- resume k per candidate (pick [] fails a branch)
+    pick xs as k \<rightarrow> concatMap k xs
+    return t \<rightarrow> [t]
+
+  let
+    a = pick (range 1 n)
+    b = pick (range a n)
+    c = pick (range b n)
+
+  if a * a + b * b == c * c then (a, b, c) else pick []
+
+main = print (triples 20)\<close>
 
 html \<open><p class="actions">
   <a class="button" href="Get_Started.html">Get started</a>
   <a class="button secondary" href="Tools.html">Documentation</a>
 </p>\<close>
 
-section \<open>What you get\<close>
+section \<open>Why CaraML?\<close>
 
 div (features) \<open>
   div (feature) \<open>
@@ -76,10 +81,12 @@ div (features) \<open>
 section \<open>Where to go next\<close>
 
 text \<open>
-  \<^item> \<^url>\<open>Get_Started\<close> is the tutorial: a first program,
-   a call across the foreign boundary.
-  \<^item> \<^url>\<open>Compiler\<close> describes the Isabelle/HOL
-   formalization of the compiler implementation.
+  \<^item> \<^url>\<open>Get_Started\<close> is the tutorial: install the compiler, write a first program
+   and compile it.
+  \<^item> \<^url>\<open>Tools\<close>, \<^url>\<open>Language\<close> and \<^url>\<open>Prelude\<close> are the documentation for CaraML.
+  \<^item> \<^url>\<open>Language_Report\<close> describes the language and compiler specification formally.
+  \<^item> \<^url>\<open>Compiler\<close> describes the Isabelle/HOL formalization of the compiler
+   implementation.
 \<close>
 
 end

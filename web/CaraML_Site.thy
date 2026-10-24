@@ -17,14 +17,15 @@ setup \<open>
     ("docs", "Documentation"),
     ("report", "Language report"),
     ("compiler", "Compiler")] #>
+  Site.repository "https://github.com/b4er/caraml" #>
   Site.sources
    ["CaraML_Prelude",
     "CaraML_Spec",
-    "CaraML_Syntax"(*,
+    "CaraML_Syntax",
     "CaraML_Core",
     "CaraML_Typing",
     "CaraML_Parser",
-    "CaraML_Export"*)] #>
+    "CaraML_Export"] #>
   Site.bib "../root.bib" #>
   Site.axes
    [("ml", "OCaml or SML", ["no", "yes"]),

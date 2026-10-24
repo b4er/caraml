@@ -1,0 +1,155 @@
+#compiler {
+  --cd-band: #f7f7f7; --cd-band-line: #dedede; --cd-tab-line: #c8c8c8;
+  --cd-hover: rgba(0, 0, 0, .045); --cd-box-line: #000;
+
+  --arrow-done: var(--fg); --arrow-stub: var(--fg); --arrow-next: var(--next);
+  --arrow-merge: var(--merge); --arrow-plan: var(--plan-line); --arrow-hyp: #a8a8a8;
+}
+
+@media (prefers-color-scheme: dark) {
+  #compiler {
+    --cd-band: #241f1b; --cd-band-line: var(--line); --cd-tab-line: #5a4b3e;
+    --cd-hover: rgba(255, 255, 255, .06); --cd-box-line: #c9b8a6;
+    --arrow-hyp: #6f655c;
+  }
+}
+
+#compiler {
+  /* the language column (compiler.js reads both widths) */
+  --box-w: 170px;
+  /* where the passes start */
+  --gutter: 225px;
+  position: relative;
+  display: flow-root;
+  margin: 1.5rem 0;
+  font-family: var(--sans);
+  font-size: .8rem;
+  line-height: 1.3;
+}
+
+#compiler p { margin: 0; }
+
+#compiler .lang {
+  box-sizing: border-box;
+  max-width: 20rem;
+  margin: .5rem 0;
+  padding: 8px 10px;
+  border: 1.4px solid var(--cd-box-line);
+  border-radius: 12px;
+  background: var(--code-bg);
+  text-align: center;
+}
+#compiler .lang.next { background: var(--next-bg); border-color: var(--next); }
+#compiler .lang.plan { background: var(--plan-bg); border: 1.4px dashed var(--plan-line); color: var(--plan); }
+#compiler .lang.hyp { background: var(--hyp-bg); border: 1.4px dashed var(--hyp-line); color: var(--hyp); font-style: italic; }
+
+/* a pass: what it does, then its status chip */
+#compiler summary {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr) minmax(0, 14.5rem);
+  column-gap: .6rem;
+  align-items: center;
+  padding: 6px 4px;
+  border-radius: 6px;
+  list-style: none;
+  cursor: pointer;
+}
+#compiler summary::-webkit-details-marker { display: none; }
+#compiler summary:hover, #compiler details.pass:hover > summary { background: var(--cd-hover); }
+#compiler summary:focus-visible { outline: 2px solid var(--arrow-next); outline-offset: -2px; }
+#compiler .pass > summary::before {
+  content: "›"; grid-column: 1; color: var(--muted); font-size: 1.15em; text-align: center;
+  transition: transform .15s;
+}
+#compiler .pass[open] > summary::before { transform: rotate(90deg); }
+#compiler .what { grid-column: 2; }
+#compiler .chip {
+  grid-column: 3; justify-self: start;
+  padding: 3px 9px; border: 1px solid; border-radius: 7px;
+  font-size: .9em; line-height: 1.3;
+}
+#compiler .chip:empty { display: none; }
+#compiler .pass > p {
+  margin: 0 0 .6rem calc(1rem + .6rem + 4px);
+  padding-top: .4rem;
+  border-top: 1px solid var(--cd-band-line);
+  max-width: 34rem;
+  font-size: .92em; line-height: 1.4; color: var(--muted);
+}
+
+#compiler .done > summary .chip, #compiler .chip.done { background: var(--done-bg); border-color: var(--done); color: var(--done); }
+#compiler .stub > summary .chip { background: var(--stub-bg); border-color: var(--stub); color: var(--stub); }
+#compiler .next > summary .chip, #compiler .chip.next { background: var(--next-bg); border-color: var(--next); color: var(--next); }
+#compiler .merge > summary .chip { background: var(--merge-bg); border-color: var(--merge); color: var(--merge); }
+#compiler .plan > summary .chip, #compiler .chip.plan { background: var(--plan-bg); border-color: var(--plan-line); color: var(--plan); }
+#compiler .hyp > summary .chip, #compiler .chip.hyp {
+  background: var(--hyp-bg); border: 1px dashed var(--hyp-line); color: var(--hyp); font-style: italic;
+}
+#compiler .pass.plan > summary .what { color: var(--plan); }
+#compiler .pass.hyp > summary .what, #compiler .pass.hyp > p { color: var(--hyp); font-style: italic; }
+
+/* a stage or a choice folds: a band when open, one row with a summary when folded */
+#compiler .stage, #compiler .choice { margin: 8px 0; border-radius: 8px; }
+#compiler .stage > summary::before, #compiler .choice > summary::before {
+  content: "+"; grid-column: 1; justify-self: center;
+  width: 14px; height: 14px; line-height: 13px; text-align: center;
+  border: 1.1px solid var(--muted); border-radius: 2px; background: var(--bg);
+  font-size: .9em; color: var(--muted);
+}
+#compiler .stage[open] > summary::before, #compiler .choice[open] > summary::before {
+  content: "\2212"; align-self: center;
+}
+#compiler .stage > summary .title, #compiler .choice > summary .title {
+  font-size: .9em; font-weight: 600; color: var(--muted);
+}
+
+/* a stage: its title when open, what it does when folded */
+#compiler .stage[open] { background: var(--cd-band); border: 1px solid var(--cd-band-line); padding: 0 4px 4px; }
+#compiler .stage.hyp[open] { border: 1px dashed var(--cd-tab-line); }
+#compiler .stage[open] > summary { display: flex; align-items: baseline; gap: .6rem; padding: 4px; }
+#compiler .stage[open] > summary .what { display: none; }
+#compiler .stage:not([open]) > summary .title { display: none; }
+#compiler .stage > summary .title { grid-column: 2; }
+#compiler .stage.hyp > summary .title { color: var(--hyp); font-style: italic; }
+#compiler .stage[open] > summary .chip {
+  padding: 0; border: none; background: none;
+  font-size: .85em; font-style: normal; color: var(--muted);
+}
+
+/* a dotted line across the diagram */
+#compiler .divider { margin: 14px 0 10px; border-top: 1.3px dotted var(--muted); }
+#compiler .divider > div { padding-top: 3px; text-align: right; font-size: .9em; font-style: italic; color: var(--muted); }
+#compiler .divider code { font-style: normal; }
+
+/* a choice between options: tabs in its header when open, one row when folded */
+#compiler details.choice[open] { border: 1.2px solid var(--cd-tab-line); padding: 0 4px 4px; }
+#compiler div.choice, #compiler details.choice.single { margin: 0; padding: 0; border: none; }
+#compiler details.choice.single > summary { display: none; }
+#compiler .choice[open] > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px .6rem; padding: 4px; }
+#compiler .choice[open] > summary .what, #compiler .choice[open] > summary .chip { display: none; }
+#compiler .choice:not([open]) > summary .title, #compiler .choice:not([open]) > summary .tabs { display: none; }
+#compiler .option::before { margin: 6px 0 0; font-size: .9em; font-weight: 600; color: var(--muted); }
+#compiler .tabs { gap: 6px; }
+#compiler .tabs .sep { width: 0; height: 14px; margin: 0 6px; border-left: 1.2px solid var(--cd-tab-line); }
+
+/* the fork of a folded choice */
+#compiler .fork { display: none; }
+#compiler.laid details.choice:not([open]) + .fork { display: block; }
+#compiler .mini {
+  position: absolute; left: 0; box-sizing: border-box; width: var(--box-w);
+  padding: 3px 8px; border: 1.4px solid var(--cd-box-line); border-radius: 12px; background: var(--code-bg);
+  font-size: .9em; line-height: 1.3; text-align: center;
+}
+#compiler .mini.plan { background: var(--plan-bg); border: 1.4px dashed var(--plan-line); color: var(--plan); }
+#compiler .mini.hyp { background: var(--hyp-bg); border: 1.4px dashed var(--hyp-line); color: var(--hyp); font-style: italic; }
+
+/* the languages in a column, the arrows in an overlay */
+#compiler.laid { padding-left: var(--gutter); }
+#compiler.laid.hang { margin-left: calc(-1 * var(--gutter)); }
+#compiler.laid .lang {
+  position: absolute; left: 0; width: var(--box-w); max-width: none; margin: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+#compiler.laid .divider { margin-left: calc(-1 * var(--gutter)); }
+#compiler svg.arrows { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+#compiler:not(.laid) svg.arrows { display: none; }

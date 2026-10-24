@@ -6,6 +6,10 @@ session CaraML_Web = CaraML_Parser +
     CaraML_Site
     Index
     Get_Started
+    Tools
+    Language
+    Prelude
+    Language_Report
     Compiler
   document_files (in "..")
     "root.bib"
