@@ -153,3 +153,14 @@
 #compiler.laid .divider { margin-left: calc(-1 * var(--gutter)); }
 #compiler svg.arrows { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 #compiler:not(.laid) svg.arrows { display: none; }
+
+/* stacked, on a narrow screen */
+#compiler:not(.laid) .lang { position: relative; margin: 1.6rem auto .6rem; padding: 6px 10px; }
+#compiler:not(.laid) > .lang:first-of-type { margin-top: .5rem; }
+#compiler:not(.laid) .lang::before {
+  content: "\2193"; position: absolute; left: 50%; top: -1.45rem; transform: translateX(-50%);
+  font-size: 1.1em; line-height: 1; color: var(--muted);
+}
+#compiler:not(.laid) > .lang:first-of-type::before { content: none; }
+#compiler:not(.laid) summary { grid-template-columns: 1rem minmax(0, 1fr); row-gap: .3rem; }
+#compiler:not(.laid) .chip { grid-column: 2; }
