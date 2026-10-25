@@ -157,8 +157,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: linux-x64,    runner: ubuntu-24.04 }
-          - { target: linux-arm64,  runner: ubuntu-24.04-arm }
           - { target: darwin-arm64, runner: macos-15 }
           - { target: win32-x64,    runner: windows-2025 }
     steps:
@@ -216,6 +214,82 @@ jobs:
           cabal install exe:caraml --installdir=../out --install-method=copy --overwrite-policy=always
           cp LICENSE ../out/
           tar -czf "../${{steps.unpack.outputs.binary}}" -C ../out .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: caraml-${{matrix.target}}
+          path: ${{steps.unpack.outputs.binary}}
+          if-no-files-found: error
+
+  haskell-static:
+    name: Build compiler (${{matrix.target}}, static)
+    needs: sdist
+    runs-on: ${{matrix.runner}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64,   runner: ubuntu-24.04 }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm }
+    env:
+      ALPINE: "3.22"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: haskell/cabal.project
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: sdist
+
+      - name: Unpack sources
+        id: unpack
+        run: |
+          echo "binary=caraml-${{matrix.target}}.tar.gz" >> "$GITHUB_OUTPUT"
+          mkdir pkg hs
+          tar -xzf caraml-*.tar.gz -C pkg --strip-components=1
+          cp haskell/cabal.project pkg/
+
+      - id: store
+        uses: actions/cache/restore@v6
+        with:
+          path: hs
+          key: static-${{matrix.target}}-${{env.GHC}}-${{env.CABAL}}-${{hashFiles('pkg/*.cabal', 'pkg/cabal.project')}}
+          restore-keys: static-${{matrix.target}}-${{env.GHC}}-${{env.CABAL}}-
+
+      # musl, because ghcup's glibc GHCs reference `__xmknod`, gone from the static glibc
+      - name: Cabal build and package CaraML on musl
+        env:
+          BINARY: ${{steps.unpack.outputs.binary}}
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w/pkg -e GHC -e CABAL -e BINARY -e OWNER="$(id -u):$(id -g)" \
+            "alpine:$ALPINE" sh -euc '
+              apk add --no-cache -q curl file gcc g++ make musl-dev gmp-dev gmp-static ncurses-dev perl tar xz
+              export GHCUP_INSTALL_BASE_PREFIX=/w/hs CABAL_DIR=/w/hs/cabal PATH="/w/hs/.ghcup/bin:$PATH"
+              if [ ! -x /w/hs/.ghcup/bin/ghcup ]; then
+                mkdir -p /w/hs/.ghcup/bin
+                curl -sSfL "https://downloads.haskell.org/ghcup/$(uname -m)-linux-ghcup" -o /w/hs/.ghcup/bin/ghcup
+                chmod +x /w/hs/.ghcup/bin/ghcup
+              fi
+              cabal=$(ghcup list -t cabal -r | awk -v v="$CABAL" "index(\$2, v \".\") == 1 || \$2 == v { c = \$2 } END { print c }")
+              ghcup install ghc "$GHC" --set
+              ghcup install cabal "$cabal" --set
+              cabal update
+              cabal build all --enable-executable-static
+              mkdir -p ../out
+              cabal install exe:caraml --enable-executable-static --enable-executable-stripping --installdir=../out --install-method=copy --overwrite-policy=always
+              file ../out/caraml | tee /dev/stderr | grep -q "statically linked"
+              cp LICENSE ../out/
+              tar -czf "../$BINARY" -C ../out .
+              chown -R "$OWNER" /w
+            '
+
+      - if: steps.store.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: hs
+          key: ${{steps.store.outputs.cache-primary-key}}
 
       - uses: actions/upload-artifact@v7
         with:
@@ -316,7 +390,7 @@ jobs:
 
   release:
     name: Release compiler
-    needs: [sdist, haskell]
+    needs: [sdist, haskell, haskell-static]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-24.04
     environment: release
